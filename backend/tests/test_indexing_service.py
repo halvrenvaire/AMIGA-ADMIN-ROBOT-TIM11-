@@ -52,6 +52,18 @@ def test_build_from_cold_start_dedupes_and_saves(setup):
     assert status["last_indexed_at"]
 
 
+def test_outdated_s3_copy_with_same_name_is_ignored(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "sop.md").write_text("SoD: dialihkan otomatis oleh sistem.", encoding="utf-8")
+    s3 = _s3({"sop.md": "SoD: minta Service Lead mengalihkan."})  # salinan versi lama
+    service = IndexingService(FakeBedrock(), index_dir=tmp_path / "index", docs_dir=docs,
+                              s3_client=s3, bucket="bucket")
+    status = service.build_index()
+    assert status["sources"] == ["local:sop.md"]
+    assert all("Service Lead" not in c["content"] for c in service.get_store().chunks)
+
+
 def test_force_false_loads_from_disk_without_embedding(setup):
     service, bedrock, tmp = setup
     first = service.build_index()

@@ -21,10 +21,19 @@ EMBED_WORKERS = 8
 
 
 def _dedupe(docs: list[dict]) -> list[dict]:
-    """Buang dokumen yang isinya identik (mis. sop.md lokal dan salinannya di S3)."""
+    """Buang dokumen ganda.
+
+    - Nama file sama di lokal dan S3: versi lokal (repo) yang dipakai, supaya salinan
+      lama di S3 tidak ikut menjawab setelah SOP direvisi.
+    - Isi identik dengan nama berbeda: hanya satu yang dipakai.
+    """
+    local_names = {Path(d["source"]).name for d in docs if d["origin"] == "local"}
     seen: set[str] = set()
     unique = []
     for doc in docs:
+        if doc["origin"] == "s3" and Path(doc["source"]).name in local_names:
+            log.info("Lewati %s (s3): versi lokal dengan nama sama yang dipakai", doc["source"])
+            continue
         digest = hashlib.sha256(doc["content"].strip().encode()).hexdigest()
         if digest in seen:
             log.info("Lewati %s (%s): isi sama dengan dokumen lain", doc["source"], doc["origin"])
