@@ -1,0 +1,16 @@
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+sqlalchemy==2.0.43
+alembic==1.16.5
+psycopg[binary]==3.2.10
+pydantic-settings==2.11.0
+python-multipart==0.0.20
+python-dotenv==1.1.1
+boto3==1.40.45
+pypdf==6.1.1
+pyjwt==2.10.1
+bcrypt==5.0.0
+pytest==8.4.2
+httpx==0.28.1
+faiss-cpu==1.15.1
+numpy==2.5.4

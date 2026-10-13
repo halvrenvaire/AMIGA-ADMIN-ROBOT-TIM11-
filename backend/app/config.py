@@ -1,0 +1,43 @@
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
+
+    database_url: str
+    jwt_secret: str = "dev-secret-ganti"
+    jwt_expire_minutes: int = 480
+
+    storage_backend: str = "local"
+    local_storage_dir: str = "../storage"
+
+    aws_access_key: str = ""
+    aws_secret_access_key: str = ""
+    aws_bucket: str = ""
+    aws_region: str = "ap-southeast-1"
+    extraction_model_id: str = ""
+
+    max_pdf_pages: int = 5
+
+    # RAG /ask
+    # Titan Text sudah end of life, jadi LLM memakai Amazon Nova (tersedia di ap-southeast-1).
+    llm_model: str = "apac.amazon.nova-lite-v1:0"
+    llm_region: str = "ap-southeast-1"
+    # Titan Embeddings tidak tersedia di ap-southeast-1; hanya bisa dipanggil di us-east-1.
+    embed_model: str = "amazon.titan-embed-text-v2:0"
+    embed_region: str = "us-east-1"
+    embed_dimension: int = 1024
+
+    rag_docs_dir: Path = BACKEND_DIR.parent / "docs"
+    rag_index_dir: Path = BACKEND_DIR / "data" / "faiss_index"
+    rag_top_k: int = 8
+    rag_history_turns: int = 3  # 3 pasang tanya-jawab terakhir = 6 pesan
+    rag_max_answer_tokens: int = 1024
+    reindex_api_key: str = ""
+
+
+settings = Settings()

@@ -1,0 +1,25 @@
+# Rahasia
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# File unggahan lokal & voucher hasil generate
+storage/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Index FAISS hasil build (dibuat ulang lewat /reindex)
+backend/data/
