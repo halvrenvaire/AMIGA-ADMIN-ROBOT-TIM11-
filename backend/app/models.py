@@ -58,6 +58,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(200), unique=True)
     full_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(200))
+    # Token yang diterbitkan sebelum waktu ini ditolak (logout semua sesi setelah ganti/reset password)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

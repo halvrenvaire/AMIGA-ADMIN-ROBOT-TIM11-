@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
@@ -6,8 +8,11 @@ from sqlalchemy.orm import Session
 from app.auth import create_access_token, get_current_user
 from app.db import get_db
 from app.models import Client, User
-from app.schemas.schemas import ClientRef, LoginResponse, MeResponse
-from app.security import verify_password
+from app.schemas.schemas import (
+    ClientRef, LoginResponse, MeResponse, PasswordChange, ProfileUpdate, TokenResponse,
+)
+from app.security import hash_password, password_problem, verify_password
+from app.services import audit_service
 from app.services.access_rules import accessible_client_ids
 
 router = APIRouter(prefix="/auth", tags=["Login"])
@@ -38,3 +43,39 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Profil, peran, dan klien yang ditugaskan kepada pengguna yang sedang login."""
     return user_profile(db, user)
+
+
+@router.patch("/me", response_model=MeResponse)
+def update_profile(body: ProfileUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Ubah nama tampilan dan/atau email. Mengganti email (dipakai untuk login) wajib dengan password saat ini."""
+    if body.full_name is not None and body.full_name.strip() != user.full_name:
+        audit_service.record(db, user, "PROFILE_UPDATED", field="full_name",
+                             old_value=user.full_name, new_value=body.full_name.strip())
+        user.full_name = body.full_name.strip()
+    if body.email is not None and body.email.strip().lower() != user.email:
+        email = body.email.strip().lower()
+        if not body.current_password or not verify_password(body.current_password, user.password_hash):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Password saat ini salah. Email tidak diubah.")
+        if db.scalar(select(User.id).where(func.lower(User.email) == email, User.id != user.id)):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Email sudah dipakai akun lain.")
+        audit_service.record(db, user, "PROFILE_UPDATED", field="email", old_value=user.email, new_value=email)
+        user.email = email
+    db.commit()
+    return user_profile(db, user)
+
+
+@router.post("/me/password", response_model=TokenResponse)
+def change_password(body: PasswordChange, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Ganti password. Semua sesi lain keluar; sesi ini mendapat token baru."""
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Password saat ini salah.")
+    if verify_password(body.new_password, user.password_hash):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Password baru harus berbeda dari password lama.")
+    problem = password_problem(body.new_password, user.email)
+    if problem:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
+    user.password_hash = hash_password(body.new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
+    audit_service.record(db, user, "PASSWORD_CHANGED", note="Password diganti oleh pemilik akun; sesi lain dikeluarkan")
+    db.commit()
+    return TokenResponse(access_token=create_access_token(user))

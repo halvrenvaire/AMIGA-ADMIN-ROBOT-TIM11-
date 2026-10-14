@@ -4,6 +4,7 @@ Setiap perubahan dicatat di jejak audit. System Admin tidak boleh mengubah peran
 penugasan, atau status akunnya sendiri.
 """
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, func, select
@@ -13,9 +14,9 @@ from app.auth import require_roles
 from app.db import get_db
 from app.models import Client, Role, User, UserClientAssignment, UserRole
 from app.schemas.schemas import (
-    ActiveUpdate, AdminUser, ClientCreate, ClientRef, ClientsUpdate, RolesUpdate, UserCreate,
+    ActiveUpdate, AdminUser, ClientCreate, ClientRef, ClientsUpdate, PasswordReset, RolesUpdate, UserCreate,
 )
-from app.security import hash_password
+from app.security import hash_password, password_problem
 from app.services import audit_service
 from app.services.access_rules import RoleCombinationError, validate_role_combination
 
@@ -151,6 +152,21 @@ def set_active(user_id: uuid.UUID, body: ActiveUpdate, admin: User = Depends(adm
         user.is_active = body.is_active
         db.commit()
     return _admin_user(db, user)
+
+
+@router.post("/users/{user_id}/password", status_code=204)
+def reset_password(user_id: uuid.UUID, body: PasswordReset, admin: User = Depends(admin_only),
+                   db: Session = Depends(get_db)):
+    """Atur password baru untuk pengguna lain (mis. lupa password). Semua sesi pengguna itu keluar."""
+    user = _get_user(db, user_id)
+    _not_self(admin, user)
+    problem = password_problem(body.new_password, user.email)
+    if problem:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
+    user.password_hash = hash_password(body.new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
+    audit_service.record(db, admin, "PASSWORD_RESET_BY_ADMIN", note=f"Password {user.email} diatur ulang")
+    db.commit()
 
 
 @router.get("/clients", response_model=list[ClientRef])

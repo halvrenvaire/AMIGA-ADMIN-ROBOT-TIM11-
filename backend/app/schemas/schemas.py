@@ -129,6 +129,27 @@ class MeResponse(BaseModel):
     clients: list[ClientRef]
 
 
+class ProfileUpdate(BaseModel):
+    full_name: str | None = Field(None, min_length=2, max_length=200)
+    email: str | None = Field(None, min_length=3, max_length=200, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # Wajib bila email diganti
+    current_password: str | None = Field(None, max_length=200)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+class PasswordReset(BaseModel):
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

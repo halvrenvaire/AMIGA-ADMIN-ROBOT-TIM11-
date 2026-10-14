@@ -1,7 +1,8 @@
 """Login dengan token JWT dan pengecekan hak akses di server (F7).
 
-Token hanya berisi ID pengguna. Peran dan status aktif dibaca ulang dari database di
-setiap request, sehingga perubahan peran oleh System Admin langsung berlaku.
+Token hanya berisi ID pengguna dan waktu terbit. Peran dan status aktif dibaca ulang dari database
+di setiap request, sehingga perubahan peran oleh System Admin langsung berlaku. Token yang terbit
+sebelum password terakhir diganti ditolak, jadi ganti/reset password mengeluarkan semua sesi lama.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -30,8 +31,11 @@ _UNAUTHORIZED = HTTPException(
 
 
 def create_access_token(user: User) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
-    return jwt.encode({"sub": str(user.id), "exp": expire}, settings.jwt_secret, algorithm=ALGORITHM)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=settings.jwt_expire_minutes)
+    # iat dengan pecahan detik: token lama yang terbit di detik yang sama dengan ganti password tetap tertolak
+    return jwt.encode({"sub": str(user.id), "iat": now.timestamp(), "exp": expire},
+                      settings.jwt_secret, algorithm=ALGORITHM)
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -42,6 +46,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise _UNAUTHORIZED
     user = db.get(User, user_id)
     if user is None or not user.is_active:
+        raise _UNAUTHORIZED
+    if user.password_changed_at and float(payload.get("iat", 0)) < user.password_changed_at.timestamp():
         raise _UNAUTHORIZED
     return user
 

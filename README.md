@@ -357,12 +357,15 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET | `/health` | Status server, database, dan index Asisten SOP |
 | POST | `/auth/login` | Login (form: `username` = email, `password`). Mengembalikan token dan profil |
 | GET | `/auth/me` | Profil, peran, dan klien yang ditugaskan |
+| PATCH | `/auth/me` | Ubah nama tampilan/email sendiri (ganti email wajib password saat ini) |
+| POST | `/auth/me/password` | Ganti password sendiri; semua sesi lain keluar, respons berisi token baru |
 | GET | `/clients` | Klien yang ditugaskan kepada pengguna |
 | GET | `/clients/{id}` | Detail klien. Klien yang tidak ditugaskan ditolak (403) dan dicatat di jejak audit |
 | GET/POST | `/admin/users` | System Admin: daftar dan buat akun (peran + klien) |
 | PUT | `/admin/users/{id}/roles` | System Admin: ubah peran (kombinasi terlarang ditolak, tidak bisa untuk diri sendiri) |
 | PUT | `/admin/users/{id}/clients` | System Admin: ubah penugasan klien |
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
+| POST | `/admin/users/{id}/password` | System Admin: reset password pengguna lain (sesi pengguna itu keluar) |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
 | POST | `/documents` | PIC Klien / Intake Support: unggah invoice PDF (form: `client_id`, `request_type`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `file`). Mengembalikan Request ID dan status QUEUED |
 | GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `sort=terbaru` atau `tenggat` |

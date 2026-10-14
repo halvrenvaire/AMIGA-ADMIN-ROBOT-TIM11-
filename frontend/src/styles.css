@@ -457,3 +457,21 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 :root[data-theme="dark"] .login-art .clover-bg { opacity: 0.1; }
 :root[data-theme="dark"] .side-foot { background: linear-gradient(160deg, var(--primary-50), var(--pink-50)); }
 :root[data-theme="dark"] .avatar { background: linear-gradient(135deg, #2a5a62, #367f89); color: #e4f4f6; }
+
+/* Pengaturan akun */
+.account-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.profile-row { display: flex; align-items: center; gap: 14px; }
+.avatar.lg { width: 52px; height: 52px; font-size: 17px; }
+.input-with-btn { display: flex; gap: 6px; align-items: center; }
+.input-with-btn .input { flex: 1; }
+.pw-rules { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; font-size: 12.5px; color: var(--fg-3); }
+.pw-rules li { display: flex; align-items: center; gap: 6px; }
+.pw-rules li.ok { color: var(--teal); }
+.pw-rules svg { width: 14px; height: 14px; }
+.theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.theme-options button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--fg-2); cursor: pointer; font: inherit; font-weight: 600; }
+.theme-options button.on { border-color: var(--primary); background: var(--primary-50); color: var(--primary-700); box-shadow: inset 0 -2px 0 var(--pink); }
+.theme-options svg { width: 20px; height: 20px; }
+.user-link { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; border-radius: 12px; padding: 4px 8px; }
+.user-link:hover, .user-link.active { background: var(--surface-hover); text-decoration: none; }
+@media (max-width: 1180px) { .account-grid { grid-template-columns: minmax(0, 1fr); } }

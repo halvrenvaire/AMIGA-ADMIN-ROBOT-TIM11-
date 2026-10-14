@@ -377,6 +377,76 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains("tr.total-row", "Total");
   });
 
+  // --- Pengaturan akun (akun baru per run agar akun seed tidak berubah) ---
+  const run = Date.now();
+  // Email awal dipakai saat membuat akun; email baru setelah TS-034 menggantinya
+  const acct = { first: `akun.${run}@amiga.test`, email: `akun2.${run}@amiga.test`, password: "AkunAwal123", next: "AkunBaru456" };
+  const loginAs = (email: string, password: string) =>
+    cy.request({ method: "POST", url: "/api/auth/login", form: true, body: { username: email, password } })
+      .its("body.access_token");
+  const visitWith = (token: string, path: string) =>
+    cy.visit(path, { onBeforeLoad: (win) => win.localStorage.setItem("amiga.token", token) });
+
+  it("TS-034 Pengguna mengubah nama dan email di Pengaturan akun", () => {
+    cy.token("admin@amiga.test").then((t) =>
+      cy.request({ method: "POST", url: "/api/admin/users", headers: { Authorization: `Bearer ${t}` },
+                   body: { email: acct.first, full_name: "Akun Uji", password: acct.password, roles: ["SERVICE_LEAD"], client_ids: [] } }));
+    loginAs(acct.first, acct.password).then((t) => visitWith(t as unknown as string, "/dashboard"));
+    cy.get(".user-link").click();
+    cy.location("pathname").should("eq", "/akun");
+    cy.get("#p-name").clear().type("Akun Uji Diubah");
+    cy.contains("button", "Simpan profil").click();
+    cy.contains(".alert", "Profil disimpan");
+    cy.get(".user-link").should("contain.text", "Akun Uji Diubah");
+    // Ganti email wajib password saat ini
+    cy.get("#p-email").clear().type(acct.email);
+    cy.get("#p-current").type("salah-password1");
+    cy.contains("button", "Simpan profil").click();
+    cy.contains(".alert", "Password saat ini salah");
+    cy.get("#p-current").clear().type(acct.password);
+    cy.contains("button", "Simpan profil").click();
+    cy.contains(".alert", "Gunakan email baru");
+    loginAs(acct.email, acct.password).should("be.a", "string");
+  });
+
+  it("TS-035 Ganti password mengeluarkan sesi lain", () => {
+    loginAs(acct.email, acct.password).then((oldToken) => {
+      loginAs(acct.email, acct.password).then((t) => visitWith(t as unknown as string, "/akun"));
+      cy.get("#pw-current").type(acct.password);
+      cy.get("#pw-new").type("pendek");
+      cy.contains("button", "Ganti password").should("be.disabled");
+      cy.get("#pw-new").clear().type(acct.next);
+      cy.get("#pw-confirm").type(acct.next);
+      cy.get(".pw-rules li.ok").should("have.length", 4);
+      cy.contains("button", "Ganti password").click();
+      cy.contains(".alert", "Password diganti");
+      // Sesi ini tetap jalan (token baru), sesi lama ditolak
+      cy.reload();
+      cy.location("pathname").should("eq", "/akun");
+      cy.request({ url: "/api/auth/me", headers: { Authorization: `Bearer ${oldToken}` }, failOnStatusCode: false })
+        .its("status").should("eq", 401);
+      loginAs(acct.email, acct.next).should("be.a", "string");
+    });
+  });
+
+  it("TS-036 Admin mereset password pengguna yang lupa", () => {
+    cy.visitAs("admin@amiga.test", "/admin/pengguna");
+    cy.contains("tr", "admin@amiga.test").contains("button", "Reset password").should("be.disabled");
+    cy.contains("tr", acct.email).contains("button", "Reset password").click();
+    cy.get("#r-pass").type("SementaraAja789");
+    cy.contains(".modal button", "Reset password").click();
+    cy.contains(".alert", "diatur ulang");
+    loginAs(acct.email, "SementaraAja789").should("be.a", "string");
+  });
+
+  it("TS-037 Tema bisa dipilih dari Pengaturan akun", () => {
+    cy.visitAs("reviewer1@amiga.test", "/akun");
+    cy.contains(".theme-options button", "Gelap").click();
+    cy.get("html").should("have.attr", "data-theme", "dark");
+    cy.contains(".theme-options button", "Terang").click();
+    cy.get("html").should("have.attr", "data-theme", "light");
+  });
+
   // --- Logout ---
   it("TS-027 Logout mengakhiri sesi", () => {
     cy.visitAs("reviewer1@amiga.test", "/antrean");

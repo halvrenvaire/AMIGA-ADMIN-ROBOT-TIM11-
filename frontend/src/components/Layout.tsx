@@ -40,7 +40,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/referensi\/vendor/, "Data Referensi / Vendor"], [/^\/referensi\/penanda-tangan/, "Data Referensi / Penanda tangan"], [/^\/peninjauan/, "Peninjauan Saya"],
   [/^\/unggah/, "Unggah Dokumen"], [/^\/pengajuan/, "Pengajuan Saya"], [/^\/voucher/, "Voucher"],
   [/^\/riwayat/, "Riwayat & Audit"], [/^\/cari/, "Hasil Pencarian"],
-  [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],
+  [/^\/akun/, "Pengaturan Akun"], [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],
 ];
 
 export function Layout() {
@@ -113,11 +113,13 @@ export function Layout() {
           )}
           <div style={canSearch ? undefined : { marginLeft: "auto" }}><ThemeToggle className="btn ghost sm icon-btn" /></div>
           <div className="user">
-            <div className="avatar" aria-hidden="true">{initials(user.full_name)}</div>
-            <div>
-              <b>{user.full_name}</b>
-              <span>{user.roles.map((r) => ROLE_LABEL[r]).join(" + ")}</span>
-            </div>
+            <NavLink to="/akun" className="user-link" title="Pengaturan akun">
+              <div className="avatar" aria-hidden="true">{initials(user.full_name)}</div>
+              <div>
+                <b>{user.full_name}</b>
+                <span>{user.roles.map((r) => ROLE_LABEL[r]).join(" + ")}</span>
+              </div>
+            </NavLink>
             <button className="btn ghost sm" onClick={logout} title="Keluar" aria-label="Keluar"><LogOut /></button>
           </div>
         </header>

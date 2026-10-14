@@ -50,6 +50,9 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   return res;
 }
 
+/** Isi respons JSON; 204 No Content menjadi undefined. */
+const json = <T>(res: Response) => (res.status === 204 ? undefined : res.json()) as Promise<T>;
+
 export const api = {
   get: async <T>(path: string, params?: Record<string, string | number | boolean | undefined | null>) => {
     const qs = new URLSearchParams();
@@ -57,16 +60,16 @@ export const api = {
       if (v !== undefined && v !== null && v !== "" && v !== false) qs.set(k, String(v));
     });
     const query = qs.toString();
-    return (await request(path + (query ? `?${query}` : ""))).json() as Promise<T>;
+    return json<T>(await request(path + (query ? `?${query}` : "")));
   },
   post: async <T>(path: string, body?: unknown) =>
-    (await request(path, {
+    json<T>(await request(path, {
       method: "POST",
       body: body instanceof FormData || body instanceof URLSearchParams ? body : JSON.stringify(body ?? {}),
-    })).json() as Promise<T>,
+    })),
   put: async <T>(path: string, body: unknown) =>
-    (await request(path, { method: "PUT", body: JSON.stringify(body) })).json() as Promise<T>,
+    json<T>(await request(path, { method: "PUT", body: JSON.stringify(body) })),
   patch: async <T>(path: string, body: unknown) =>
-    (await request(path, { method: "PATCH", body: JSON.stringify(body) })).json() as Promise<T>,
+    json<T>(await request(path, { method: "PATCH", body: JSON.stringify(body) })),
   blob: async (path: string) => (await request(path)).blob(),
 };

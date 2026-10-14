@@ -14,6 +14,8 @@ export function AdminUsers() {
   const users = useApi(() => api.get<AdminUser[]>("/admin/users"), []);
   const clients = useApi(() => api.get<ClientRef[]>("/admin/clients"), []);
   const [editing, setEditing] = useState<AdminUser | "new" | null>(null);
+  const [resetting, setResetting] = useState<AdminUser | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function toggleActive(u: AdminUser) {
@@ -31,6 +33,7 @@ export function AdminUsers() {
         <button className="btn primary" onClick={() => setEditing("new")}><UserPlus /> Tambah pengguna</button>
       </div>
       {(error || users.error) && <Alert>{error ?? users.error}</Alert>}
+      {notice && <Alert kind="ok">{notice}</Alert>}
       <section className="card panel">
         {users.loading && !users.data ? <Loading /> : (
           <div className="table-wrap">
@@ -50,6 +53,7 @@ export function AdminUsers() {
                         <span className="actions" style={{ justifyContent: "flex-end" }}>
                           <button className="btn sm" disabled={self} onClick={() => setEditing(u)}>Ubah</button>
                           <button className="btn sm" disabled={self} onClick={() => toggleActive(u)}>{u.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
+                          <button className="btn sm" disabled={self} onClick={() => { setNotice(null); setResetting(u); }}>Reset password</button>
                         </span>
                       </td>
                     </tr>
@@ -61,14 +65,54 @@ export function AdminUsers() {
         )}
         <small className="muted">
           Kombinasi peran yang dilarang: PIC Klien dengan peran internal, dan System Admin dengan Finance Reviewer. Anda tidak bisa
-          mengubah akun Anda sendiri.
+          mengubah akun Anda sendiri; ganti data dan password Anda lewat Pengaturan akun.
         </small>
       </section>
       {editing && clients.data && (
         <UserModal user={editing === "new" ? null : editing} clients={clients.data}
                    onClose={() => setEditing(null)} onDone={() => { setEditing(null); users.reload(); }} />
       )}
+      {resetting && (
+        <ResetPasswordModal user={resetting} onClose={() => setResetting(null)}
+                            onDone={() => { setNotice(`Password ${resetting.email} diatur ulang. Semua sesinya sudah dikeluarkan.`); setResetting(null); }} />
+      )}
     </>
+  );
+}
+
+function ResetPasswordModal({ user, onClose, onDone }: { user: AdminUser; onClose: () => void; onDone: () => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/admin/users/${user.id}/password`, { new_password: password });
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Reset password ${user.full_name}`} onClose={onClose}>
+      {error && <Alert>{error}</Alert>}
+      <p className="muted" style={{ margin: 0 }}>
+        Gunakan bila pengguna lupa password. Sampaikan password sementara lewat saluran resmi dan minta pengguna
+        menggantinya di Pengaturan akun. Semua sesi {user.email} akan dikeluarkan.
+      </p>
+      <div className="field"><label htmlFor="r-pass">Password sementara</label>
+        <input id="r-pass" className="input" type="text" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <small>Minimal 8 karakter, berisi huruf dan angka.</small></div>
+      <div className="actions" style={{ justifyContent: "flex-end" }}>
+        <button className="btn" onClick={onClose}>Batal</button>
+        <button className="btn primary" disabled={busy || password.length < 8} onClick={submit}>Reset password</button>
+      </div>
+    </Modal>
   );
 }
 

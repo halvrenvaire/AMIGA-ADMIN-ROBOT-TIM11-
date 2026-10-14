@@ -150,7 +150,7 @@ def test_health_reports_index_status(client):
 @pytest.mark.integration
 def test_ask_end_to_end_with_real_bedrock(session_id):
     """Skenario plan Task 8: memakai index FAISS sungguhan + Bedrock sungguhan."""
-    with TestClient(app) as c:
+    with TestClient(app, headers=auth_header("reviewer1@amiga.test")) as c:
         r = c.post("/ask", json={"question": "Apa yang dimaksud QUEUED?", "session_id": session_id})
         assert r.status_code == 200
         body = r.json()

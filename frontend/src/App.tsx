@@ -4,6 +4,7 @@ import { AuthProvider, homePath, useAuth } from "./auth";
 import { ThemeProvider } from "./theme";
 import { Layout } from "./components/Layout";
 import { Loading } from "./components/ui";
+import { Account } from "./pages/Account";
 import { AdminClients, AdminUsers } from "./pages/Admin";
 import { DocumentPage } from "./pages/DocumentPage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -55,6 +56,7 @@ export function App() {
             <Route path="dokumen/:id" element={<DocumentPage />} />
             <Route path="dokumen/:id/voucher" element={<VoucherPage />} />
             <Route path="dokumen/:id/riwayat" element={<HistoryPage />} />
+            <Route path="akun" element={<Account />} />
             <Route path="admin/pengguna" element={<Protected roles={["SYSTEM_ADMIN"]}><AdminUsers /></Protected>} />
             <Route path="admin/klien" element={<Protected roles={["SYSTEM_ADMIN"]}><AdminClients /></Protected>} />
             <Route path="*" element={<Home />} />

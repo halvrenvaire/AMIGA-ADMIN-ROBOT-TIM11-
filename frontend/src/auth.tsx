@@ -8,6 +8,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<Me>;
   logout: () => void;
   has: (...roles: Role[]) => boolean;
+  /** Perbarui data pengguna (dan token, mis. setelah ganti password) tanpa login ulang. */
+  updateSession: (user: Me, newToken?: string) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -37,7 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const has = (...roles: Role[]) => Boolean(user?.roles.some((r) => roles.includes(r)));
 
-  return <AuthContext.Provider value={{ user, loading, login, logout, has }}>{children}</AuthContext.Provider>;
+  const updateSession = (next: Me, newToken?: string) => {
+    if (newToken) token.set(newToken);
+    setUser(next);
+  };
+
+  return <AuthContext.Provider value={{ user, loading, login, logout, has, updateSession }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
