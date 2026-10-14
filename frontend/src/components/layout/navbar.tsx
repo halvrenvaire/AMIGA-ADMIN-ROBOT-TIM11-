@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { UserProfile } from '../../lib/types';
 import { cn } from '../../lib/utils';
@@ -19,6 +19,7 @@ const PRESET_USERS = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -48,7 +49,7 @@ export function Navbar() {
     try {
       const res = await api.login(email, 'password123!');
       setCurrentUser(res.user);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       console.error('Failed to switch user:', err);
     } finally {

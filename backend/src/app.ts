@@ -12,6 +12,7 @@ import { intakeRoutes } from './routes/intake.routes.js';
 import { reviewRoutes } from './routes/review.routes.js';
 import { voucherRoutes } from './routes/voucher.routes.js';
 import { auditRoutes } from './routes/audit.routes.js';
+import { testRoutes } from './routes/test.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -96,6 +97,7 @@ export function buildApp(): FastifyInstance {
   app.register(reviewRoutes, { prefix: '/api/v1/invoices' });
   app.register(voucherRoutes, { prefix: '/api/v1/invoices' });
   app.register(auditRoutes, { prefix: '/api/v1/invoices' });
+  app.register(testRoutes, { prefix: '/api/v1/test' });
 
   return app;
 }

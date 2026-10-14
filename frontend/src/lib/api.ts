@@ -51,7 +51,7 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${currentToken}`;
     }
 
-    if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+    if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
       headers['Content-Type'] = 'application/json';
     }
 

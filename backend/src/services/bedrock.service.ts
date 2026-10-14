@@ -111,15 +111,25 @@ JSON structure must strictly match:
 Invoice text:
 ${invoiceText}`;
 
-    const payload = {
-      inputText: systemPrompt,
-      textGenerationConfig: {
-        maxTokenCount: 2048,
-        stopSequences: [],
-        temperature: 0.0,
-        topP: 0.9,
-      },
-    };
+    const isNova = this.modelId.includes('nova');
+    const payload = isNova
+      ? {
+          messages: [{ role: 'user', content: [{ text: systemPrompt }] }],
+          inferenceConfig: {
+            max_new_tokens: 2048,
+            temperature: 0.0,
+            top_p: 0.9,
+          },
+        }
+      : {
+          inputText: systemPrompt,
+          textGenerationConfig: {
+            maxTokenCount: 2048,
+            stopSequences: [],
+            temperature: 0.0,
+            topP: 0.9,
+          },
+        };
 
     const command = new InvokeModelCommand({
       modelId: this.modelId,
@@ -131,7 +141,10 @@ ${invoiceText}`;
     const response = await this.client.send(command);
     const responseBody = new TextDecoder().decode(response.body);
     const parsedBody = JSON.parse(responseBody);
-    const outputText = parsedBody.results?.[0]?.outputText || '{}';
+    const outputText =
+      parsedBody.output?.message?.content?.[0]?.text ||
+      parsedBody.results?.[0]?.outputText ||
+      '{}';
 
     // Bersihkan kemungkinan markdown code fence jika LLM menambahkannya
     const cleanedJsonStr = outputText.replace(/```json/gi, '').replace(/```/g, '').trim();

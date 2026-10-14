@@ -8,6 +8,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:e2e": "pnpm --filter backend test:e2e",
+    "test:cypress": "pnpm --filter frontend cypress:run",
+    "test:cypress:open": "pnpm --filter frontend cypress:open",
     "typecheck": "turbo run typecheck",
     "db:migrate": "pnpm --filter backend db:migrate",
     "db:seed": "pnpm --filter backend db:seed",

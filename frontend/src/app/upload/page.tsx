@@ -231,6 +231,7 @@ export default function UploadPage() {
             </label>
 
             <div
+              id="invoice-dropzone"
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
