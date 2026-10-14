@@ -1,3 +1,5 @@
+export {};
+
 /**
  * 8 skenario uji penerimaan (PRD bagian 8) lewat UI, dengan ekstraksi Nova sungguhan,
  * plus target waktu (PRD bagian 7). Skenario berurutan dan saling memakai dokumen.

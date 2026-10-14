@@ -147,3 +147,13 @@ def test_procedure_question_does_not_use_queue_data(docs, assistant):
     body = ask("reviewer1@amiga.test", "Apa itu QUEUED?")
     assert body["used_queue_data"] is False
     assert body["answer_id"] is not None
+
+
+def test_reviewer_options_exclude_uploader_and_current_reviewer(extractor):
+    doc = upload(email="multi@amiga.test").json()  # pengunggah = multi@ (juga reviewer Alpha)
+    current = detail(doc["id"])["assigned_reviewer"]
+    names = {r["name"] for r in api("lead@amiga.test").get(f"/documents/{doc['id']}/reviewer-options").json()}
+    assert "Yoga (Intake + Reviewer)" not in names
+    assert current not in names
+    assert names == set(NAMES) - {"Yoga (Intake + Reviewer)", current}
+    assert api("reviewer1@amiga.test").get(f"/documents/{doc['id']}/reviewer-options").status_code == 403

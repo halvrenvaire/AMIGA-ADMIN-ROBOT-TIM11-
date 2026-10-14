@@ -30,6 +30,17 @@ def dashboard_summary(user: User = Depends(require_roles(Role.SERVICE_LEAD, Role
     )
 
 
+@router.get("/documents/{document_id}/reviewer-options", response_model=list[ReviewerLoadOut])
+def reviewer_options(document_id: uuid.UUID, user: User = Depends(require_roles(Role.SERVICE_LEAD)),
+                     db: Session = Depends(get_db)):
+    """Reviewer yang sah untuk dokumen ini: Finance Reviewer aktif klien dokumen, bukan pengunggah
+    (SoD) dan bukan reviewer saat ini, beserta bebannya."""
+    doc = _get_document(db, user, document_id)
+    excluded = uploader_ids(doc) | ({doc.assigned_reviewer_id} if doc.assigned_reviewer_id else set())
+    return [ReviewerLoadOut.model_validate(r) for r in summarize(db, {doc.client_id}).reviewers
+            if r.id not in excluded]
+
+
 @router.post("/documents/{document_id}/reassign", response_model=DocumentDetail)
 def reassign(document_id: uuid.UUID, body: ReassignRequest,
              user: User = Depends(require_roles(Role.SERVICE_LEAD)), db: Session = Depends(get_db)):

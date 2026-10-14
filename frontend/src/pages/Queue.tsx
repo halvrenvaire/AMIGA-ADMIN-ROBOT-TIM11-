@@ -121,8 +121,8 @@ export function Queue() {
         </section>
       </div>
 
-      {reassign && s && (
-        <ReassignModal doc={reassign} reviewers={s.reviewers} onClose={() => setReassign(null)}
+      {reassign && (
+        <ReassignModal doc={reassign} onClose={() => setReassign(null)}
                        onDone={() => { setReassign(null); refresh(); }} />
       )}
     </>

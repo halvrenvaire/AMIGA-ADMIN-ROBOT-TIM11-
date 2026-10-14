@@ -1,17 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { DocumentSummary, ReviewerLoad } from "../types";
-import { Alert, Modal } from "./ui";
+import { Alert, Loading, Modal } from "./ui";
 
-/** Service Lead mengalihkan dokumen ke reviewer lain (FR-6.3). Status dokumen tidak berubah. */
-export function ReassignModal({ doc, reviewers, onClose, onDone }: {
-  doc: DocumentSummary; reviewers: ReviewerLoad[]; onClose: () => void; onDone: () => void;
+/** Service Lead mengalihkan dokumen ke reviewer lain (FR-6.3). Status dokumen tidak berubah.
+ *  Pilihan hanya reviewer yang sah dari server: klien dokumen, bukan pengunggah, bukan reviewer saat ini. */
+export function ReassignModal({ doc, onClose, onDone }: {
+  doc: DocumentSummary; onClose: () => void; onDone: () => void;
 }) {
-  const options = reviewers.filter((r) => r.name !== doc.assigned_reviewer);
-  const [reviewerId, setReviewerId] = useState(options[0]?.id ?? "");
+  const [options, setOptions] = useState<ReviewerLoad[] | null>(null);
+  const [reviewerId, setReviewerId] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get<ReviewerLoad[]>(`/documents/${doc.id}/reviewer-options`)
+      .then((list) => { setOptions(list); setReviewerId(list[0]?.id ?? ""); })
+      .catch((e: Error) => { setOptions([]); setError(e.message); });
+  }, [doc.id]);
 
   async function submit() {
     setBusy(true);
@@ -33,12 +40,16 @@ export function ReassignModal({ doc, reviewers, onClose, onDone }: {
         tercatat di jejak audit.
       </p>
       {error && <Alert>{error}</Alert>}
-      <div className="field">
-        <label htmlFor="rv">Reviewer baru</label>
-        <select id="rv" className="input" value={reviewerId} onChange={(e) => setReviewerId(e.target.value)}>
-          {options.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.pending} dokumen)</option>)}
-        </select>
-      </div>
+      {options === null ? <Loading label="Memuat reviewer…" /> : options.length === 0 ? (
+        <Alert kind="warn">Tidak ada reviewer lain yang bisa ditugaskan untuk klien dokumen ini.</Alert>
+      ) : (
+        <div className="field">
+          <label htmlFor="rv">Reviewer baru</label>
+          <select id="rv" className="input" value={reviewerId} onChange={(e) => setReviewerId(e.target.value)}>
+            {options.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.pending} dokumen)</option>)}
+          </select>
+        </div>
+      )}
       <div className="field">
         <label htmlFor="reason">Alasan (opsional)</label>
         <input id="reason" className="input" value={reason} onChange={(e) => setReason(e.target.value)}

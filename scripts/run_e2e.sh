@@ -47,5 +47,9 @@ cd "$ROOT/frontend"
 if [[ "${1:-}" == "--open" ]]; then
   CYPRESS_SEED_PASSWORD="$PASSWORD" npx cypress open --e2e
 else
-  CYPRESS_SEED_PASSWORD="$PASSWORD" npx cypress run --spec cypress/e2e/uat.cy.ts
+  # UAT dulu, lalu system testing; hasil per test disimpan sebagai JUnit XML di cypress/results/
+  rm -rf cypress/results
+  CYPRESS_SEED_PASSWORD="$PASSWORD" npx cypress run \
+    --spec "${E2E_SPEC:-cypress/e2e/uat.cy.ts,cypress/e2e/system.cy.ts}" \
+    --reporter junit --reporter-options "mochaFile=cypress/results/[hash].xml,toConsole=false"
 fi

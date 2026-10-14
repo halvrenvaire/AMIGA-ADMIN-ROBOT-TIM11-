@@ -6,7 +6,7 @@ import { useAuth } from "../auth";
 import { ReassignModal } from "../components/ReassignModal";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
 import { FIELD_LABEL, ISSUE_LABEL, plainNumber, rupiah, tanggal, waktu } from "../format";
-import type { DashboardSummary, DocumentDetail, Extraction, Issue } from "../types";
+import type { DocumentDetail, Extraction, Issue } from "../types";
 
 const HEADER_FIELDS = ["vendor_name", "invoice_no", "invoice_date", "total"] as const;
 const PAYMENT_FIELDS = ["bank_name", "account_no", "account_name"] as const;
@@ -38,7 +38,7 @@ export function DocumentPage() {
   const { has } = useAuth();
   const doc = useApi(() => api.get<DocumentDetail>(`/documents/${id}`), [id]);
   const [notice, setNotice] = useState<{ kind: "ok" | "info" | "error" | "warn"; text: string } | null>(null);
-  const [reassign, setReassign] = useState<DashboardSummary | null>(null);
+  const [reassign, setReassign] = useState(false);
   const d = doc.data;
 
   // Ekstraksi dan verifikasi berjalan di background: muat ulang sampai selesai
@@ -71,11 +71,6 @@ export function DocumentPage() {
     } catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
   }
 
-  async function openReassign() {
-    try { setReassign(await api.get<DashboardSummary>("/dashboard/summary")); }
-    catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
-  }
-
   return (
     <>
       <div className="page-head">
@@ -86,7 +81,7 @@ export function DocumentPage() {
           <p>{d.client.name} · {d.request_type ?? "-"} · via {d.channel ?? "-"}</p>
         </div>
         <div className="actions">
-          {has("SERVICE_LEAD") && d.status === "READY_FOR_REVIEW" && <button className="btn" onClick={openReassign}>Alihkan reviewer</button>}
+          {has("SERVICE_LEAD") && d.status === "READY_FOR_REVIEW" && <button className="btn" onClick={() => setReassign(true)}>Alihkan reviewer</button>}
           <Link className="btn" to={`/dokumen/${id}/riwayat`}><FileClock /> Riwayat</Link>
           {hasVoucher && !has("SERVICE_LEAD") && <Link className="btn primary" to={`/dokumen/${id}/voucher`}><Receipt /> Voucher</Link>}
         </div>
@@ -150,8 +145,8 @@ export function DocumentPage() {
       </div>
 
       {reassign && (
-        <ReassignModal doc={d} reviewers={reassign.reviewers} onClose={() => setReassign(null)}
-                       onDone={() => { setReassign(null); doc.reload(); setNotice({ kind: "ok", text: "Reviewer dialihkan." }); }} />
+        <ReassignModal doc={d} onClose={() => setReassign(false)}
+                       onDone={() => { setReassign(false); doc.reload(); setNotice({ kind: "ok", text: "Reviewer dialihkan." }); }} />
       )}
     </>
   );

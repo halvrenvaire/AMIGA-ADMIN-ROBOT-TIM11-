@@ -27,3 +27,4 @@ backend/data/
 frontend/cypress/downloads/
 frontend/cypress/screenshots/
 frontend/cypress/logs/
+frontend/cypress/results/
