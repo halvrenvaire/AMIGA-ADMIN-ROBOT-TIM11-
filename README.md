@@ -1,0 +1,350 @@
+# AMIGA Robot Admin — Intelligent Vendor Invoice-to-Voucher Processing
+
+Proof of Concept untuk **MAIN Hackathon 2026** oleh **Kelompok 11 (TEAM 11 MAIN)**.
+
+AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi dalam hitungan detik. **AI hanya membaca invoice.** Sistem yang memverifikasi angka, kelengkapan, dan duplikasi, lalu **Finance Reviewer** menyetujui sebelum voucher diserahkan ke klien.
+
+> **Dokumen acuan** (folder [`readme/`](readme/)):
+> - [BRD AMIGA Robot Admin v1.1](readme/BRD_AMIGA_Robot_Admin_v1.1.docx)
+> - [PRD AMIGA Robot Admin v2](<readme/PRD — AMIGA Robot Admin(v2).pdf>) (versi PRD 1.1)
+> - [BPMN Invoice-to-Voucher (revisi)](readme/AMIGA_Robot_Admin_Invoice_to_Voucher.bpmn)
+> - [SOP-AMIGA-FIN-001 v1.1](docs/sop.md)
+>
+> Bila README ini berbeda dengan dokumen acuan, **dokumen acuan yang berlaku**. Bagian [Keputusan desain](#keputusan-desain) mencatat hal yang belum diatur dokumen acuan.
+
+---
+
+## Daftar isi
+
+1. [Masalah dan tujuan](#masalah-dan-tujuan)
+2. [Alur dokumen (BPMN)](#alur-dokumen-bpmn)
+3. [Peran dan hak akses](#peran-dan-hak-akses)
+4. [Fitur dan status pengerjaan](#fitur-dan-status-pengerjaan)
+5. [Skenario uji penerimaan (UAT)](#skenario-uji-penerimaan-uat)
+6. [Arsitektur](#arsitektur)
+7. [Menjalankan project](#menjalankan-project)
+8. [Endpoint API](#endpoint-api)
+9. [Keputusan desain](#keputusan-desain)
+10. [Pertanyaan terbuka](#pertanyaan-terbuka)
+11. [Di luar cakupan PoC](#di-luar-cakupan-poc)
+
+---
+
+## Masalah dan tujuan
+
+| Masalah saat ini | Tujuan produk |
+| --- | --- |
+| Input ulang manual 5–10 menit per invoice, penyusunan voucher 5–15 menit | Data invoice terisi otomatis oleh AI |
+| Salah ketik nominal atau nomor rekening, salah hitung total, risiko pembayaran ganda | Kesalahan tertangkap sebelum pembayaran: cek hitungan, kelengkapan, dan duplikasi |
+| Riwayat perubahan dan persetujuan tidak tercatat | Pengunggah tidak bisa menyetujui dokumennya sendiri, dan semua perubahan tercatat permanen |
+
+### Target metrik PoC
+
+| Metrik | Target |
+| --- | --- |
+| Waktu ekstraksi per invoice (≤ 5 halaman) | ≤ 15 detik |
+| Waktu muat antrean dan layar review | ≤ 2 detik |
+| Waktu pembuatan voucher | ≤ 3 detik |
+| Line items terbaca dan total benar | 100% di skenario uji |
+| Duplikat yang lolos tanpa tanda | 0 |
+| Pelanggaran SoD dan akses lintas klien | 0 |
+| Perubahan data tercatat di jejak audit | 100% |
+
+---
+
+## Alur dokumen (BPMN)
+
+Setiap invoice melewati **6 status** dengan **3 titik keputusan**: verifikasi sistem, keputusan reviewer, dan cek Segregation of Duties.
+
+```mermaid
+flowchart TD
+    S1([Invoice vendor diterima]) --> T1[PIC Klien / Intake:<br/>Unggah PDF & isi formulir]
+    T1 --> G1{File valid?<br/>PDF, ≤ 5 hal.}
+    G1 -- Tidak --> T1
+    G1 -- Ya --> T2[Sistem: terbitkan Request ID<br/><b>QUEUED</b>]
+    T2 --> T3[AI Engine: ekstraksi data<br/><b>PROCESSING</b>]
+    T3 --> T4[Sistem: verifikasi angka,<br/>kelengkapan & duplikasi]
+    T4 --> G2{Lolos<br/>verifikasi?}
+    G2 -- Tidak --> T5[Sistem: tandai <b>EXCEPTION</b><br/>+ kode & alasan]
+    T5 --> T6[PIC Klien: lengkapi /<br/>perbaiki data]
+    T6 -- "Ekstraksi & verifikasi ulang<br/>(Request ID sama)" --> T3
+    G2 -- Ya --> T7[Finance Reviewer: tinjau & koreksi<br/><b>READY_FOR_REVIEW</b>]
+    T7 --> G3{Keputusan<br/>reviewer}
+    G3 -- "Kembalikan ke PIC<br/>(wajib alasan)" --> T6
+    G3 -- Setujui --> T8[Sistem: cek<br/>Segregation of Duties]
+    T8 --> G4{Penyetuju =<br/>pengunggah?}
+    G4 -- Ya --> T9[Sistem: tolak & alihkan otomatis<br/>ke reviewer lain]
+    T9 --> T7
+    G4 -- Tidak --> T11[Sistem: <b>AMIGA_REVIEWED</b><br/>+ buat voucher PDF]
+    T11 --> T12[PIC Klien: unduh voucher<br/><b>SENT_TO_CLIENT</b>]
+    T12 --> E1([Voucher diteruskan ke<br/>Client Approver])
+
+    S2([Beban reviewer terlalu banyak]) --> T10[Service Lead: alihkan dokumen<br/>ke reviewer lain] --> E2([Beban kerja seimbang])
+```
+
+Catatan alur:
+
+- **AI Engine hanya mengekstrak.** Verifikasi, cek SoD, dan pembuatan voucher dilakukan **Sistem**.
+- EXCEPTION bisa datang dari verifikasi sistem atau dari reviewer yang mengembalikan dokumen. Setelah PIC memperbaiki, dokumen kembali ke ekstraksi dengan **Request ID yang sama**.
+- Pengalihan oleh **Service Lead** terpisah dari alur SoD. Pengalihan ini hanya untuk pemerataan beban, dan status dokumen tidak berubah.
+- Persetujuan dan pembayaran oleh **Client Approver** terjadi di luar sistem.
+- Setiap aktivitas, perubahan data (nilai awal → nilai baru), penolakan, dan pengalihan dicatat permanen di **jejak audit**.
+
+### Aturan verifikasi (dijalankan sistem)
+
+| Aturan | Kode | Kapan muncul | Akibat |
+| --- | --- | --- | --- |
+| Kelengkapan | `MISSING_EVIDENCE` | Data wajib tidak ditemukan, misalnya nomor rekening | EXCEPTION |
+| Angka / perhitungan | `CALCULATION_DISCREPANCY` | Jumlah subtotal line items ≠ total invoice | EXCEPTION |
+| Duplikasi | `POSSIBLE_DUPLICATE` | Ada invoice lain dengan nomor invoice dan vendor yang sama | EXCEPTION |
+| Dikembalikan reviewer | `RETURNED_BY_REVIEWER` | Finance Reviewer memilih "Kembalikan ke PIC" | EXCEPTION |
+
+Nomor invoice dan nama vendor **dinormalisasi** sebelum dibandingkan (huruf kecil, tanpa spasi dan tanda baca), sehingga `INV-001` dan `inv 001` tetap terdeteksi sebagai duplikat.
+
+---
+
+## Peran dan hak akses
+
+Ada 6 peran internal, ditambah **Sistem** dan **AI Engine** sebagai pelaku otomatis. **Setiap aksi diperiksa di server**, bukan hanya disembunyikan di tampilan.
+
+| Aksi | PIC Klien | Intake Support | Finance Reviewer | Service Lead | System Admin |
+| --- | --- | --- | --- | --- | --- |
+| Unggah invoice dan isi formulir | Ya | Ya (klien yang didelegasikan) | Tidak | Tidak | Tidak |
+| Lihat status, kode, dan alasan EXCEPTION | Ya (klien sendiri) | Ya (klien ditugaskan) | Ya | Ya | Tidak |
+| Lengkapi / perbaiki data invoice | Ya | Ya (klien ditugaskan) | Tidak | Tidak | Tidak |
+| Koreksi data hasil ekstraksi | Tidak | Tidak | Ya | Tidak | Tidak |
+| Setujui atau kembalikan ke PIC | Tidak | Tidak | Ya, kecuali unggahan sendiri | Tidak | Tidak |
+| Unduh voucher PDF | Ya | Ya | Ya | Tidak | Tidak |
+| Alihkan dokumen ke reviewer lain (atur beban) | Tidak | Tidak | Tidak | Ya | Tidak |
+| Kelola akun, peran, penugasan klien | Tidak | Tidak | Tidak | Tidak | Ya |
+| Lihat riwayat dan jejak audit | Ya (klien sendiri) | Ya (klien ditugaskan) | Ya | Ya | Ya |
+| Asisten AI di dashboard | Tidak | Tidak | Ya | Ya | Ya (SOP saja) |
+
+**Peran ganda.** Satu pengguna boleh memiliki lebih dari satu peran internal, misalnya Intake Support sekaligus Finance Reviewer. Kombinasi yang **dilarang**: PIC Klien dengan peran internal mana pun, dan System Admin dengan Finance Reviewer. System Admin tidak boleh memberi peran kepada dirinya sendiri.
+
+**Segregation of Duties.** Pengguna tidak boleh menyetujui dokumen yang ia unggah sendiri, termasuk dokumen yang diunggah atas namanya. Sistem menolak persetujuan dan **otomatis mengalihkan** dokumen ke reviewer lain dengan antrean tertunda paling sedikit.
+
+**Isolasi klien.** Pengguna hanya bisa membuka dokumen klien yang ditugaskan kepadanya. Akses ke dokumen klien lain ditolak dan dicatat.
+
+---
+
+## Fitur dan status pengerjaan
+
+Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
+
+| Fitur (PRD §4) | Prioritas | Status | Keterangan |
+| --- | --- | --- | --- |
+| F1. Unggah invoice dan antrean | P0 | ⏳ | Tabel `documents` (Request ID, status, pengunggah, atas nama) sudah ada. Kolom **saluran** belum ditambahkan |
+| F2. Ekstraksi AI | P0 | ⏳ | Tabel `extractions` dan `line_items` sudah ada |
+| F3. Verifikasi otomatis oleh sistem | P0 | ⏳ | Tabel `validation_issues` dan kode kendala sudah ada |
+| F4. Peninjauan oleh Finance Reviewer | P0 | ⏳ | |
+| F5. Voucher PDF dan serah terima | P0 | ⏳ | Tabel `vouchers` sudah ada |
+| F6. Dashboard antrean | P1 | ⏳ | |
+| F7. Hak akses dan isolasi klien | P0 | 🔄 | Tabel pengguna, peran, penugasan klien, dan delegasi + data seed sudah ada. Login dan pengecekan di server belum |
+| F8. Jejak audit | P0 | 🔄 | Tabel `audit_logs` **append-only** sudah aktif: UPDATE, DELETE, dan TRUNCATE ditolak oleh database. Pencatatan dari setiap aksi belum |
+| Asisten AI (SOP) | Tambahan | ✅ | `POST /ask`: menjawab dari SOP dengan sumber dan riwayat percakapan |
+| Asisten AI Agent (memori tanya-jawab) | Tambahan | ✅ | `POST /ask-agent`: memakai tanya-jawab lama yang mirip sebagai referensi, dengan 👍/👎 |
+| Asisten AI Agent (data antrean) | Tambahan | ⏳ | Membaca data antrean sesuai hak akses pengguna (Tahap 6) |
+| Frontend (5 layar) | P0 | ⏳ | React + Vite |
+
+### Rencana tahap berikutnya
+
+| Tahap | Isi |
+| --- | --- |
+| 3 | Login, peran ganda, isolasi klien, aturan SoD di server |
+| 4 | F1–F3: unggah, ekstraksi AI, verifikasi (termasuk ekstraksi ulang dengan Request ID sama) |
+| 5 | F4, F5, F8: layar review, setujui/kembalikan, cek SoD + pengalihan otomatis, voucher PDF, pencatatan audit |
+| 6 | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
+| 7 | Frontend 5 layar + tombol chat asisten |
+| 8 | UAT 8 skenario, lalu Demo Day |
+
+---
+
+## Skenario uji penerimaan (UAT)
+
+PoC dinyatakan siap demo bila **8 skenario** di bawah lulus semua dan target waktu tercapai (PRD §8).
+
+| No | Skenario | Langkah | Hasil yang diharapkan | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Alur normal | Unggah → ekstraksi → lolos verifikasi → disetujui | Voucher terunduh, status SENT_TO_CLIENT | ⏳ |
+| 2 | Multi-line item | Invoice dengan ≥ 3 jenis barang | Semua baris terbaca, total benar | ⏳ |
+| 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | ⏳ |
+| 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | ⏳ |
+| 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | ⏳ |
+| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | ⏳ |
+| 7 | Jejak audit | Reviewer mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | 🔄 tabel append-only siap |
+| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | ⏳ |
+
+Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD v2, tetapi tetap diuji dengan test otomatis.
+
+---
+
+## Arsitektur
+
+| Bagian | Teknologi |
+| --- | --- |
+| Backend | Python, FastAPI, SQLAlchemy, Alembic |
+| Database | PostgreSQL |
+| Frontend (rencana) | React + Vite |
+| AI (menjawab, nantinya ekstraksi) | Amazon Bedrock — **Amazon Nova Lite** (`ap-southeast-1`) |
+| Embedding Asisten SOP | Amazon Bedrock — **Titan Text Embeddings v2** (`us-east-1`) |
+| Pencarian dokumen Asisten SOP | FAISS (index disimpan di `backend/data/`) |
+| Testing | pytest (rencana: Cypress untuk end-to-end) |
+
+Semua library dan tools yang dipakai bersifat **open source**. Satu-satunya layanan berbayar adalah Amazon Bedrock.
+
+**Kenapa Nova dan Titan di `us-east-1`?** Hasil pengujian di akun AWS kelas pada 13/10/2026:
+
+- `amazon.titan-text-express-v1` sudah **end of life** di semua region, sehingga diganti **Nova Lite**.
+- Titan Embeddings **tidak tersedia** di `ap-southeast-1`, tetapi bisa dipanggil di `us-east-1`.
+- Model Claude belum diaktifkan dan Cohere embedding tidak diizinkan untuk akun siswa.
+
+Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EMBED_REGION` di `.env`. Setelah mengganti model embedding, jalankan `POST /reindex`.
+
+### Struktur folder
+
+```
+.
+├── README.md
+├── readme/                     # Dokumen acuan: BRD v1.1, PRD v2, BPMN revisi
+├── docs/
+│   └── sop.md                  # SOP v1.1 — juga sumber pengetahuan Asisten SOP
+└── backend/
+    ├── app/
+    │   ├── main.py             # Entry point FastAPI
+    │   ├── config.py           # Pengaturan dari .env
+    │   ├── db.py, models.py    # Koneksi dan model database
+    │   ├── security.py         # Hash password
+    │   ├── routers/            # health, ask (/ask), ask_agent (/ask-agent + feedback), reindex
+    │   ├── schemas/            # Model request/response
+    │   └── services/           # Bedrock, loader dokumen, chunker, FAISS, indexing, riwayat, memori tanya-jawab
+    ├── alembic/                # Migrasi database
+    ├── scripts/create_db.sh    # Membuat role & database PostgreSQL lokal
+    ├── seed.py                 # Data dummy: 2 klien, 7 pengguna
+    ├── tests/                  # pytest
+    ├── requirements.txt
+    └── .env.example
+```
+
+---
+
+## Menjalankan project
+
+### Prasyarat
+
+- Python 3.12+ (dikembangkan dengan 3.14)
+- PostgreSQL 13+ (dikembangkan dengan 18) yang berjalan di `localhost:5432`
+- Akun AWS dengan akses Amazon Bedrock (Nova Lite dan Titan Embeddings v2)
+
+### Langkah setup
+
+```bash
+cd backend
+
+# 1. Virtualenv dan dependensi
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 2. Konfigurasi: salin lalu isi nilainya (kredensial AWS milik masing-masing)
+cp .env.example .env
+
+# 3. Buat role & database PostgreSQL sesuai DATABASE_URL di .env (meminta password sudo)
+bash scripts/create_db.sh
+
+# 4. Buat tabel dan isi data dummy
+.venv/bin/alembic upgrade head
+.venv/bin/python seed.py
+
+# 5. Jalankan server
+.venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Buka <http://localhost:8000/docs> untuk mencoba endpoint dari browser. Saat pertama dijalankan, server membangun index Asisten SOP dari `docs/sop.md` (sekitar 10 detik).
+
+> ⚠️ **Jangan commit atau membagikan `.env`.** File ini sudah ada di `.gitignore`. Jangan membuka `.env` saat berbagi layar.
+
+### Akun dummy (hasil `seed.py`)
+
+Semua akun memakai password dari `SEED_DEFAULT_PASSWORD` di `.env`.
+
+| Email | Peran | Klien |
+| --- | --- | --- |
+| `pic.alpha@amiga.test` | PIC Klien | PT Klien Alpha |
+| `pic.beta@amiga.test` | PIC Klien | PT Klien Beta |
+| `intake@amiga.test` | Intake Support (delegasi PIC Alpha) | PT Klien Alpha |
+| `reviewer1@amiga.test` | Finance Reviewer | Alpha, Beta |
+| `reviewer2@amiga.test` | Finance Reviewer | Alpha, Beta |
+| `lead@amiga.test` | Service Lead | Alpha, Beta |
+| `admin@amiga.test` | System Admin | — |
+
+### Menjalankan test
+
+```bash
+cd backend
+.venv/bin/python -m pytest -m "not integration"   # cepat, tanpa AWS
+.venv/bin/python -m pytest                        # termasuk integration test ke Bedrock
+```
+
+---
+
+## Endpoint API
+
+| Method | Endpoint | Fungsi |
+| --- | --- | --- |
+| GET | `/health` | Status server, database, dan index Asisten SOP |
+| POST | `/ask` | Tanya Asisten SOP. Body: `{"question": "...", "session_id": "..."}` |
+| POST | `/ask-agent` | Seperti `/ask`, ditambah **memori tanya-jawab lintas sesi** (arahan mentor): pertanyaan lama yang mirip ikut dipakai sebagai referensi. Respons menambahkan `answer_id` dan `memory_refs` |
+| POST | `/ask-agent/feedback` | Beri 👍/👎 pada jawaban `/ask-agent`. Body: `{"answer_id": 17, "helpful": true}` |
+| POST | `/reindex` | Bangun ulang index Asisten SOP setelah SOP/dokumen berubah. Butuh header `X-API-Key` (`REINDEX_API_KEY`) |
+| GET | `/db/summary` | Jumlah baris di setiap tabel database |
+| GET | `/db/qa-memory` | Isi memori `/ask-agent` (`active` = bisa dipakai sebagai referensi) |
+| GET | `/db/conversations` | Daftar sesi chat beserta jumlah pesan |
+| GET | `/db/conversations/{session_id}` | Seluruh pesan dalam satu sesi |
+| GET | `/db/users` | Daftar pengguna, peran, dan klien (tanpa password) |
+
+Endpoint `/db/*` hanya untuk **melihat** isi database selama pengembangan. Hash password dan vektor embedding tidak pernah ditampilkan. Setelah login tersedia, endpoint ini dibatasi untuk System Admin.
+
+`session_id` mengelompokkan riwayat percakapan. Gunakan nilai unik per orang/percakapan. Setelah login tersedia, nilai ini akan diatur otomatis per pengguna.
+
+Endpoint invoice → voucher (unggah, ekstraksi, review, voucher, dashboard, admin) dibangun mulai Tahap 3.
+
+---
+
+## Keputusan desain
+
+Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim** (13/10/2026):
+
+| Topik | Keputusan | Alasan |
+| --- | --- | --- |
+| Data saat ekstraksi ulang | Field yang diisi/diperbaiki PIC **didahulukan** atas hasil AI | Mencegah putaran tanpa akhir: PDF tanpa nomor rekening akan selalu kosong bila AI menimpa isian PIC (UAT #8) |
+| Pengalihan otomatis SoD | Ke reviewer lain (bukan pengunggah) dengan **antrean tertunda paling sedikit** | Sekaligus membantu pemerataan beban |
+| Peran ganda | Diizinkan dengan kombinasi terlarang (lihat [Peran dan hak akses](#peran-dan-hak-akses)) | Tanpa ini, UAT #5 tidak mungkin terjadi karena Finance Reviewer tidak boleh mengunggah |
+| `POSSIBLE_DUPLICATE` | Membuat status **EXCEPTION** | Sesuai PRD v2 dan target "0 duplikat lolos" |
+| Kembalikan ke PIC | Kode kendala `RETURNED_BY_REVIEWER` + alasan wajib | PRD v2 tidak memberi nama kode |
+| Jejak audit permanen | Ditegakkan dengan **trigger database**, bukan hanya di aplikasi | Bahkan akses langsung ke database tidak bisa mengubah atau menghapus catatan |
+| Sumber pengetahuan Asisten | `docs/sop.md` di repo adalah sumber kebenaran; file di S3 dengan nama sama dilewati | Mencegah salinan SOP lama ikut menjawab |
+| Asisten AI | Satu fitur di dalam aplikasi (tombol chat di semua layar), hanya untuk peran internal | Data yang dijawab dibatasi hak akses pengguna, sama seperti layar biasa |
+| Memori tanya-jawab `/ask-agent` | Dipakai **sebagai referensi** (SOP tetap acuan utama); kemiripan minimal **0,70**; jawaban 👎 tidak dipakai, 👍 didahulukan; memori dari index SOP lama diabaikan setelah `/reindex`; pertanyaan lanjutan dan jawaban "tidak ada di dokumen" tidak disimpan | Diukur dengan Titan Embed v2: pertanyaan berbeda maksud bisa mencapai ~0,36 (mis. target waktu *ekstraksi* vs *voucher*), parafrase berkata mirip ~0,80. Batas 0,70 mencegah jawaban yang salah topik ikut menjadi referensi |
+
+---
+
+## Pertanyaan terbuka
+
+Perlu dijawab klien / tim Keuangan AMIGA (PRD v2 §8):
+
+1. Apakah kode `CALCULATION_DISCREPANCY` disetujui dan ditambahkan ke glosarium BRD?
+2. Apakah `POSSIBLE_DUPLICATE` membuat status EXCEPTION (seperti PRD v2) atau hanya peringatan bagi reviewer?
+3. Batas "beban terlalu banyak" bagi Service Lead, misalnya lebih dari N dokumen tertunda per reviewer.
+4. Format nomor voucher dan teks batas otorisasi.
+5. Layanan AI/OCR yang dipakai dan kebijakan datanya (no-training).
+6. Tanggal Demo Day.
+
+---
+
+## Di luar cakupan PoC
+
+- Persetujuan dan pembayaran oleh klien, serta portal untuk Client Approver.
+- Integrasi ke ERP, akuntansi, internet banking, atau payment gateway.
+- Penarikan invoice otomatis dari WhatsApp/Email (saluran hanya dicatat sebagai metadata).
+- Format selain PDF dan invoice lebih dari 5 halaman.
+- Validasi Faktur Pajak ke sistem DJP.

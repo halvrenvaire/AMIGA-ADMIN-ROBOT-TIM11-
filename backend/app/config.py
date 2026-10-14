@@ -39,5 +39,11 @@ class Settings(BaseSettings):
     rag_max_answer_tokens: int = 1024
     reindex_api_key: str = ""
 
+    # Memori tanya-jawab /ask-agent
+    # Diukur dengan Titan Embed v2: pertanyaan berbeda maksud mencapai ~0,36, parafrase
+    # dengan kata mirip ~0,80. Batas 0,70 menolak semua yang berbeda maksud.
+    qa_memory_min_score: float = 0.70
+    qa_memory_top_k: int = 3
+
 
 settings = Settings()

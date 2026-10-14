@@ -5,10 +5,10 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text,
+    Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, SmallInteger, String, Text,
     UniqueConstraint, func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, REAL, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -207,4 +207,19 @@ class ConversationMessage(Base):
     session_id: Mapped[str] = mapped_column(String(100), index=True)
     role: Mapped[str] = mapped_column(String(20))  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class QAMemory(Base):
+    """Memori tanya-jawab /ask-agent: pertanyaan lama yang mirip dipakai sebagai referensi."""
+    __tablename__ = "qa_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(100), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(ARRAY(REAL))
+    # Waktu index SOP saat jawaban dibuat; memori dari index lama diabaikan setelah /reindex
+    index_version: Mapped[str] = mapped_column(String(64), index=True)
+    feedback: Mapped[int | None] = mapped_column(SmallInteger)  # 1 = 👍, -1 = 👎, None = belum dinilai
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

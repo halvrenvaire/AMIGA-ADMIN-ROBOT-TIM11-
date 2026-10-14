@@ -2,12 +2,13 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 
 from app.config import settings
 from app.db import SessionLocal
 from app.main import app
+from app.models import ConversationMessage, QAMemory
 from app.services.bedrock_client import BedrockError
-from app.services.history_service import HistoryService
 from app.services.vector_store import VectorStore
 
 CHUNKS = [
@@ -38,6 +39,8 @@ class FakeIndexing:
     def __init__(self, store):
         self.store = store
         self.rebuilt = 0
+        # Versi index unik per test, supaya memori /ask-agent dari test lain tidak terbawa
+        self.version = f"test-{uuid.uuid4()}"
 
     def get_store(self):
         return self.store
@@ -48,7 +51,7 @@ class FakeIndexing:
 
     def status(self):
         return {"indexed": not self.store.is_empty(), "total_chunks": len(self.store.chunks),
-                "sources": ["local:sop.md"], "last_indexed_at": "2026-10-13T00:00:00+00:00"}
+                "sources": ["local:sop.md"], "last_indexed_at": self.version}
 
 
 def _store():
@@ -69,12 +72,21 @@ def client():
 def session_id():
     sid = f"test-{uuid.uuid4()}"
     yield sid
+    # Termasuk sesi turunan (mis. f"{sid}-a") yang dibuat test memori /ask-agent
     with SessionLocal() as db:
-        HistoryService(db).clear_session(sid)
+        db.execute(delete(ConversationMessage).where(ConversationMessage.session_id.like(f"{sid}%")))
+        db.execute(delete(QAMemory).where(QAMemory.session_id.like(f"{sid}%")))
+        db.commit()
 
 
-def test_ask_returns_answer_and_ranked_sources(client, session_id):
-    r = client.post("/ask", json={"question": "Apa yang dimaksud QUEUED?", "session_id": session_id})
+@pytest.fixture(params=["/ask", "/ask-agent"])
+def endpoint(request):
+    """Perilaku dasar /ask juga berlaku untuk /ask-agent (yang menambahkan memori)."""
+    return request.param
+
+
+def test_ask_returns_answer_and_ranked_sources(client, endpoint, session_id):
+    r = client.post(endpoint, json={"question": "Apa yang dimaksud QUEUED?", "session_id": session_id})
     assert r.status_code == 200
     body = r.json()
     assert body["answer"] == "jawaban untuk: Apa yang dimaksud QUEUED?"
@@ -84,28 +96,28 @@ def test_ask_returns_answer_and_ranked_sources(client, session_id):
     assert "QUEUED: invoice sudah diunggah" in app.state.bedrock.last_system
 
 
-def test_second_question_includes_history(client, session_id):
-    client.post("/ask", json={"question": "Apa itu QUEUED?", "session_id": session_id})
-    client.post("/ask", json={"question": "Lalu setelah itu?", "session_id": session_id})
+def test_second_question_includes_history(client, endpoint, session_id):
+    client.post(endpoint, json={"question": "Apa itu QUEUED?", "session_id": session_id})
+    client.post(endpoint, json={"question": "Lalu setelah itu?", "session_id": session_id})
     msgs = app.state.bedrock.last_messages
     assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
     assert msgs[0]["content"] == "Apa itu QUEUED?"
     assert msgs[-1]["content"] == "Lalu setelah itu?"
 
 
-def test_ask_validation_error(client):
-    assert client.post("/ask", json={"question": "", "session_id": "x"}).status_code == 422
+def test_ask_validation_error(client, endpoint):
+    assert client.post(endpoint, json={"question": "", "session_id": "x"}).status_code == 422
 
 
-def test_ask_when_index_empty_returns_503(client, session_id):
+def test_ask_when_index_empty_returns_503(client, endpoint, session_id):
     app.state.indexing = FakeIndexing(VectorStore())
-    r = client.post("/ask", json={"question": "Apa itu QUEUED?", "session_id": session_id})
+    r = client.post(endpoint, json={"question": "Apa itu QUEUED?", "session_id": session_id})
     assert r.status_code == 503
 
 
-def test_ask_when_bedrock_down_returns_503_without_leaking_detail(client, session_id):
+def test_ask_when_bedrock_down_returns_503_without_leaking_detail(client, endpoint, session_id):
     app.state.bedrock = FakeBedrock(fail=True)
-    r = client.post("/ask", json={"question": "Apa itu QUEUED?", "session_id": session_id})
+    r = client.post(endpoint, json={"question": "Apa itu QUEUED?", "session_id": session_id})
     assert r.status_code == 503
     assert "down" not in r.text
 
