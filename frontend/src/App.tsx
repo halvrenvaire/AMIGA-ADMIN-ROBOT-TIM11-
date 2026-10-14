@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, homePath, useAuth } from "./auth";
+import { ThemeProvider } from "./theme";
 import { Layout } from "./components/Layout";
 import { Loading } from "./components/ui";
 import { AdminClients, AdminUsers } from "./pages/Admin";
@@ -34,6 +35,7 @@ function Home() {
 
 export function App() {
   return (
+    <ThemeProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -60,5 +62,6 @@ export function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
   );
 }

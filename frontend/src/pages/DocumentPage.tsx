@@ -370,7 +370,7 @@ function FixForm({ doc, onDone }: { doc: DocumentDetail; onDone: (d: DocumentDet
   }
 
   return (
-    <section className="card panel" style={{ borderColor: "#f6d7b0" }}>
+    <section className="card panel" style={{ borderColor: "var(--amber-100)" }}>
       <div className="panel-head">
         <div>
           <h2>Kirim perbaikan</h2>

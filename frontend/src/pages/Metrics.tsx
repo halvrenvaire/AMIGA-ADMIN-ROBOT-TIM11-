@@ -7,6 +7,7 @@ import {
   ArrowDownRight, ArrowUpRight, ClipboardCheck, FileInput, Minus, Receipt, ShieldCheck, Upload, Wallet,
 } from "lucide-react";
 import { Clover } from "../components/Logo";
+import { useTheme } from "../theme";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Alert, Loading, StatusBadge, useApi } from "../components/ui";
@@ -15,10 +16,17 @@ import type { DashboardMetrics, DocStatus } from "../types";
 
 const PERIODS = [7, 30, 90];
 // Warna seri grafik dari brand amiga: teal (masuk), teal tua (disetujui), merah muda (bermasalah)
+// Palet per tema: teal tua tidak terbaca di latar gelap, jadi seri "disetujui" memakai teal muda
+const PALETTE = {
+  light: { received: "#4497A1", approved: "#1D5B63", exception: "#E65C97", ok: "#12936B",
+           grid: "#ecf1f3", axis: "#dfe6e9", tick: "#84959b", tipBg: "#ffffff", tipText: "#1d2b30" },
+  dark: { received: "#5CB8C2", approved: "#A7E1E6", exception: "#FF8FBE", ok: "#45CF9C",
+          grid: "#1e2f33", axis: "#273a3f", tick: "#7d9196", tipBg: "#132024", tipText: "#e4edef" },
+};
 const SERIES = [
-  { key: "received", label: "Invoice masuk", color: "#4497A1" },
-  { key: "approved", label: "Voucher terbit", color: "#1D5B63" },
-  { key: "exception", label: "Bermasalah", color: "#E65C97" },
+  { key: "received", label: "Invoice masuk" },
+  { key: "approved", label: "Voucher terbit" },
+  { key: "exception", label: "Bermasalah" },
 ] as const;
 
 const shortDate = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short" });
@@ -53,6 +61,7 @@ export function Metrics() {
   const m = useApi(() => api.get<DashboardMetrics>("/dashboard/metrics", { days, client_id: clientId }), [days, clientId]);
   const d = m.data;
   const internal = has("SERVICE_LEAD", "FINANCE_REVIEWER");
+  const c = PALETTE[useTheme().resolved];
   const openStatus = (s: DocStatus) => navigate(internal ? `/antrean?status=${s}` : `/pengajuan?status=${s}`);
 
   return (
@@ -95,13 +104,13 @@ export function Metrics() {
           </section>
 
           <section className="stats">
-            <Kpi icon={FileInput} accent="#4497A1" tone="navy" label="Invoice masuk" value={String(d.received)}
+            <Kpi icon={FileInput} accent={c.received} tone="navy" label="Invoice masuk" value={String(d.received)}
                  foot={<><Delta now={d.received} prev={d.received_prev} /> vs {days} hari sebelumnya</>} />
-            <Kpi icon={Receipt} accent="#1D5B63" tone="teal" label="Voucher terbit" value={String(d.approved)}
+            <Kpi icon={Receipt} accent={c.approved} tone="teal" label="Voucher terbit" value={String(d.approved)}
                  foot={<><Delta now={d.approved} prev={d.approved_prev} /> vs {days} hari sebelumnya</>} />
-            <Kpi icon={Wallet} accent="#E65C97" tone="pink" label="Nilai pembayaran" value={compactRp(Number(d.total_value))}
+            <Kpi icon={Wallet} accent={c.exception} tone="pink" label="Nilai pembayaran" value={compactRp(Number(d.total_value))}
                  foot={<><Delta now={Number(d.total_value)} prev={Number(d.total_value_prev)} /> total voucher terbit</>} />
-            <Kpi icon={ShieldCheck} accent="#12936B" tone="teal" label="Lolos verifikasi pertama" value={pct(d.first_pass, d.first_pass_total)}
+            <Kpi icon={ShieldCheck} accent={c.ok} tone="teal" label="Lolos verifikasi pertama" value={pct(d.first_pass, d.first_pass_total)}
                  foot={<>{d.first_pass} dari {d.first_pass_total} dokumen tanpa kendala</>} />
           </section>
 
@@ -112,15 +121,15 @@ export function Metrics() {
             <div style={{ width: "100%", height: 280 }}>
               <ResponsiveContainer>
                 <LineChart data={d.trend} margin={{ top: 8, right: 16, bottom: 0, left: -12 }}>
-                  <CartesianGrid stroke="#ecf1f3" vertical={false} />
-                  <XAxis dataKey="date" tickFormatter={(v) => shortDate.format(new Date(v))} tick={{ fontSize: 12, fill: "#84959b" }}
-                         tickLine={false} axisLine={{ stroke: "#dfe6e9" }} minTickGap={24} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "#84959b" }} tickLine={false} axisLine={false} />
+                  <CartesianGrid stroke={c.grid} vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={(v) => shortDate.format(new Date(v))} tick={{ fontSize: 12, fill: c.tick }}
+                         tickLine={false} axisLine={{ stroke: c.axis }} minTickGap={24} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: c.tick }} tickLine={false} axisLine={false} />
                   <Tooltip labelFormatter={(v) => shortDate.format(new Date(String(v)))}
-                           contentStyle={{ borderRadius: 10, border: "1px solid #dfe6e9", fontSize: 13 }} />
+                           contentStyle={{ borderRadius: 10, border: `1px solid ${c.axis}`, fontSize: 13, background: c.tipBg, color: c.tipText }} />
                   <Legend iconType="plainline" wrapperStyle={{ fontSize: 13 }} />
                   {SERIES.map((s) => (
-                    <Line key={s.key} type="linear" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2}
+                    <Line key={s.key} type="linear" dataKey={s.key} name={s.label} stroke={c[s.key]} strokeWidth={2}
                           dot={days <= 7 ? { r: 2.5 } : false} activeDot={{ r: 5 }} />
                   ))}
                 </LineChart>
@@ -150,16 +159,16 @@ export function Metrics() {
                 <dd>{pct(d.corrected_docs, d.reviewed_docs)} <small className="muted">{d.corrected_docs}/{d.reviewed_docs} voucher</small></dd>
               </dl>
               <BarList items={d.top_issues.map((i) => ({ label: ISSUE_LABEL[i.code], value: i.count, text: String(i.count) }))}
-                       empty="Belum ada kendala dalam periode ini." color="#E65C97" />
+                       empty="Belum ada kendala dalam periode ini." color={c.exception} />
             </section>
 
             <section className="card panel">
               <div className="panel-head"><div><h2>Nilai pembayaran</h2><p>Per klien dan 5 vendor terbesar</p></div></div>
               <BarList items={d.value_by_client.map((c) => ({ label: c.client, value: Number(c.value), text: compactRp(Number(c.value)) }))}
-                       empty="Belum ada voucher terbit." color="#4497A1" />
+                       empty="Belum ada voucher terbit." color={c.received} />
               <div className="section-title" style={{ marginTop: 4 }}>Vendor terbesar</div>
               <BarList items={d.top_vendors.map((v) => ({ label: v.vendor, value: Number(v.value), text: compactRp(Number(v.value)) }))}
-                       empty="–" color="#1D5B63" />
+                       empty="–" color={c.approved} />
             </section>
           </div>
         </>

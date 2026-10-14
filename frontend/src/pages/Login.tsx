@@ -4,6 +4,7 @@ import { BadgeCheck, LogIn, ScanText, ShieldCheck } from "lucide-react";
 import { homePath, useAuth } from "../auth";
 import { Alert } from "../components/ui";
 import { Clover, Logo } from "../components/Logo";
+import { ThemeToggle } from "../theme";
 
 // Akun hasil seed.py (data dummy PoC); password dari SEED_DEFAULT_PASSWORD di backend/.env
 const DEMO = [
@@ -56,6 +57,7 @@ export function Login() {
         <Clover className="clover-bg small" size={120} />
       </section>
       <section className="login-form">
+        <ThemeToggle className="btn ghost sm icon-btn theme-corner" />
         <form onSubmit={submit} className="login-card">
           <div>
             <h2>Selamat datang kembali</h2>

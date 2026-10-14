@@ -9,6 +9,7 @@ import { ROLE_LABEL } from "../format";
 import type { Role } from "../types";
 import { Assistant } from "./Assistant";
 import { Clover, Logo } from "./Logo";
+import { ThemeToggle } from "../theme";
 import { initials } from "./ui";
 
 interface NavItem { to: string; label: string; icon: typeof FileText; roles: Role[] }
@@ -110,7 +111,8 @@ export function Layout() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari Request ID atau vendor…" aria-label="Cari dokumen" />
             </form>
           )}
-          <div className="user" style={canSearch ? undefined : { marginLeft: "auto" }}>
+          <div style={canSearch ? undefined : { marginLeft: "auto" }}><ThemeToggle className="btn ghost sm icon-btn" /></div>
+          <div className="user">
             <div className="avatar" aria-hidden="true">{initials(user.full_name)}</div>
             <div>
               <b>{user.full_name}</b>
