@@ -148,7 +148,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Frontend (5 layar) | P0 | ✅ | React + Vite + TypeScript: login, Dashboard Antrean, Unggah & Pengajuan, Peninjauan split-screen, Voucher, Riwayat, layar System Admin, tombol chat Asisten |
 | Dashboard metrik | Owner | ✅ | KPI per status, tren harian (line chart), kecepatan proses, kualitas & kendala, nilai pembayaran; dibanding periode sebelumnya (`GET /dashboard/metrics`) |
 | Data referensi vendor | Owner | ✅ | PIC Klien/Intake mendaftarkan vendor (NPWP, alamat, kontak, rekening) per klien; nama dinormalisasi agar tidak dobel; dipakai sebagai dropdown di filter & formulir; dokumen tertaut otomatis |
-| Penanda tangan voucher | Owner | ✅ | PIC Klien mendaftarkan "Diajukan oleh" dan "Disetujui oleh" (default per klien, bisa diganti per dokumen); dicetak di voucher bersama kotak "Diverifikasi oleh AMIGA" |
+| Penanda tangan voucher | Owner | ✅ | PIC Klien mendaftarkan "Diajukan oleh" dan "Disetujui oleh" (default per klien, bisa diganti per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
 | Manajemen voucher | Owner | ✅ | Tabel voucher dengan filter perusahaan, vendor, status, tanggal; dikelompokkan dengan subtotal; unduh CSV |
 
 ### Rencana tahap berikutnya
@@ -339,6 +339,8 @@ bash scripts/run_e2e.sh --open
 Log server E2E ada di `frontend/cypress/logs/`.
 
 **Mengosongkan data transaksi** (mis. sebelum Demo Day): `.venv/bin/python scripts/reset_transactions.py --yes` dari folder `backend/`. Menghapus dokumen, ekstraksi, kendala, voucher, jejak audit, dan file PDF di `storage/`; akun, klien, vendor, dan penanda tangan tetap ada. Trigger jejak audit hanya dinonaktifkan di dalam transaksi skrip itu.
+
+pytest berjalan di database **`amiga_robot_admin_test`** (dibuat sekali dengan `bash scripts/create_db.sh amiga_robot_admin_test`), bukan database dev; migrasi dan seed dijalankan otomatis di awal test. Mengubah akun atau data di aplikasi tidak memengaruhi test.
 
 Test dokumen berjalan di dalam satu transaksi database yang di-rollback, sehingga database dev tidak terisi dokumen test (jejak audit yang append-only membuat dokumen yang sudah di-commit tidak bisa dihapus).
 

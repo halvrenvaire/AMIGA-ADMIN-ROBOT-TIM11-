@@ -112,7 +112,7 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         pdf.cell(0, 6, f": {_t(value)}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
 
-    _signature_blocks(pdf, doc, approver, approved_at)
+    _signature_blocks(pdf, doc)
     pdf.ln(1)
 
     pdf.set_draw_color(*TEAL)
@@ -123,40 +123,40 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
 
 
 SIGN_BLOCK_H = 46  # mm per kotak: judul, ruang tanda tangan, garis, tiga baris keterangan
-SIGN_PER_ROW = 3
+SIGN_MAX_PER_ROW = 3
 BLANK = "..............................................."
 
 
-def _sign_boxes(doc: Document, approver: User, approved_at: datetime) -> list[tuple[str, str, list[str], bool]]:
-    """(judul, petunjuk, baris keterangan, opsional). Urutan: diajukan → diverifikasi AMIGA → disetujui."""
+def _sign_boxes(doc: Document) -> list[tuple[str, str, list[str], bool]]:
+    """(judul, petunjuk, baris keterangan, opsional). Hanya pihak klien: diajukan → disetujui.
+    Persetujuan Finance Reviewer AMIGA tidak ditandatangani di voucher (keputusan owner); tercatat di jejak audit."""
     signers = getattr(doc, "signers", None) or []
     pengaju = [s for s in signers if s["kind"] == "PENGAJU"]
     penyetuju = [s for s in signers if s["kind"] == "PENYETUJU"]
     client_lines = lambda s: [_t(s["name"]), _t(s["position"]), f"Tanggal: {BLANK[:30]}"]  # noqa: E731
     boxes = [("Diajukan oleh", "Tanda tangan", client_lines(p), False) for p in pengaju] or [
         ("Diajukan oleh", "Tanda tangan", [f"Nama: {BLANK[:26]}", "Jabatan: PIC Klien", f"Tanggal: {BLANK[:24]}"], False)]
-    boxes.append(("Diverifikasi oleh AMIGA", "Tanda tangan & stempel",
-                  [_t(approver.full_name), "Finance Reviewer AMIGA", f"Tanggal: {approved_at:%d-%m-%Y %H:%M} WIB"], False))
     boxes += [("Disetujui oleh", "Tanda tangan", client_lines(p), False) for p in penyetuju] or [
         ("Disetujui oleh (opsional)", "Tanda tangan bila diperlukan klien",
          [f"Nama: {BLANK[:26]}", "Jabatan: Client Approver", f"Tanggal: {BLANK[:24]}"], True)]
     return boxes
 
 
-def _signature_blocks(pdf: FPDF, doc: Document, approver: User, approved_at: datetime) -> None:
+def _signature_blocks(pdf: FPDF, doc: Document) -> None:
     """Kotak tanda tangan agar voucher sah. Satu baris kotak tidak pernah terbelah halaman."""
-    boxes = _sign_boxes(doc, approver, approved_at)
-    gap = 6
-    width = (pdf.epw - gap * (SIGN_PER_ROW - 1)) / SIGN_PER_ROW
-    for row_start in range(0, len(boxes), SIGN_PER_ROW):
+    boxes = _sign_boxes(doc)
+    # 2 atau 4 kotak → 2 per baris; selain itu maks. 3 per baris
+    per_row = 2 if len(boxes) in (2, 4) else min(SIGN_MAX_PER_ROW, len(boxes))
+    gap = 8
+    width = (pdf.epw - gap * (per_row - 1)) / per_row
+    for row_start in range(0, len(boxes), per_row):
         if pdf.will_page_break(SIGN_BLOCK_H + 4):
             pdf.add_page()
         top = pdf.get_y()
-        for i, (title, hint, lines, optional) in enumerate(boxes[row_start:row_start + SIGN_PER_ROW]):
+        for i, (title, hint, lines, optional) in enumerate(boxes[row_start:row_start + per_row]):
             x = pdf.l_margin + i * (width + gap)
-            amiga = title.endswith("AMIGA")
             pdf.set_line_width(0.3)
-            pdf.set_draw_color(*(TEAL if amiga else (150, 160, 165)))
+            pdf.set_draw_color(150, 160, 165)
             if optional:
                 pdf.set_dash_pattern(dash=1.2, gap=1)
             pdf.rect(x, top, width, SIGN_BLOCK_H)
@@ -164,7 +164,7 @@ def _signature_blocks(pdf: FPDF, doc: Document, approver: User, approved_at: dat
 
             pdf.set_xy(x + 3, top + 2.5)
             pdf.set_font("Helvetica", "B", 8.5)
-            pdf.set_text_color(*(TEAL if amiga else (40, 50, 55)))
+            pdf.set_text_color(40, 50, 55)
             pdf.cell(width - 6, 5, title)
             pdf.set_xy(x + 3, top + 7)
             pdf.set_font("Helvetica", "", 6.5)

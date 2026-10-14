@@ -106,7 +106,8 @@ def test_upload_uses_default_signers_and_voucher_prints_them(extractor):
     approve(doc)
     pdf = api("pic.alpha@amiga.test").get(f"/documents/{doc['id']}/voucher").content
     text = re.sub(r"\s+", " ", " ".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages))
-    for expected in ("Diajukan oleh", "Rina Kartika", "Staf Keuangan", "Diverifikasi oleh AMIGA",
+    assert "Diverifikasi oleh AMIGA" not in text
+    for expected in ("Diajukan oleh", "Rina Kartika", "Staf Keuangan",
                      "Budi Santoso", "Direktur", "Sari Dewi", "Bendahara"):
         assert expected in text
     assert "Tidak Dipakai" not in text

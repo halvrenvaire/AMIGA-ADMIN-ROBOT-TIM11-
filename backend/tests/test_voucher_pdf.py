@@ -46,12 +46,12 @@ def test_signature_blocks_for_amiga_and_optional_client():
     text = re.sub(r"\s+", " ", reader.pages[0].extract_text())
     # Tanpa penanda tangan terdaftar: kotak tetap dicetak dengan isian kosong
     assert "Diajukan oleh" in text and "Jabatan: PIC Klien" in text
-    assert "Diverifikasi oleh AMIGA" in text and "Finance Reviewer AMIGA" in text and "Dewi" in text
+    assert "Diverifikasi oleh AMIGA" not in text  # keputusan owner: tidak ada kotak tanda tangan AMIGA
     assert "Disetujui oleh (opsional)" in text and "Jabatan: Client Approver" in text
 
 
 def test_signature_blocks_stay_together_on_last_page():
     reader = _render([_line(n, LONG) for n in range(1, 31)])
     last = re.sub(r"\s+", " ", reader.pages[-1].extract_text())
-    assert "Diverifikasi oleh AMIGA" in last and "Disetujui oleh (opsional)" in last
+    assert "Diajukan oleh" in last and "Disetujui oleh (opsional)" in last
     assert "Tanggal:" in last
