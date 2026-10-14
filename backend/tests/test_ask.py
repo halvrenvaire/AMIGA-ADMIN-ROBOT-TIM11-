@@ -10,6 +10,7 @@ from app.main import app
 from app.models import ConversationMessage, QAMemory
 from app.services.bedrock_client import BedrockError
 from app.services.vector_store import VectorStore
+from tests.auth_helpers import auth_header
 
 CHUNKS = [
     {"content": "QUEUED: invoice sudah diunggah dan menunggu dibaca AI.", "source": "sop.md",
@@ -62,7 +63,8 @@ def _store():
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    # Asisten hanya untuk peran internal; test memakai akun Finance Reviewer
+    with TestClient(app, headers=auth_header("reviewer1@amiga.test")) as c:
         app.state.bedrock = FakeBedrock()
         app.state.indexing = FakeIndexing(_store())
         yield c

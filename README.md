@@ -140,8 +140,8 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | F4. Peninjauan oleh Finance Reviewer | P0 | ⏳ | |
 | F5. Voucher PDF dan serah terima | P0 | ⏳ | Tabel `vouchers` sudah ada |
 | F6. Dashboard antrean | P1 | ⏳ | |
-| F7. Hak akses dan isolasi klien | P0 | 🔄 | Tabel pengguna, peran, penugasan klien, dan delegasi + data seed sudah ada. Login dan pengecekan di server belum |
-| F8. Jejak audit | P0 | 🔄 | Tabel `audit_logs` **append-only** sudah aktif: UPDATE, DELETE, dan TRUNCATE ditolak oleh database. Pencatatan dari setiap aksi belum |
+| F7. Hak akses dan isolasi klien | P0 | ✅ | Login JWT, peran ganda (tabel `user_roles`), cek peran di server, isolasi klien (ditolak + dicatat), API System Admin. Delegasi oleh PIC Klien dibangun bersama unggah (Tahap 4) |
+| F8. Jejak audit | P0 | 🔄 | Tabel `audit_logs` **append-only** sudah aktif: UPDATE, DELETE, dan TRUNCATE ditolak oleh database. Sudah mencatat aksi System Admin dan akses lintas klien yang ditolak. Pencatatan aksi dokumen menyusul di Tahap 5 |
 | Asisten AI (SOP) | Tambahan | ✅ | `POST /ask`: menjawab dari SOP dengan sumber dan riwayat percakapan |
 | Asisten AI Agent (memori tanya-jawab) | Tambahan | ✅ | `POST /ask-agent`: memakai tanya-jawab lama yang mirip sebagai referensi, dengan 👍/👎 |
 | Asisten AI Agent (data antrean) | Tambahan | ⏳ | Membaca data antrean sesuai hak akses pengguna (Tahap 6) |
@@ -151,7 +151,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 
 | Tahap | Isi |
 | --- | --- |
-| 3 | Login, peran ganda, isolasi klien, aturan SoD di server |
+| 3 ✅ | Login, peran ganda, isolasi klien, API System Admin (aturan SoD saat menyetujui dibangun di Tahap 5) |
 | 4 | F1–F3: unggah, ekstraksi AI, verifikasi (termasuk ekstraksi ulang dengan Request ID sama) |
 | 5 | F4, F5, F8: layar review, setujui/kembalikan, cek SoD + pengalihan otomatis, voucher PDF, pencatatan audit |
 | 6 | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
@@ -171,7 +171,7 @@ PoC dinyatakan siap demo bila **8 skenario** di bawah lulus semua dan target wak
 | 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | ⏳ |
 | 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | ⏳ |
 | 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | ⏳ |
-| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | ⏳ |
+| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | 🔄 aturan & test di level klien siap; endpoint dokumen di Tahap 4 |
 | 7 | Jejak audit | Reviewer mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | 🔄 tabel append-only siap |
 | 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | ⏳ |
 
@@ -215,12 +215,13 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
     │   ├── config.py           # Pengaturan dari .env
     │   ├── db.py, models.py    # Koneksi dan model database
     │   ├── security.py         # Hash password
-    │   ├── routers/            # health, ask (/ask), ask_agent (/ask-agent + feedback), reindex
+    │   ├── auth.py             # Token JWT, cek peran & isolasi klien (dependency FastAPI)
+    │   ├── routers/            # health, auth, clients, admin, ask, ask_agent, reindex, database
     │   ├── schemas/            # Model request/response
-    │   └── services/           # Bedrock, loader dokumen, chunker, FAISS, indexing, riwayat, memori tanya-jawab
+    │   └── services/           # Aturan akses, jejak audit, Bedrock, loader dokumen, chunker, FAISS, indexing, riwayat, memori tanya-jawab
     ├── alembic/                # Migrasi database
     ├── scripts/create_db.sh    # Membuat role & database PostgreSQL lokal
-    ├── seed.py                 # Data dummy: 2 klien, 7 pengguna
+    ├── seed.py                 # Data dummy: 2 klien, 8 pengguna
     ├── tests/                  # pytest
     ├── requirements.txt
     └── .env.example
@@ -274,6 +275,7 @@ Semua akun memakai password dari `SEED_DEFAULT_PASSWORD` di `.env`.
 | `intake@amiga.test` | Intake Support (delegasi PIC Alpha) | PT Klien Alpha |
 | `reviewer1@amiga.test` | Finance Reviewer | Alpha, Beta |
 | `reviewer2@amiga.test` | Finance Reviewer | Alpha, Beta |
+| `multi@amiga.test` | Intake Support + Finance Reviewer (peran ganda, untuk UAT 5) | PT Klien Alpha |
 | `lead@amiga.test` | Service Lead | Alpha, Beta |
 | `admin@amiga.test` | System Admin | — |
 
@@ -289,9 +291,20 @@ cd backend
 
 ## Endpoint API
 
+Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Authorization: Bearer <token>`. Di <http://localhost:8000/docs>, klik **Authorize** lalu isi email (kolom `username`) dan password.
+
 | Method | Endpoint | Fungsi |
 | --- | --- | --- |
 | GET | `/health` | Status server, database, dan index Asisten SOP |
+| POST | `/auth/login` | Login (form: `username` = email, `password`). Mengembalikan token dan profil |
+| GET | `/auth/me` | Profil, peran, dan klien yang ditugaskan |
+| GET | `/clients` | Klien yang ditugaskan kepada pengguna |
+| GET | `/clients/{id}` | Detail klien. Klien yang tidak ditugaskan ditolak (403) dan dicatat di jejak audit |
+| GET/POST | `/admin/users` | System Admin: daftar dan buat akun (peran + klien) |
+| PUT | `/admin/users/{id}/roles` | System Admin: ubah peran (kombinasi terlarang ditolak, tidak bisa untuk diri sendiri) |
+| PUT | `/admin/users/{id}/clients` | System Admin: ubah penugasan klien |
+| PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
+| GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
 | POST | `/ask` | Tanya Asisten SOP. Body: `{"question": "...", "session_id": "..."}` |
 | POST | `/ask-agent` | Seperti `/ask`, ditambah **memori tanya-jawab lintas sesi** (arahan mentor): pertanyaan lama yang mirip ikut dipakai sebagai referensi. Respons menambahkan `answer_id` dan `memory_refs` |
 | POST | `/ask-agent/feedback` | Beri 👍/👎 pada jawaban `/ask-agent`. Body: `{"answer_id": 17, "helpful": true}` |
@@ -302,11 +315,13 @@ cd backend
 | GET | `/db/conversations/{session_id}` | Seluruh pesan dalam satu sesi |
 | GET | `/db/users` | Daftar pengguna, peran, dan klien (tanpa password) |
 
-Endpoint `/db/*` hanya untuk **melihat** isi database selama pengembangan. Hash password dan vektor embedding tidak pernah ditampilkan. Setelah login tersedia, endpoint ini dibatasi untuk System Admin.
+Endpoint `/db/*` hanya untuk **melihat** isi database selama pengembangan dan hanya bisa dibuka **System Admin**. Hash password dan vektor embedding tidak pernah ditampilkan.
 
-`session_id` mengelompokkan riwayat percakapan. Gunakan nilai unik per orang/percakapan. Setelah login tersedia, nilai ini akan diatur otomatis per pengguna.
+`/ask` dan `/ask-agent` hanya untuk Finance Reviewer, Service Lead, dan System Admin.
 
-Endpoint invoice → voucher (unggah, ekstraksi, review, voucher, dashboard, admin) dibangun mulai Tahap 3.
+`session_id` mengelompokkan riwayat percakapan. Gunakan nilai unik per orang/percakapan.
+
+Endpoint invoice → voucher (unggah, ekstraksi, review, voucher, dashboard) dibangun mulai Tahap 4.
 
 ---
 
@@ -319,6 +334,9 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Data saat ekstraksi ulang | Field yang diisi/diperbaiki PIC **didahulukan** atas hasil AI | Mencegah putaran tanpa akhir: PDF tanpa nomor rekening akan selalu kosong bila AI menimpa isian PIC (UAT #8) |
 | Pengalihan otomatis SoD | Ke reviewer lain (bukan pengunggah) dengan **antrean tertunda paling sedikit** | Sekaligus membantu pemerataan beban |
 | Peran ganda | Diizinkan dengan kombinasi terlarang (lihat [Peran dan hak akses](#peran-dan-hak-akses)) | Tanpa ini, UAT #5 tidak mungkin terjadi karena Finance Reviewer tidak boleh mengunggah |
+| Isi token login | Token hanya berisi ID pengguna; peran dan status aktif dibaca ulang dari database di setiap request | Perubahan peran atau penonaktifan akun oleh System Admin langsung berlaku tanpa menunggu token kedaluwarsa |
+| Akses lintas klien | Ditolak dengan **403 "Akses ditolak"** dan dicatat sebagai `ACCESS_DENIED` di jejak audit | Sesuai UAT 6, dan percobaan akses bisa ditelusuri |
+| System Admin dan akunnya sendiri | Tidak bisa mengubah peran, penugasan klien, atau status akunnya sendiri | Perluasan aturan "admin tidak boleh memberi peran ke diri sendiri" |
 | `POSSIBLE_DUPLICATE` | Membuat status **EXCEPTION** | Sesuai PRD v2 dan target "0 duplikat lolos" |
 | Kembalikan ke PIC | Kode kendala `RETURNED_BY_REVIEWER` + alasan wajib | PRD v2 tidak memberi nama kode |
 | Jejak audit permanen | Ditegakkan dengan **trigger database**, bukan hanya di aplikasi | Bahkan akses langsung ke database tidak bisa mengubah atau menghapus catatan |

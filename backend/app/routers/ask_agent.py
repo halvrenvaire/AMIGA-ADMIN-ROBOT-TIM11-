@@ -6,16 +6,19 @@ referensi tambahan. Dokumen SOP tetap acuan utama.
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.auth import require_roles
 from app.config import settings
 from app.db import get_db
 from app.schemas.schemas import (
     AskAgentResponse, AskRequest, FeedbackRequest, FeedbackResponse, MemoryRef, SourceItem,
 )
+from app.services.access_rules import ASSISTANT_ROLES
 from app.services.bedrock_client import BedrockError
 from app.services.history_service import HistoryService
 from app.services.qa_memory_service import QAMemoryService, is_not_found_answer
 
-router = APIRouter(tags=["Asisten SOP Agent"])
+router = APIRouter(tags=["Asisten SOP Agent"],
+                   dependencies=[Depends(require_roles(*ASSISTANT_ROLES))])
 
 SYSTEM_PROMPT = """Kamu adalah asisten AMIGA Robot Admin untuk tim keuangan dan PIC klien.
 Jawab HANYA berdasarkan konteks dokumen di bawah. Jika jawabannya tidak ada di konteks,

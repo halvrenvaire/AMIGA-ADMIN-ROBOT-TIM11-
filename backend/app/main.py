@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from app.routers import ask, ask_agent, database, health, reindex
+from app.routers import admin, ask, ask_agent, auth, clients, database, health, reindex
 from app.services.bedrock_client import BedrockClient
 from app.services.indexing_service import IndexingService
 
@@ -47,6 +47,9 @@ def root():
 
 
 app.include_router(health.router)
+app.include_router(auth.router)
+app.include_router(clients.router)
+app.include_router(admin.router)
 app.include_router(ask.router)
 app.include_router(ask_agent.router)
 app.include_router(reindex.router)

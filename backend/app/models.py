@@ -58,13 +58,31 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(200), unique=True)
     full_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(200))
-    role: Mapped[Role] = mapped_column(Enum(Role, name="user_role"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     assignments: Mapped[list["UserClientAssignment"]] = relationship(
         back_populates="user", foreign_keys="UserClientAssignment.user_id"
     )
+    role_links: Mapped[list["UserRole"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    @property
+    def roles(self) -> set[Role]:
+        return {link.role for link in self.role_links}
+
+
+class UserRole(Base):
+    """Peran pengguna. Satu pengguna boleh punya lebih dari satu peran internal."""
+    __tablename__ = "user_roles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[Role] = mapped_column(Enum(Role, name="user_role"), primary_key=True)
+
+    user: Mapped[User] = relationship(back_populates="role_links")
 
 
 class UserClientAssignment(Base):

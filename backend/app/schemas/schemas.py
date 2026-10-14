@@ -1,6 +1,9 @@
+import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models import Role
 
 
 class AskRequest(BaseModel):
@@ -101,6 +104,59 @@ class MessageItem(BaseModel):
 class UserItem(BaseModel):
     email: str
     full_name: str
-    role: str
+    roles: list[str]
     is_active: bool
     clients: list[str]
+
+
+# --- Login dan hak akses (F7) ---
+
+class ClientRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
+class MeResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    full_name: str
+    roles: list[Role]
+    clients: list[ClientRef]
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: MeResponse
+
+
+# --- System Admin: kelola akun, peran, penugasan klien (FR-7.1) ---
+
+class AdminUser(MeResponse):
+    is_active: bool
+
+
+class UserCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=200, pattern=r"^[^@\s]+@[^@\s]+$")
+    full_name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+    roles: list[Role] = Field(min_length=1)
+    client_ids: list[uuid.UUID] = []
+
+
+class RolesUpdate(BaseModel):
+    roles: list[Role] = Field(min_length=1)
+
+
+class ClientsUpdate(BaseModel):
+    client_ids: list[uuid.UUID]
+
+
+class ActiveUpdate(BaseModel):
+    is_active: bool
+
+
+class ClientCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)

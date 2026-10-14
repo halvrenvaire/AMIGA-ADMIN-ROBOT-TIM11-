@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from app.auth import require_roles
 from app.config import settings
 from app.db import get_db
 from app.schemas.schemas import AskRequest, AskResponse, SourceItem
+from app.services.access_rules import ASSISTANT_ROLES
 from app.services.bedrock_client import BedrockError
 from app.services.history_service import HistoryService
 
-router = APIRouter(tags=["Asisten SOP"])
+router = APIRouter(tags=["Asisten SOP"], dependencies=[Depends(require_roles(*ASSISTANT_ROLES))])
 
 SYSTEM_PROMPT = """Kamu adalah asisten AMIGA Robot Admin untuk tim keuangan dan PIC klien.
 Jawab HANYA berdasarkan konteks dokumen di bawah. Jika jawabannya tidak ada di konteks,

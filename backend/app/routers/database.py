@@ -1,19 +1,21 @@
 """Melihat isi database dari /docs (hanya baca, untuk pengembangan).
 
 Data sensitif tidak ditampilkan: hash password dan vektor embedding.
-Setelah login tersedia (Tahap 3), endpoint ini dibatasi untuk System Admin.
+Hanya System Admin yang bisa membuka endpoint ini.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
 
+from app.auth import require_roles
 from app.db import get_db
-from app.models import ConversationMessage, QAMemory, User
+from app.models import ConversationMessage, QAMemory, Role, User
 from app.schemas.schemas import (
     MessageItem, QAMemoryItem, SessionSummary, TableCount, UserItem,
 )
 
-router = APIRouter(prefix="/db", tags=["Lihat Database"])
+router = APIRouter(prefix="/db", tags=["Lihat Database"],
+                   dependencies=[Depends(require_roles(Role.SYSTEM_ADMIN))])
 
 
 @router.get("/summary", response_model=list[TableCount])
@@ -77,7 +79,8 @@ def users(db: Session = Depends(get_db)):
     rows = db.scalars(select(User).order_by(User.email)).all()
     return [
         UserItem(
-            email=u.email, full_name=u.full_name, role=u.role.value, is_active=u.is_active,
+            email=u.email, full_name=u.full_name, roles=sorted(r.value for r in u.roles),
+            is_active=u.is_active,
             clients=sorted(a.client.name for a in u.assignments),
         )
         for u in rows
