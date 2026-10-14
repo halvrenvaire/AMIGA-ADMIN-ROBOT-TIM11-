@@ -2,7 +2,7 @@
 import io
 import secrets
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import InvalidOperation
 from typing import Annotated, Literal
 
@@ -12,14 +12,14 @@ from fastapi import (
 from fastapi.responses import Response
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import ensure_client_access, get_current_user, require_roles
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    DocStatus, Document, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
+    DocStatus, Document, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
     ClientRef, DocumentDetail, DocumentSummary, ExtractionOut, FixRequest, IssueItem, VoucherOut,
@@ -174,16 +174,39 @@ async def upload_document(
 def list_documents(
     status_filter: Annotated[DocStatus | None, Query(alias="status")] = None,
     client_id: uuid.UUID | None = None,
+    reviewer_id: uuid.UUID | None = None,
+    problem: Annotated[bool, Query(description="Hanya dokumen bermasalah (EXCEPTION)")] = False,
+    due_within_days: Annotated[int | None, Query(ge=0, le=365, description="Tenggat <= N hari lagi, belum selesai")] = None,
+    q: Annotated[str | None, Query(max_length=100, description="Cari Request ID atau vendor")] = None,
+    sort: Literal["terbaru", "tenggat"] = "terbaru",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Dokumen milik klien yang ditugaskan kepada Anda, terbaru di atas."""
+    """Dokumen milik klien yang ditugaskan kepada Anda, dengan filter klien, status, reviewer,
+    tenggat, dan dokumen bermasalah (FR-6.2)."""
     client_ids = accessible_client_ids(db, user)
     if client_id is not None:
         client_ids &= {client_id}
-    query = select(Document).where(Document.client_id.in_(client_ids)).order_by(Document.created_at.desc())
+    query = select(Document).where(Document.client_id.in_(client_ids))
     if status_filter is not None:
         query = query.where(Document.status == status_filter)
+    if problem:
+        query = query.where(Document.status == DocStatus.EXCEPTION)
+    if reviewer_id is not None:
+        query = query.where(Document.assigned_reviewer_id == reviewer_id)
+    if due_within_days is not None:
+        query = query.where(
+            Document.due_date <= date.today() + timedelta(days=due_within_days),
+            Document.status.not_in((DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT)),
+        )
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.outerjoin(Extraction, Extraction.document_id == Document.id).where(
+            or_(Document.request_id.ilike(pattern), Extraction.vendor_name.ilike(pattern)))
+    if sort == "tenggat":
+        query = query.order_by(Document.due_date.is_(None), Document.due_date, Document.created_at)
+    else:
+        query = query.order_by(Document.created_at.desc())
     docs = db.scalars(query).all()
     names = _names(db, set().union(*(_people(d) for d in docs)) if docs else set())
     return [DocumentSummary(**_summary(d, names)) for d in docs]

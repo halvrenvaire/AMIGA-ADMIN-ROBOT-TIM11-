@@ -139,12 +139,12 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | F3. Verifikasi otomatis oleh sistem | P0 | ✅ | Kelengkapan, angka, duplikasi (dinormalisasi). Kode + alasan berbahasa sederhana. Perbaikan PIC didahulukan atas hasil AI |
 | F4. Peninjauan oleh Finance Reviewer | P0 | ✅ | Koreksi data + verifikasi ulang, Setujui (kendala terbuka menahan persetujuan), Kembalikan ke PIC dengan alasan, cek SoD + pengalihan otomatis, tandai bukan duplikat |
 | F5. Voucher PDF dan serah terima | P0 | ✅ | Voucher PDF (fpdf2) < 1 detik dengan teks batas otorisasi tercetak; unduhan pihak klien → SENT_TO_CLIENT |
-| F6. Dashboard antrean | P1 | ⏳ | |
+| F6. Dashboard antrean | P1 | ✅ | `GET /dashboard/summary` (per status, bermasalah, tenggat, beban reviewer), filter di `GET /documents`, pengalihan oleh Service Lead |
 | F7. Hak akses dan isolasi klien | P0 | ✅ | Login JWT, peran ganda (tabel `user_roles`), cek peran di server, isolasi klien (ditolak + dicatat), API System Admin. Delegasi oleh PIC Klien dibangun bersama unggah (Tahap 4) |
 | F8. Jejak audit | P0 | ✅ | `audit_logs` **append-only** (trigger database). Mencatat unggah, perubahan status, ekstraksi, perbaikan PIC, koreksi reviewer (nilai awal → baru), persetujuan, pengembalian, penolakan SoD, pengalihan, voucher, unduhan, aksi admin, akses ditolak. `GET /documents/{id}/history` |
 | Asisten AI (SOP) | Tambahan | ✅ | `POST /ask`: menjawab dari SOP dengan sumber dan riwayat percakapan |
 | Asisten AI Agent (memori tanya-jawab) | Tambahan | ✅ | `POST /ask-agent`: memakai tanya-jawab lama yang mirip sebagai referensi, dengan 👍/👎 |
-| Asisten AI Agent (data antrean) | Tambahan | ⏳ | Membaca data antrean sesuai hak akses pengguna (Tahap 6) |
+| Asisten AI Agent (data antrean) | Tambahan | ✅ | `/ask-agent` menjawab pertanyaan antrean dari data sistem, hanya klien yang ditugaskan; System Admin SOP saja |
 | Frontend (5 layar) | P0 | ⏳ | React + Vite |
 
 ### Rencana tahap berikutnya
@@ -154,7 +154,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | 3 ✅ | Login, peran ganda, isolasi klien, API System Admin (aturan SoD saat menyetujui dibangun di Tahap 5) |
 | 4 ✅ | F1–F3: unggah, ekstraksi AI, verifikasi (termasuk ekstraksi ulang dengan Request ID sama) |
 | 5 ✅ | F4, F5, F8: layar review, setujui/kembalikan, cek SoD + pengalihan otomatis, voucher PDF, pencatatan audit |
-| 6 | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
+| 6 ✅ | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
 | 7 | Frontend 5 layar + tombol chat asisten |
 | 8 | UAT 8 skenario, lalu Demo Day |
 
@@ -322,7 +322,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
 | POST | `/documents` | PIC Klien / Intake Support: unggah invoice PDF (form: `client_id`, `request_type`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `file`). Mengembalikan Request ID dan status QUEUED |
-| GET | `/documents` | Dokumen milik klien yang ditugaskan; filter `status`, `client_id` |
+| GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `sort=terbaru` atau `tenggat` |
 | GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
 | GET | `/documents/{id}/file` | PDF asli |
 | POST | `/documents/{id}/fix` | PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}` |
@@ -332,9 +332,11 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | POST | `/documents/{id}/return` | Finance Reviewer: **Kembalikan ke PIC**. Body: `{"reason": "..."}` (wajib) |
 | POST | `/documents/{id}/dismiss-duplicate` | Finance Reviewer: tandai bukan duplikat (alasan wajib) → READY_FOR_REVIEW |
 | GET | `/documents/{id}/voucher` | Pratinjau voucher PDF. `?download=true` = unduh; oleh PIC Klien (atau Intake Support pengunggah) → SENT_TO_CLIENT |
+| GET | `/dashboard/summary` | Service Lead / Finance Reviewer: jumlah per status, bermasalah, tenggat dekat & lewat, beban per reviewer |
+| POST | `/documents/{id}/reassign` | Service Lead: alihkan ke reviewer lain (status tetap). Body: `{"reviewer_id": "...", "reason": "..."}` |
 | GET | `/documents/{id}/history` | Riwayat & jejak audit dokumen (System Admin boleh tanpa penugasan klien) |
 | POST | `/ask` | Tanya Asisten SOP. Body: `{"question": "...", "session_id": "..."}` |
-| POST | `/ask-agent` | Seperti `/ask`, ditambah **memori tanya-jawab lintas sesi** (arahan mentor): pertanyaan lama yang mirip ikut dipakai sebagai referensi. Respons menambahkan `answer_id` dan `memory_refs` |
+| POST | `/ask-agent` | Seperti `/ask`, ditambah **memori tanya-jawab lintas sesi** (arahan mentor): pertanyaan lama yang mirip ikut dipakai sebagai referensi. Pertanyaan tentang antrean dijawab dari data sistem sesuai hak akses (`used_queue_data`). Respons menambahkan `answer_id` dan `memory_refs` |
 | POST | `/ask-agent/feedback` | Beri 👍/👎 pada jawaban `/ask-agent`. Body: `{"answer_id": 17, "helpful": true}` |
 | POST | `/reindex` | Bangun ulang index Asisten SOP setelah SOP/dokumen berubah. Butuh header `X-API-Key` (`REINDEX_API_KEY`) |
 | GET | `/db/summary` | Jumlah baris di setiap tabel database |
@@ -374,6 +376,9 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Duplikat yang ternyata bukan duplikat | Finance Reviewer (bukan pengunggah) bisa **menandai bukan duplikat** dengan alasan wajib → READY_FOR_REVIEW | Tanpa ini dokumen tertahan di EXCEPTION selamanya; PRD belum mengatur (pertanyaan terbuka 2) |
 | Serah terima voucher | Status jadi SENT_TO_CLIENT hanya bila diunduh **PIC Klien** atau **Intake Support yang mengunggah dokumen itu**. Pratinjau dan unduhan reviewer tidak mengubah status | Pengguna peran ganda yang mengunduh sebagai reviewer tidak boleh dianggap menyerahkan ke klien |
 | Nomor voucher | `VCH/YYYY/MM/NNNN`, urut per bulan (WIB). Teks batas otorisasi bisa diganti lewat `VOUCHER_AUTHORIZATION_TEXT` di `.env` | **Sementara**, menunggu format resmi dari tim Keuangan (pertanyaan terbuka 4) |
+| Beban berlebih | Reviewer dengan **> 5** dokumen READY_FOR_REVIEW ditandai berlebih; tenggat "dekat" = ≤ 2 hari. Bisa diubah lewat `REVIEWER_OVERLOAD_THRESHOLD` dan `DUE_SOON_DAYS` | **Sementara**, menunggu batas resmi (pertanyaan terbuka 3) |
+| Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif klien itu yang bukan pengunggah | Pengalihan tidak boleh membuka celah SoD |
+| Asisten dan data antrean | `/ask-agent` memakai data antrean hanya bila pertanyaannya tentang antrean (mis. "dokumen apa yang tenggatnya dekat?"). Data dibangun di server dari klien yang ditugaskan; jawaban seperti ini **tidak disimpan** ke memori | Data cepat berubah, jadi tidak boleh menjadi referensi jawaban lain; hak akses sama dengan layar biasa |
 | `POSSIBLE_DUPLICATE` | Membuat status **EXCEPTION** | Sesuai PRD v2 dan target "0 duplikat lolos" |
 | Kembalikan ke PIC | Kode kendala `RETURNED_BY_REVIEWER` + alasan wajib | PRD v2 tidak memberi nama kode |
 | Jejak audit permanen | Ditegakkan dengan **trigger database**, bukan hanya di aplikasi | Bahkan akses langsung ke database tidak bisa mengubah atau menghapus catatan |
@@ -389,7 +394,7 @@ Perlu dijawab klien / tim Keuangan AMIGA (PRD v2 §8):
 
 1. Apakah kode `CALCULATION_DISCREPANCY` disetujui dan ditambahkan ke glosarium BRD?
 2. Apakah `POSSIBLE_DUPLICATE` membuat status EXCEPTION (seperti PRD v2) atau hanya peringatan bagi reviewer? (Sementara: EXCEPTION, dan reviewer bisa menandai bukan duplikat dengan alasan.)
-3. Batas "beban terlalu banyak" bagi Service Lead, misalnya lebih dari N dokumen tertunda per reviewer.
+3. Batas "beban terlalu banyak" bagi Service Lead, misalnya lebih dari N dokumen tertunda per reviewer. (Sementara: > 5.)
 4. Format nomor voucher dan teks batas otorisasi. (Sementara: `VCH/YYYY/MM/NNNN` dan teks di `app/config.py`.)
 5. Layanan AI/OCR yang dipakai dan kebijakan datanya (no-training).
 6. Tanggal Demo Day.

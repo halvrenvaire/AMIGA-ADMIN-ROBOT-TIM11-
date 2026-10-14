@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     max_pdf_pages: int = 5
     max_upload_mb: int = 10
 
+    # Dashboard antrean: reviewer dengan dokumen READY_FOR_REVIEW lebih dari ini ditandai
+    # "beban berlebih" (batas resmi masih pertanyaan terbuka PRD); tenggat "dekat" = <= N hari
+    reviewer_overload_threshold: int = 5
+    due_soon_days: int = 2
+
     # Voucher (format nomor dan teks batas otorisasi masih menunggu tim Keuangan AMIGA)
     voucher_prefix: str = "VCH"
     voucher_authorization_text: str = (

@@ -39,6 +39,8 @@ class AskAgentResponse(AskResponse):
     # Alasan jawaban disimpan / tidak disimpan ke memori
     memory_note: str
     memory_refs: list[MemoryRef]
+    # True bila jawaban memakai data antrean (sesuai hak akses pengguna)
+    used_queue_data: bool = False
 
 
 class FeedbackRequest(BaseModel):
@@ -274,3 +276,29 @@ class AuditItem(BaseModel):
     old_value: str | None
     new_value: str | None
     note: str | None
+
+
+# --- Dashboard antrean (F6, Layar 01) ---
+
+class ReviewerLoadOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    pending: int
+    overloaded: bool
+
+
+class DashboardSummary(BaseModel):
+    counts: dict[str, int]
+    problem: int
+    due_soon: int
+    overdue: int
+    reviewers: list[ReviewerLoadOut]
+    overload_threshold: int
+    due_soon_days: int
+
+
+class ReassignRequest(BaseModel):
+    reviewer_id: uuid.UUID
+    reason: str | None = Field(None, max_length=1000)
