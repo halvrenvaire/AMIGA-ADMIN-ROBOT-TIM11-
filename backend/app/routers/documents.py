@@ -21,7 +21,9 @@ from app.db import get_db
 from app.models import (
     DocStatus, Document, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
 )
-from app.schemas.schemas import ClientRef, DocumentDetail, DocumentSummary, ExtractionOut, FixRequest, IssueItem
+from app.schemas.schemas import (
+    ClientRef, DocumentDetail, DocumentSummary, ExtractionOut, FixRequest, IssueItem, VoucherOut,
+)
 from app.services import audit_service, storage
 from app.services.access_rules import accessible_client_ids
 from app.services.document_processing import PIC_FIELDS, parse_pic_value, process_document, set_status
@@ -74,6 +76,7 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         issues=[IssueItem.model_validate(i) for i in open_issues],
         extraction=ExtractionOut.model_validate(doc.extraction) if doc.extraction else None,
         pic_overrides=doc.pic_overrides or {},
+        voucher=VoucherOut.model_validate(doc.voucher) if doc.voucher else None,
     )
 
 

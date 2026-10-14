@@ -219,15 +219,58 @@ class ExtractionOut(BaseModel):
     duration_ms: int | None
 
 
+class VoucherOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    voucher_no: str
+    generated_at: datetime
+
+
 class DocumentDetail(DocumentSummary):
     # Kendala yang masih terbuka: kode + alasan berbahasa sederhana (FR-3.3)
     issues: list[IssueItem]
     extraction: ExtractionOut | None
     # Field yang sudah diisi/diperbaiki PIC (didahulukan atas hasil AI)
     pic_overrides: dict[str, str]
+    voucher: VoucherOut | None
 
 
 class FixRequest(BaseModel):
     """Perbaikan oleh PIC Klien / Intake Support saat EXCEPTION (FR-3.4)."""
     fields: dict[str, str] = {}
     note: str | None = Field(None, max_length=1000)
+
+
+# --- Peninjauan Finance Reviewer, voucher, jejak audit (F4, F5, F8) ---
+
+class LineItemIn(BaseModel):
+    description: str | None = Field(None, max_length=1000)
+    qty: Decimal | None = None
+    unit_price: Decimal | None = None
+    subtotal: Decimal | None = None
+
+
+class ReviewUpdate(BaseModel):
+    """Koreksi data hasil ekstraksi oleh Finance Reviewer. Field yang tidak dikirim tidak berubah;
+    `line_items` bila dikirim menggantikan seluruh rincian."""
+    fields: dict[str, str | None] = {}
+    line_items: list[LineItemIn] | None = None
+
+
+class ReasonRequest(BaseModel):
+    reason: str = Field(min_length=5, max_length=1000)
+
+
+class AuditItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    actor_label: str
+    action: str
+    status_before: str | None
+    status_after: str | None
+    field: str | None
+    old_value: str | None
+    new_value: str | None
+    note: str | None

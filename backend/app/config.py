@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     max_pdf_pages: int = 5
     max_upload_mb: int = 10
 
+    # Voucher (format nomor dan teks batas otorisasi masih menunggu tim Keuangan AMIGA)
+    voucher_prefix: str = "VCH"
+    voucher_authorization_text: str = (
+        "BATAS OTORISASI: Voucher ini disusun dan ditinjau oleh AMIGA berdasarkan invoice vendor. "
+        "Voucher ini BUKAN persetujuan pembayaran. Keputusan dan pelaksanaan pembayaran sepenuhnya "
+        "menjadi wewenang Client Approver."
+    )
+
     # RAG /ask
     # Titan Text sudah end of life, jadi LLM memakai Amazon Nova (tersedia di ap-southeast-1).
     llm_model: str = "apac.amazon.nova-lite-v1:0"

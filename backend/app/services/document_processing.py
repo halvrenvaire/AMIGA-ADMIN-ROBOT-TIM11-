@@ -58,8 +58,6 @@ def _save_extraction(db, doc: Document, data: ExtractedInvoice, duration_ms: int
     for name, value in (doc.pic_overrides or {}).items():
         if name in PIC_FIELDS:
             setattr(extraction, name, parse_pic_value(name, value))
-    extraction.vendor_norm = normalize(extraction.vendor_name)
-    extraction.invoice_no_norm = normalize(extraction.invoice_no)
     extraction.raw_json = data.raw
     extraction.extracted_at = datetime.now(timezone.utc)
     extraction.duration_ms = duration_ms
@@ -90,6 +88,39 @@ def _duplicate_of(db, doc: Document, extraction: Extraction) -> str | None:
         .order_by(Document.created_at)
         .limit(1)
     )
+
+
+def uploader_ids(doc: Document) -> set[uuid.UUID]:
+    """Pengunggah dan PIC yang diwakili: keduanya dianggap "pengunggah" untuk aturan SoD."""
+    return {doc.uploaded_by} | ({doc.on_behalf_of} if doc.on_behalf_of else set())
+
+
+def run_verification(db, doc: Document) -> list:
+    """Verifikasi sistem atas data ekstraksi saat ini; kendala lama diganti yang baru."""
+    extraction = doc.extraction
+    extraction.vendor_norm = normalize(extraction.vendor_name)
+    extraction.invoice_no_norm = normalize(extraction.invoice_no)
+    invoice = InvoiceData(
+        vendor_name=extraction.vendor_name, invoice_no=extraction.invoice_no,
+        invoice_date=extraction.invoice_date, total=extraction.total,
+        bank_name=extraction.bank_name, account_no=extraction.account_no,
+        account_name=extraction.account_name,
+        subtotals=[line.subtotal for line in extraction.line_items],
+    )
+    issues = verify(invoice, _duplicate_of(db, doc, extraction))
+    _resolve_open_issues(db, doc)
+    for issue in issues:
+        db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field, message=issue.message))
+    db.flush()
+    return issues
+
+
+def send_to_review(db, doc: Document, note: str) -> None:
+    """READY_FOR_REVIEW dan tugaskan reviewer dengan antrean paling sedikit, bukan pengunggah."""
+    reviewer = pick_reviewer(db, doc.client_id, uploader_ids(doc))
+    doc.assigned_reviewer_id = reviewer.id if reviewer else None
+    set_status(db, doc, DocStatus.READY_FOR_REVIEW,
+               f"{note}; reviewer: {reviewer.email if reviewer else 'belum ada'}")
 
 
 def _resolve_open_issues(db, doc: Document) -> None:
@@ -125,27 +156,10 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
         audit_service.record(db, None, "EXTRACTED", document_id=doc.id, client_id=doc.client_id,
                              note=f"AI membaca {len(extraction.line_items)} baris dalam {duration_ms} ms")
 
-        invoice = InvoiceData(
-            vendor_name=extraction.vendor_name, invoice_no=extraction.invoice_no,
-            invoice_date=extraction.invoice_date, total=extraction.total,
-            bank_name=extraction.bank_name, account_no=extraction.account_no,
-            account_name=extraction.account_name,
-            subtotals=[line.subtotal for line in extraction.line_items],
-        )
-        issues = verify(invoice, _duplicate_of(db, doc, extraction))
-
-        _resolve_open_issues(db, doc)
-        for issue in issues:
-            db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field,
-                                   message=issue.message))
+        issues = run_verification(db, doc)
         if issues:
             codes = ", ".join(sorted({i.code.value for i in issues}))
             set_status(db, doc, DocStatus.EXCEPTION, f"Verifikasi sistem: {codes}")
         else:
-            # Pengunggah dan klien yang diwakili tidak ditugaskan meninjau dokumennya sendiri
-            exclude = {doc.uploaded_by} | ({doc.on_behalf_of} if doc.on_behalf_of else set())
-            reviewer = pick_reviewer(db, doc.client_id, exclude)
-            doc.assigned_reviewer_id = reviewer.id if reviewer else None
-            set_status(db, doc, DocStatus.READY_FOR_REVIEW,
-                       f"Lolos verifikasi; reviewer: {reviewer.email if reviewer else 'belum ada'}")
+            send_to_review(db, doc, "Lolos verifikasi")
         db.commit()
