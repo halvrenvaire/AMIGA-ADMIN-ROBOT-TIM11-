@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { LogIn } from "lucide-react";
 import { homePath, useAuth } from "../auth";
 import { Alert } from "../components/ui";
+import { Clover, Logo } from "../components/Logo";
 
 // Akun hasil seed.py (data dummy PoC); password dari SEED_DEFAULT_PASSWORD di backend/.env
 const DEMO = [
@@ -38,16 +39,15 @@ export function Login() {
   return (
     <div className="login">
       <section className="login-art">
-        <div className="brand" style={{ padding: 0 }}>
-          <div className="logo" style={{ background: "#fff", color: "var(--navy)" }}>A</div>
-          <div><b>AMIGA</b><span style={{ color: "#c7d5f6" }}>Robot Admin</span></div>
-        </div>
+        <Logo height={40} light />
         <div>
-          <h1>Kami Tangani Back Office Anda Seperti Bagian dari Tim.</h1>
-          <p>Invoice vendor menjadi voucher pembayaran resmi dalam hitungan detik. AI membaca invoice, sistem memverifikasi,
-            Finance Reviewer menyetujui.</p>
+          <span className="eyebrow">Robot Admin · Back Office as A Service</span>
+          <h1>We Run Your Ops, So You Can Run the Business</h1>
+          <p>Invoice vendor menjadi voucher pembayaran resmi dalam hitungan detik. AI membaca invoice, sistem
+            memverifikasi, dan Finance Reviewer menyetujui.</p>
         </div>
-        <small style={{ color: "#c7d5f6" }}>PoC MAIN Hackathon 2026 · Kelompok 11</small>
+        <small style={{ color: "#e6f3f5" }}>PoC MAIN Hackathon 2026 · Kelompok 11</small>
+        <Clover className="clover-bg" size={300} />
       </section>
       <section className="login-form">
         <form onSubmit={submit}>

@@ -326,7 +326,7 @@ Cypress menjalankan 8 skenario UAT lewat UI dengan **ekstraksi Nova sungguhan**,
 # Sekali saja: buat database test (meminta password sudo)
 cd backend && bash scripts/create_db.sh amiga_robot_admin_test && cd ..
 
-# Jalankan E2E (backend :8001 + frontend :5174 dinyalakan dan dimatikan otomatis, sekitar 30 detik)
+# Jalankan E2E (backend :8001 + frontend :5180 dinyalakan dan dimatikan otomatis, sekitar 30 detik)
 bash scripts/run_e2e.sh
 # Mode interaktif Cypress
 bash scripts/run_e2e.sh --open

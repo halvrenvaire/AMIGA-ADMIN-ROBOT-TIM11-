@@ -64,7 +64,7 @@ export function Assistant() {
       {open && (
         <section className="chat" aria-label="Asisten AMIGA">
           <div className="chat-head">
-            <Bot size={18} color="var(--navy)" />
+            <Bot size={18} color="var(--primary)" />
             <b>Asisten AMIGA</b>
             <button className="btn ghost sm" title="Percakapan baru" onClick={() => { setMessages([]); setSession(newSession()); }}>
               <RotateCcw />

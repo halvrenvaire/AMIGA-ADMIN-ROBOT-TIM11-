@@ -15,7 +15,8 @@ from app.models import Document, User, Voucher
 from app.services import storage
 from app.services.verification import rupiah
 
-NAVY = (30, 58, 138)
+TEAL = (54, 127, 137)  # #367F89, teal brand amiga yang cukup kontras untuk teks putih
+PINK = (255, 128, 180)  # #FF80B4
 WIB = ZoneInfo("Asia/Jakarta")
 
 
@@ -43,15 +44,17 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.set_auto_page_break(True, margin=18)
     pdf.add_page()
 
-    pdf.set_fill_color(*NAVY)
+    pdf.set_fill_color(*TEAL)
     pdf.rect(0, 0, 210, 26, style="F")
+    pdf.set_fill_color(*PINK)
+    pdf.rect(0, 26, 210, 1.2, style="F")
     pdf.set_text_color(255, 255, 255)
     pdf.set_xy(12, 7)
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 7, "AMIGA Robot Admin", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, "amiga  Robot Admin", new_x="LMARGIN", new_y="NEXT")
     pdf.set_x(12)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, "Voucher Pembayaran Vendor")
+    pdf.cell(0, 5, "Voucher Pembayaran Vendor  |  Back Office as A Service")
     pdf.set_text_color(15, 23, 42)
     pdf.set_y(32)
 
@@ -72,7 +75,7 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
 
     widths = (10, 84, 18, 38, 40)
     pdf.set_font("Helvetica", "B", 9)
-    pdf.set_fill_color(234, 240, 254)
+    pdf.set_fill_color(235, 245, 246)
     for w, h in zip(widths, ("No", "Uraian", "Qty", "Harga Satuan", "Subtotal")):
         pdf.cell(w, 7, h, border=1, fill=True, align="C")
     pdf.ln()
@@ -103,7 +106,7 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.cell(0, 5, f"Waktu persetujuan: {approved_at:%d-%m-%Y %H:%M} WIB", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
 
-    pdf.set_draw_color(*NAVY)
+    pdf.set_draw_color(*TEAL)
     pdf.set_fill_color(254, 243, 227)
     pdf.set_font("Helvetica", "B", 9)
     pdf.multi_cell(0, 5, _t(settings.voucher_authorization_text), border=1, fill=True, padding=3)

@@ -30,12 +30,12 @@ export function DocumentTable({ docs, showReviewer = true, action }: {
           {docs.map((d) => (
             <tr key={d.id}>
               <td><Link to={`/dokumen/${d.id}`} className="mono">{d.request_id}</Link></td>
-              <td>{d.client.name}</td>
+              <td className="wrap">{d.client.name}</td>
               <td className="vendor">{d.vendor_name ?? <span className="muted">-</span>}</td>
               <td className="right num">{rupiah(d.total)}</td>
               <td><StatusBadge status={d.status} /></td>
               <td><Due due={d.due_date} done={d.status === "AMIGA_REVIEWED" || d.status === "SENT_TO_CLIENT"} /></td>
-              {showReviewer && <td>{d.assigned_reviewer ?? <span className="muted">-</span>}</td>}
+              {showReviewer && <td className="wrap">{d.assigned_reviewer ?? <span className="muted">-</span>}</td>}
               <td className="right">{action ? action(d) : <Link className="btn sm" to={`/dokumen/${d.id}`}>Buka</Link>}</td>
             </tr>
           ))}

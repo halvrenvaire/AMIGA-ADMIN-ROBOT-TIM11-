@@ -7,6 +7,7 @@ import { useAuth } from "../auth";
 import { ROLE_LABEL } from "../format";
 import type { Role } from "../types";
 import { Assistant } from "./Assistant";
+import { Logo } from "./Logo";
 import { initials } from "./ui";
 
 interface NavItem { to: string; label: string; icon: typeof FileText; roles: Role[] }
@@ -53,8 +54,8 @@ export function Layout() {
     <div className="shell">
       <aside className="side" aria-label="Navigasi utama">
         <div className="brand">
-          <div className="logo">A</div>
-          <div><b>AMIGA</b><span>Robot Admin</span></div>
+          <Logo height={30} />
+          <span className="brand-sub">Robot Admin</span>
         </div>
         {visible(NAV).length > 0 && (
           <nav>
@@ -77,8 +78,8 @@ export function Layout() {
           </nav>
         )}
         <div className="side-foot">
-          <b>Kami Tangani Back Office Anda</b>
-          <span>Seperti bagian dari tim. Panduan lengkap ada di SOP-AMIGA-FIN-001.</span>
+          <b>We Run Your Ops, So You Can Run the Business</b>
+          <span>Back Office as A Service. Panduan kerja: SOP-AMIGA-FIN-001.</span>
         </div>
       </aside>
 

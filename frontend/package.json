@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "dev:e2e": "VITE_API_TARGET=http://localhost:8001 vite --port 5174 --strictPort",
+    "dev:e2e": "VITE_API_TARGET=http://localhost:8001 vite --port 5180 --strictPort",
     "e2e": "cypress run",
     "e2e:open": "cypress open"
   },

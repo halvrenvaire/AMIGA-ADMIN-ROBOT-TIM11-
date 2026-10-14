@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Gagal dengan jelas bila 5173 terpakai, jangan pindah diam-diam ke port lain (mis. port E2E)
+    strictPort: true,
     proxy: {
       "/api": {
         target: process.env.VITE_API_TARGET ?? "http://localhost:8000",

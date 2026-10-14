@@ -49,7 +49,7 @@ export function Queue() {
                 foot="menunggu keputusan reviewer" onClick={() => { setStatus("READY_FOR_REVIEW"); setProblem(false); }} />
           <Stat icon={AlertTriangle} tone="amber" label="Dokumen bermasalah" value={s.problem}
                 foot="status EXCEPTION" onClick={() => { setProblem(true); setStatus(""); }} />
-          <Stat icon={CalendarClock} tone="teal" label={`Tenggat ≤ ${s.due_soon_days} hari`} value={s.due_soon}
+          <Stat icon={CalendarClock} tone="pink" label={`Tenggat ≤ ${s.due_soon_days} hari`} value={s.due_soon}
                 foot="belum selesai" onClick={() => setDueSoon(true)} />
           <Stat icon={Clock} tone="red" label="Lewat tenggat" value={s.overdue} foot="perlu segera ditangani" />
         </section>
@@ -99,7 +99,7 @@ export function Queue() {
           )}
         </section>
 
-        <section className="card panel" aria-labelledby="load-h">
+        <section className="card panel load-panel" aria-labelledby="load-h">
           <div className="panel-head">
             <div><h2 id="load-h">Beban reviewer</h2><p>Dokumen siap ditinjau per reviewer</p></div>
           </div>
