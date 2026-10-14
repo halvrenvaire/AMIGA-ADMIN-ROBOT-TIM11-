@@ -1,0 +1,238 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  PIC_KLIEN
+  INTAKE_SUPPORT
+  FINANCE_REVIEWER
+  SERVICE_LEAD
+  SYSTEM_ADMIN
+}
+
+enum InvoiceStatus {
+  QUEUED
+  PROCESSING
+  READY_FOR_REVIEW
+  EXCEPTION
+  AMIGA_REVIEWED
+  SENT_TO_CLIENT
+}
+
+enum IssueCode {
+  MISSING_EVIDENCE
+  POSSIBLE_DUPLICATE
+  CALCULATION_DISCREPANCY
+  REVIEWER_RETURNED
+}
+
+enum IssueCategory {
+  COMPLETENESS
+  INTEGRITY
+  ARITHMETIC
+  MANUAL_REVIEW
+}
+
+enum AssignmentTriggerReason {
+  INITIAL_ASSIGNMENT
+  SOD_AUTO_REASSIGN
+  WORKLOAD_REBALANCE_LEAD
+}
+
+model Client {
+  id         String   @id @default(uuid()) @db.Uuid
+  clientCode String   @unique @map("client_code") @db.VarChar(20)
+  clientName String   @map("client_name") @db.VarChar(150)
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  users                 User[]                 @relation("UserDefaultClient")
+  userClientAssignments UserClientAssignment[]
+  invoiceRequests       InvoiceRequest[]
+
+  @@map("clients")
+}
+
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  email           String   @unique @db.VarChar(120)
+  fullName        String   @map("full_name") @db.VarChar(150)
+  passwordHash    String   @map("password_hash") @db.VarChar(255)
+  role            UserRole
+  defaultClientId String?  @map("default_client_id") @db.Uuid
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  defaultClient        Client?                @relation("UserDefaultClient", fields: [defaultClientId], references: [id], onDelete: SetNull)
+  clientAssignments    UserClientAssignment[] @relation("AssignedUser")
+  delegatedAssignments UserClientAssignment[] @relation("DelegatingUser")
+  uploadedInvoices     InvoiceRequest[]       @relation("InvoiceUploader")
+  reviewedInvoices     InvoiceRequest[]       @relation("InvoiceCurrentReviewer")
+  previousAssignments  ReviewerAssignment[]   @relation("PreviousReviewer")
+  assignedAssignments  ReviewerAssignment[]   @relation("AssignedReviewer")
+  performedAssignments ReviewerAssignment[]   @relation("AssignedByUser")
+  generatedVouchers    PaymentVoucher[]       @relation("VoucherGenerator")
+  auditLogs            AuditLog[]             @relation("AuditActor")
+
+  @@map("users")
+}
+
+model UserClientAssignment {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  clientId    String   @map("client_id") @db.Uuid
+  delegatedBy String   @map("delegated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user      User   @relation("AssignedUser", fields: [userId], references: [id], onDelete: Cascade)
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  delegator User   @relation("DelegatingUser", fields: [delegatedBy], references: [id], onDelete: Restrict)
+
+  @@unique([userId, clientId])
+  @@map("user_client_assignments")
+}
+
+model InvoiceRequest {
+  id                      String        @id @default(uuid()) @db.Uuid
+  requestId               String        @unique @map("request_id") @db.VarChar(30)
+  clientId                String        @map("client_id") @db.Uuid
+  uploaderId              String        @map("uploader_id") @db.Uuid
+  currentReviewerId       String?       @map("current_reviewer_id") @db.Uuid
+  requestType             String        @map("request_type") @db.VarChar(50)
+  submissionChannel       String        @map("submission_channel") @db.VarChar(50)
+  submissionDate          DateTime      @map("submission_date") @db.Date
+  originalFileName        String        @map("original_file_name") @db.VarChar(255)
+  storageFilePath         String        @map("storage_file_path") @db.VarChar(500)
+  filePageCount           Int           @map("file_page_count")
+  status                  InvoiceStatus @default(QUEUED)
+  vendorName              String?       @map("vendor_name") @db.VarChar(150)
+  vendorNameNormalized    String?       @map("vendor_name_normalized") @db.VarChar(150)
+  invoiceNumber           String?       @map("invoice_number") @db.VarChar(80)
+  invoiceNumberNormalized String?       @map("invoice_number_normalized") @db.VarChar(80)
+  invoiceDate             DateTime?     @map("invoice_date") @db.Date
+  subtotalAmount          Decimal?      @map("subtotal_amount") @db.Decimal(15, 2)
+  taxAmount               Decimal       @default(0.00) @map("tax_amount") @db.Decimal(15, 2)
+  totalAmount             Decimal?      @map("total_amount") @db.Decimal(15, 2)
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  client          Client                @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  uploader        User                  @relation("InvoiceUploader", fields: [uploaderId], references: [id], onDelete: Restrict)
+  currentReviewer User?                 @relation("InvoiceCurrentReviewer", fields: [currentReviewerId], references: [id], onDelete: SetNull)
+  lineItems       InvoiceLineItem[]
+  paymentDetails  InvoicePaymentDetail?
+  issues          VerificationIssue[]
+  assignments     ReviewerAssignment[]
+  paymentVoucher  PaymentVoucher?
+  auditLogs       AuditLog[]
+
+  @@index([clientId, status], name: "idx_invoice_client_status")
+  @@index([clientId, vendorNameNormalized, invoiceNumberNormalized], name: "idx_invoice_duplicate_lookup")
+  @@map("invoice_requests")
+}
+
+model InvoiceLineItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  requestId        String   @map("request_id") @db.Uuid
+  itemIndex        Int      @map("item_index")
+  description      String   @db.Text
+  quantity         Decimal  @db.Decimal(12, 4)
+  unitPrice        Decimal  @map("unit_price") @db.Decimal(15, 2)
+  subtotal         Decimal  @db.Decimal(15, 2)
+  isManuallyEdited Boolean  @default(false) @map("is_manually_edited")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  invoiceRequest InvoiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("invoice_line_items")
+}
+
+model InvoicePaymentDetail {
+  id                String   @id @default(uuid()) @db.Uuid
+  requestId         String   @unique @map("request_id") @db.Uuid
+  bankName          String?  @map("bank_name") @db.VarChar(100)
+  accountNumber     String?  @map("account_number") @db.VarChar(50)
+  accountHolderName String?  @map("account_holder_name") @db.VarChar(150)
+  isManuallyEdited  Boolean  @default(false) @map("is_manually_edited")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  invoiceRequest InvoiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_payment_details")
+}
+
+model VerificationIssue {
+  id            String        @id @default(uuid()) @db.Uuid
+  requestId     String        @map("request_id") @db.Uuid
+  issueCode     IssueCode     @map("issue_code")
+  issueCategory IssueCategory @map("issue_category")
+  messageId     String        @map("message_id") @db.Text
+  isResolved    Boolean       @default(false) @map("is_resolved")
+  detectedAt    DateTime      @default(now()) @map("detected_at") @db.Timestamptz
+  resolvedAt    DateTime?     @map("resolved_at") @db.Timestamptz
+
+  invoiceRequest InvoiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("verification_issues")
+}
+
+model ReviewerAssignment {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  requestId          String                  @map("request_id") @db.Uuid
+  previousReviewerId String?                 @map("previous_reviewer_id") @db.Uuid
+  assignedReviewerId String                  @map("assigned_reviewer_id") @db.Uuid
+  assignedByUserId   String?                 @map("assigned_by_user_id") @db.Uuid
+  triggerReason      AssignmentTriggerReason @map("trigger_reason")
+  reasonNotes        String?                 @map("reason_notes") @db.Text
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz
+
+  invoiceRequest   InvoiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  previousReviewer User?          @relation("PreviousReviewer", fields: [previousReviewerId], references: [id], onDelete: SetNull)
+  assignedReviewer User           @relation("AssignedReviewer", fields: [assignedReviewerId], references: [id], onDelete: Restrict)
+  assignedByUser   User?          @relation("AssignedByUser", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@map("reviewer_assignments")
+}
+
+model PaymentVoucher {
+  id                        String   @id @default(uuid()) @db.Uuid
+  requestId                 String   @unique @map("request_id") @db.Uuid
+  voucherNumber             String   @unique @map("voucher_number") @db.VarChar(50)
+  voucherFilePath           String   @map("voucher_file_path") @db.VarChar(500)
+  authorizationBoundaryText String   @map("authorization_boundary_text") @db.Text
+  generatedBy               String   @map("generated_by") @db.Uuid
+  generatedAt               DateTime @default(now()) @map("generated_at") @db.Timestamptz
+
+  invoiceRequest InvoiceRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  generator      User           @relation("VoucherGenerator", fields: [generatedBy], references: [id], onDelete: Restrict)
+
+  @@map("payment_vouchers")
+}
+
+model AuditLog {
+  id             BigInt   @id @default(autoincrement())
+  requestId      String   @map("request_id") @db.Uuid
+  actorId        String?  @map("actor_id") @db.Uuid
+  actorName      String   @map("actor_name") @db.VarChar(150)
+  actorRole      String   @map("actor_role") @db.VarChar(50)
+  actionType     String   @map("action_type") @db.VarChar(50)
+  previousStatus String?  @map("previous_status") @db.VarChar(30)
+  newStatus      String?  @map("new_status") @db.VarChar(30)
+  changeDiff     Json?    @map("change_diff")
+  ipAddress      String?  @map("ip_address") @db.VarChar(45)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  invoiceRequest InvoiceRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  actor          User?          @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt(sort: Asc)], name: "idx_audit_logs_request")
+  @@map("audit_logs")
+}

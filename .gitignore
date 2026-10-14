@@ -1,0 +1,28 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build Outputs
+dist
+.next
+out
+.turbo
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.dump
+
+# Local Storage & Uploads
+storage/
+../storage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db

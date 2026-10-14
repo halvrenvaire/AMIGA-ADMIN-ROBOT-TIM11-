@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+:root {
+  --color-ink-navy: #0B3558;
+  --color-ink-secondary: #4A6572;
+  --color-signal-blue: #006BFF;
+  --color-signal-blue-hover: #0055CC;
+  --color-cool-marble: #F8F9FB;
+  --color-surface-card: #FFFFFF;
+  --color-border-subtle: #E2E8F0;
+  --shadow-subtle: 0 4px 12px rgba(11, 53, 88, 0.06);
+}
+
+body {
+  background-color: var(--color-cool-marble);
+  color: var(--color-ink-navy);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+}
