@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import {
+  ArrowDownRight, ArrowUpRight, ClipboardCheck, FileInput, Minus, Receipt, ShieldCheck, Upload, Wallet,
+} from "lucide-react";
+import { Clover } from "../components/Logo";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Alert, Loading, StatusBadge, useApi } from "../components/ui";
@@ -19,6 +22,11 @@ const SERIES = [
 ] as const;
 
 const shortDate = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short" });
+const longDate = new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+function greeting() {
+  const h = new Date().getHours();
+  return h < 11 ? "Selamat pagi" : h < 15 ? "Selamat siang" : h < 18 ? "Selamat sore" : "Selamat malam";
+}
 const compactRp = (v: number) =>
   v >= 1e9 ? `Rp ${(v / 1e9).toFixed(1).replace(".", ",")} M` : v >= 1e6 ? `Rp ${(v / 1e6).toFixed(1).replace(".", ",")} jt` : rupiah(v);
 const pct = (num: number, den: number) => (den ? `${Math.round((num / den) * 100)}%` : "–");
@@ -49,9 +57,11 @@ export function Metrics() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Dashboard</h1>
+      <section className="hero">
+        <Clover className="clover-deco" size={150} />
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <span className="eyebrow">Dashboard · {longDate.format(new Date())}</span>
+          <h1>{greeting()}, {user?.full_name.replace(/\s*\(.*\)$/, "").split(" ")[0]}</h1>
           <p>Kinerja back office invoice-to-voucher{d ? `, ${shortDate.format(new Date(d.start))} – ${shortDate.format(new Date(d.end))}` : ""}.</p>
         </div>
         <div className="actions">
@@ -66,8 +76,11 @@ export function Metrics() {
               <button key={p} aria-pressed={days === p} onClick={() => setDays(p)}>{p} hari</button>
             ))}
           </div>
+          {has("PIC_KLIEN", "INTAKE_SUPPORT")
+            ? <Link className="btn on-dark" to="/unggah"><Upload /> Unggah invoice</Link>
+            : <Link className="btn on-dark" to={has("FINANCE_REVIEWER") ? "/peninjauan" : "/antrean"}><ClipboardCheck /> Buka antrean</Link>}
         </div>
-      </div>
+      </section>
 
       {m.error && <Alert>{m.error}</Alert>}
       {!d ? <Loading /> : (
@@ -82,26 +95,14 @@ export function Metrics() {
           </section>
 
           <section className="stats">
-            <div className="card stat">
-              <div className="stat-top">Invoice masuk</div>
-              <div className="stat-val">{d.received}</div>
-              <div className="stat-foot"><Delta now={d.received} prev={d.received_prev} /> vs {days} hari sebelumnya</div>
-            </div>
-            <div className="card stat">
-              <div className="stat-top">Voucher terbit</div>
-              <div className="stat-val">{d.approved}</div>
-              <div className="stat-foot"><Delta now={d.approved} prev={d.approved_prev} /> vs {days} hari sebelumnya</div>
-            </div>
-            <div className="card stat">
-              <div className="stat-top">Nilai pembayaran</div>
-              <div className="stat-val">{compactRp(Number(d.total_value))}</div>
-              <div className="stat-foot"><Delta now={Number(d.total_value)} prev={Number(d.total_value_prev)} /> total voucher terbit</div>
-            </div>
-            <div className="card stat">
-              <div className="stat-top">Lolos verifikasi pertama</div>
-              <div className="stat-val">{pct(d.first_pass, d.first_pass_total)}</div>
-              <div className="stat-foot">{d.first_pass} dari {d.first_pass_total} dokumen tanpa kendala</div>
-            </div>
+            <Kpi icon={FileInput} accent="#4497A1" tone="navy" label="Invoice masuk" value={String(d.received)}
+                 foot={<><Delta now={d.received} prev={d.received_prev} /> vs {days} hari sebelumnya</>} />
+            <Kpi icon={Receipt} accent="#1D5B63" tone="teal" label="Voucher terbit" value={String(d.approved)}
+                 foot={<><Delta now={d.approved} prev={d.approved_prev} /> vs {days} hari sebelumnya</>} />
+            <Kpi icon={Wallet} accent="#E65C97" tone="pink" label="Nilai pembayaran" value={compactRp(Number(d.total_value))}
+                 foot={<><Delta now={Number(d.total_value)} prev={Number(d.total_value_prev)} /> total voucher terbit</>} />
+            <Kpi icon={ShieldCheck} accent="#12936B" tone="teal" label="Lolos verifikasi pertama" value={pct(d.first_pass, d.first_pass_total)}
+                 foot={<>{d.first_pass} dari {d.first_pass_total} dokumen tanpa kendala</>} />
           </section>
 
           <section className="card panel">
@@ -164,6 +165,18 @@ export function Metrics() {
         </>
       )}
     </>
+  );
+}
+
+function Kpi({ icon: Icon, accent, tone, label, value, foot }: {
+  icon: typeof Wallet; accent: string; tone: string; label: string; value: string; foot: React.ReactNode;
+}) {
+  return (
+    <div className="card stat kpi-lead" style={{ ["--accent" as string]: accent }}>
+      <div className="stat-top">{label}<span className={`stat-ic ${tone}`}><Icon /></span></div>
+      <div className="stat-val">{value}</div>
+      <div className="stat-foot">{foot}</div>
+    </div>
   );
 }
 

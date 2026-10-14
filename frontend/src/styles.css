@@ -63,8 +63,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--surface); border-right: 1px solid var(--line); padding: 18px 12px;
   display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh;
 }
-.brand { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 2px 10px 8px; }
-.brand-sub { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); padding-left: 2px; }
+.brand { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 4px 10px 10px; border-bottom: 1px solid var(--line-soft); margin: 0 -2px 2px; }
+.brand-sub { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pink-600); background: var(--pink-50); padding: 2px 8px; border-radius: 999px; }
 .logo {
   width: 34px; height: 34px; border-radius: 9px; background: var(--primary); color: #fff;
   display: grid; place-items: center; font-weight: 700; font-size: 15px;
@@ -83,7 +83,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a:hover { background: #f3f5f8; color: var(--fg); }
 .nav a.active { background: var(--primary-50); color: var(--primary-700); font-weight: 600; box-shadow: inset 3px 0 0 var(--pink); }
 .nav svg { width: 18px; height: 18px; flex: none; }
-.side-foot { margin-top: auto; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; background: #fafbfc; }
+.side-foot { margin-top: auto; border: 0; border-radius: var(--radius); padding: 14px; background: linear-gradient(160deg, var(--primary-50), var(--pink-50)); position: relative; overflow: hidden; }
 .side-foot b { display: block; font-size: 12.5px; }
 .side-foot span { font-size: 11.5px; color: var(--fg-3); }
 
@@ -114,7 +114,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 /* --- Komponen dasar --- */
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 16px; box-shadow: 0 1px 2px rgba(29, 43, 48, 0.04), 0 4px 14px rgba(29, 43, 48, 0.04); }
 .panel { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .panel-head h2 { font-size: 15px; font-weight: 600; }
@@ -197,14 +197,14 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .stat { padding: 15px 18px; display: flex; flex-direction: column; gap: 8px; }
 .stat-top { display: flex; align-items: center; justify-content: space-between; color: var(--fg-2); font-weight: 500; }
-.stat-ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; }
+.stat-ic { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; }
 .stat-ic svg { width: 17px; height: 17px; }
 .stat-ic.navy { background: var(--primary-50); color: var(--primary); }
 .stat-ic.amber { background: var(--amber-50); color: var(--amber); }
 .stat-ic.red { background: var(--red-50); color: var(--red); }
 .stat-ic.teal { background: var(--teal-50); color: var(--teal); }
 .stat-ic.pink { background: var(--pink-50); color: var(--pink-600); }
-.stat-val { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat-val { font-size: 28px; font-weight: 750; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--fg); }
 .stat-foot { font-size: 12px; color: var(--fg-3); }
 
 .status-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
@@ -271,17 +271,33 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .drop:hover, .drop.over { border-color: var(--primary); background: var(--primary-50); }
 .drop svg { width: 26px; height: 26px; color: var(--primary); }
 
-/* Login */
-.login { min-height: 100%; display: grid; grid-template-columns: 1fr 1fr; }
-.login-art { background: var(--brand); color: #fff; padding: 48px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; }
-.login-art h1 { font-size: 38px; line-height: 1.15; max-width: 14ch; letter-spacing: 0.01em; font-weight: 700; }
-.login-art p { color: #e6f3f5; max-width: 46ch; font-size: 15px; }
-.login-art .eyebrow { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #fff; border-bottom: 2px solid var(--pink); padding-bottom: 4px; margin-bottom: 18px; }
-.login-art .clover-bg { position: absolute; right: -60px; bottom: -60px; width: 300px; height: 300px; opacity: 0.16; }
-.login-form { display: grid; place-items: center; padding: 24px; }
-.login-form form { width: min(380px, 100%); display: flex; flex-direction: column; gap: 14px; }
-.demo-accounts { font-size: 12px; color: var(--fg-3); border-top: 1px solid var(--line); padding-top: 12px; }
-.demo-accounts button { background: none; border: 0; padding: 2px 0; color: var(--primary-700); cursor: pointer; font-size: 12px; }
+/* Login: panel terang supaya logo teal amiga terbaca, aksen semanggi merah muda */
+.login { min-height: 100%; display: grid; grid-template-columns: 1.1fr 1fr; background: var(--surface); }
+.login-art {
+  position: relative; overflow: hidden; padding: 44px 56px; display: flex; flex-direction: column;
+  justify-content: space-between; gap: 32px; color: var(--fg);
+  background: radial-gradient(circle at 85% 90%, var(--pink-50) 0, transparent 45%),
+              radial-gradient(circle at 10% 10%, var(--primary-50) 0, transparent 55%), #f7fbfb;
+  border-right: 1px solid var(--line-soft);
+}
+.login-copy { position: relative; z-index: 1; max-width: 520px; }
+.login-art h1 { font-size: 40px; line-height: 1.12; max-width: 15ch; letter-spacing: -0.01em; font-weight: 800; color: var(--primary-700); margin: 6px 0 14px; }
+.login-art p { color: var(--fg-2); max-width: 46ch; font-size: 15.5px; margin: 0; }
+.login-art .eyebrow { display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pink-600); }
+.login-points { list-style: none; margin: 28px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.login-points li { display: flex; align-items: center; gap: 12px; font-weight: 500; color: var(--fg); }
+.login-points span { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: #fff; color: var(--brand); box-shadow: 0 1px 2px rgba(29, 43, 48, 0.08), 0 0 0 1px var(--line-soft); flex: none; }
+.login-points svg { width: 18px; height: 18px; }
+.login-art .clover-bg { position: absolute; right: -70px; bottom: -70px; opacity: 0.18; transform: rotate(-14deg); pointer-events: none; }
+.login-art .clover-bg.small { right: 9%; bottom: auto; top: 22%; opacity: 0.14; transform: rotate(18deg); }
+.login-form { display: grid; place-items: center; padding: 32px 24px; background: var(--bg); }
+.login-card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 32px; box-shadow: 0 18px 40px rgba(29, 43, 48, 0.08); }
+.login-card h2 { font-size: 22px; font-weight: 750; }
+.btn.lg { height: 42px; font-size: 14px; }
+.demo-accounts { font-size: 12px; color: var(--fg-3); border-top: 1px solid var(--line-soft); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.demo-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.demo-accounts button { background: var(--primary-50); border: 1px solid transparent; border-radius: 999px; padding: 4px 10px; color: var(--primary-700); cursor: pointer; font-size: 12px; font-weight: 600; }
+.demo-accounts button:hover { border-color: var(--primary-100); background: #fff; }
 
 /* Asisten */
 .fab {
@@ -356,3 +372,28 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .signer-picker legend { font-size: 12.5px; font-weight: 600; color: var(--fg-2); padding: 0 4px; }
 @media (max-width: 1180px) { .kpi-status { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 860px) { .signer-picker { grid-template-columns: minmax(0, 1fr); } }
+
+/* Banner sambutan di Dashboard */
+.hero {
+  position: relative; overflow: hidden; border-radius: 20px; padding: 24px 28px; color: #fff;
+  background: linear-gradient(120deg, #367f89 0%, #4497a1 55%, #5fb0b8 100%);
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+}
+.hero h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+.hero p { margin: 4px 0 0; color: #e3f2f4; max-width: 60ch; }
+.hero .eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #ffd3e5; }
+.hero .clover-deco { position: absolute; right: 190px; top: -26px; opacity: 0.22; transform: rotate(16deg); pointer-events: none; }
+.hero .actions { position: relative; z-index: 1; }
+.hero .btn { border-color: transparent; }
+.hero .btn.on-dark { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.hero .btn.on-dark:hover { background: rgba(255, 255, 255, 0.26); }
+.hero .seg { background: rgba(255, 255, 255, 0.16); border-color: transparent; }
+.hero .seg button { color: #eaf6f7; }
+.hero .seg button[aria-pressed="true"] { background: #fff; color: var(--primary-700); }
+.hero select.input { background: #fff; border-color: transparent; color: var(--fg); border-radius: 999px; padding: 0 14px; }
+.kpi-mini { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.kpi-mini:hover { transform: translateY(-2px); }
+.stat.kpi-lead { position: relative; overflow: hidden; }
+.stat.kpi-lead::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--accent, var(--brand)); opacity: 0.85; }
+@media (prefers-reduced-motion: reduce) { .kpi-mini { transition: none; } .kpi-mini:hover { transform: none; } }
+@media (max-width: 860px) { .hero .clover-deco { display: none; } }

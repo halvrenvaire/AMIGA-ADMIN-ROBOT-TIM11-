@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { LogIn } from "lucide-react";
+import { BadgeCheck, LogIn, ScanText, ShieldCheck } from "lucide-react";
 import { homePath, useAuth } from "../auth";
 import { Alert } from "../components/ui";
 import { Clover, Logo } from "../components/Logo";
@@ -39,21 +39,27 @@ export function Login() {
   return (
     <div className="login">
       <section className="login-art">
-        <Logo height={40} light />
-        <div>
+        <Logo height={64} />
+        <div className="login-copy">
           <span className="eyebrow">Robot Admin · Back Office as A Service</span>
           <h1>We Run Your Ops, So You Can Run the Business</h1>
-          <p>Invoice vendor menjadi voucher pembayaran resmi dalam hitungan detik. AI membaca invoice, sistem
-            memverifikasi, dan Finance Reviewer menyetujui.</p>
+          <p>Invoice vendor menjadi voucher pembayaran resmi dalam hitungan detik, dengan kontrol yang bisa
+            dipertanggungjawabkan.</p>
+          <ul className="login-points">
+            <li><span><ScanText /></span>AI membaca invoice PDF dalam hitungan detik</li>
+            <li><span><ShieldCheck /></span>Sistem memverifikasi angka, kelengkapan, dan duplikasi</li>
+            <li><span><BadgeCheck /></span>Finance Reviewer menyetujui, semua aksi tercatat</li>
+          </ul>
         </div>
-        <small style={{ color: "#e6f3f5" }}>PoC MAIN Hackathon 2026 · Kelompok 11</small>
-        <Clover className="clover-bg" size={300} />
+        <small className="muted">PoC MAIN Hackathon 2026 · Kelompok 11</small>
+        <Clover className="clover-bg" size={340} />
+        <Clover className="clover-bg small" size={120} />
       </section>
       <section className="login-form">
-        <form onSubmit={submit}>
+        <form onSubmit={submit} className="login-card">
           <div>
-            <h2 style={{ fontSize: 22 }}>Masuk</h2>
-            <p className="muted" style={{ margin: "4px 0 0" }}>Gunakan akun AMIGA Robot Admin Anda.</p>
+            <h2>Selamat datang kembali</h2>
+            <p className="muted" style={{ margin: "4px 0 0" }}>Masuk dengan akun amiga Robot Admin Anda.</p>
           </div>
           {error && <Alert>{error}</Alert>}
           <div className="field">
@@ -66,10 +72,10 @@ export function Login() {
             <input id="password" className="input" type="password" autoComplete="current-password" required
                    value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-          <button className="btn primary" disabled={busy}><LogIn /> {busy ? "Memeriksa…" : "Masuk"}</button>
+          <button className="btn primary lg" disabled={busy}><LogIn /> {busy ? "Memeriksa…" : "Masuk"}</button>
           <div className="demo-accounts">
-            Akun demo (data dummy):
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", marginTop: 4 }}>
+            <span>Akun demo (data dummy)</span>
+            <div className="demo-grid">
               {DEMO.map(([e, label]) => (
                 <button type="button" key={e} onClick={() => setEmail(e)} title={e}>{label}</button>
               ))}

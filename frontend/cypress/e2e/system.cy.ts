@@ -43,7 +43,7 @@ describe("System Testing AMIGA Robot Admin", () => {
     });
     cy.contains("button", "Masuk").click();
     cy.location("pathname").should("eq", "/dashboard");
-    cy.contains("h1", "Dashboard");
+    cy.get(".hero h1").should("contain.text", "Hendra");
     cy.get(".user").should("contain.text", "Hendra");
   });
 
