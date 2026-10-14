@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  ClipboardCheck, FileClock, FileText, LayoutDashboard, LogOut, Receipt, Search, Upload, Users, Building2,
+  BarChart3, Building2, ClipboardCheck, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
+  Upload, Users,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { ROLE_LABEL } from "../format";
@@ -14,12 +15,17 @@ interface NavItem { to: string; label: string; icon: typeof FileText; roles: Rol
 
 // Menu sesuai 5 layar PRD bagian 5, ditambah layar System Admin
 const NAV: NavItem[] = [
+  { to: "/dashboard", label: "Dashboard", icon: BarChart3, roles: ["SERVICE_LEAD", "FINANCE_REVIEWER", "PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/antrean", label: "Dashboard Antrean", icon: LayoutDashboard, roles: ["SERVICE_LEAD", "FINANCE_REVIEWER"] },
   { to: "/peninjauan", label: "Peninjauan Saya", icon: ClipboardCheck, roles: ["FINANCE_REVIEWER"] },
   { to: "/unggah", label: "Unggah Dokumen", icon: Upload, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/pengajuan", label: "Pengajuan Saya", icon: FileText, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
-  { to: "/voucher", label: "Voucher", icon: Receipt, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER"] },
+  { to: "/voucher", label: "Voucher", icon: Receipt, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
   { to: "/riwayat", label: "Riwayat & Audit", icon: FileClock, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
+];
+const REFERENCE_NAV: NavItem[] = [
+  { to: "/referensi/vendor", label: "Vendor", icon: Store, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
+  { to: "/referensi/penanda-tangan", label: "Penanda tangan", icon: PenLine, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
 ];
 const ADMIN_NAV: NavItem[] = [
   { to: "/admin/pengguna", label: "Pengguna & Peran", icon: Users, roles: ["SYSTEM_ADMIN"] },
@@ -29,7 +35,8 @@ const ADMIN_NAV: NavItem[] = [
 // Dicocokkan berurutan; pola yang lebih spesifik di atas
 const TITLES: [RegExp, string][] = [
   [/^\/dokumen\/[^/]+\/voucher$/, "Pratinjau Voucher"], [/^\/dokumen\/[^/]+\/riwayat$/, "Riwayat Dokumen"],
-  [/^\/dokumen/, "Detail Dokumen"], [/^\/antrean/, "Dashboard Antrean"], [/^\/peninjauan/, "Peninjauan Saya"],
+  [/^\/dokumen/, "Detail Dokumen"], [/^\/dashboard/, "Dashboard"], [/^\/antrean/, "Dashboard Antrean"],
+  [/^\/referensi\/vendor/, "Data Referensi / Vendor"], [/^\/referensi\/penanda-tangan/, "Data Referensi / Penanda tangan"], [/^\/peninjauan/, "Peninjauan Saya"],
   [/^\/unggah/, "Unggah Dokumen"], [/^\/pengajuan/, "Pengajuan Saya"], [/^\/voucher/, "Voucher"],
   [/^\/riwayat/, "Riwayat & Audit"], [/^\/cari/, "Hasil Pencarian"],
   [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],
@@ -62,6 +69,16 @@ export function Layout() {
             <div className="nav-label">Menu</div>
             <ul className="nav">
               {visible(NAV).map(({ to, label, icon: Icon }) => (
+                <li key={to}><NavLink to={to}><Icon /><span>{label}</span></NavLink></li>
+              ))}
+            </ul>
+          </nav>
+        )}
+        {visible(REFERENCE_NAV).length > 0 && (
+          <nav>
+            <div className="nav-label">Data Referensi</div>
+            <ul className="nav">
+              {visible(REFERENCE_NAV).map(({ to, label, icon: Icon }) => (
                 <li key={to}><NavLink to={to}><Icon /><span>{label}</span></NavLink></li>
               ))}
             </ul>

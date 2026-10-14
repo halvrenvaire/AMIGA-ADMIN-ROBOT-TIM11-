@@ -90,8 +90,10 @@ describe("UAT AMIGA Robot Admin", () => {
 
   it("UAT 8 — perbaikan PIC: kembali ke ekstraksi dengan Request ID sama → READY_FOR_REVIEW", () => {
     cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.missing.id}`);
-    cy.get("#fix-account_no").type("8890012345");
-    cy.get("#fix-note").type("Nomor rekening dikonfirmasi vendor via email.");
+    // Halaman memuat data vendor & penanda tangan secara asinkron: tunggu field siap sebelum mengetik
+    cy.contains("section", "Penanda tangan voucher");
+    cy.get("#fix-account_no").should("be.enabled").click().type("8890012345");
+    cy.get("#fix-note").should("be.enabled").click().type("Nomor rekening dikonfirmasi vendor via email.");
     cy.contains("button", "Kirim perbaikan").click();
     waitStatus("Siap ditinjau");
     cy.get(".page-head h1 .mono").should("have.text", docs.missing.requestId);

@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.models import Client, Role, Signatory, SignatoryKind, User, UserClientAssignment, UserRole, Vendor
+from app.routers.reference import link_documents
 from app.services.verification import normalize
 from app.security import hash_password
 
@@ -56,9 +57,14 @@ def seed_reference(db, clients: dict[str, Client], pic_by_client: dict[str, User
                              created_by=pic_by_client[client_name].id))
     for client_name, name, bank, account in VENDORS:
         client = clients[client_name]
-        if db.scalar(select(Vendor).where(Vendor.client_id == client.id, Vendor.name_norm == normalize(name))) is None:
-            db.add(Vendor(client_id=client.id, name=name, name_norm=normalize(name), bank_name=bank,
-                          account_no=account, account_name=name, created_by=pic_by_client[client_name].id))
+        vendor = db.scalar(select(Vendor).where(Vendor.client_id == client.id, Vendor.name_norm == normalize(name)))
+        if vendor is None:
+            vendor = Vendor(client_id=client.id, name=name, name_norm=normalize(name), bank_name=bank,
+                            account_no=account, account_name=name, created_by=pic_by_client[client_name].id)
+            db.add(vendor)
+            db.flush()
+        # Dokumen lama dengan nama vendor yang sama ikut tertaut, sama seperti saat PIC mendaftarkan lewat API
+        link_documents(db, vendor)
 
 
 def main() -> None:

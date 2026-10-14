@@ -335,3 +335,24 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .content { padding: 16px; }
 }
+
+/* --- Dashboard metrik, data referensi, manajemen voucher --- */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 5px 12px; border-radius: 999px; font-weight: 600; font-size: 12.5px; color: var(--fg-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+.kpi-status { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.kpi-mini { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; cursor: pointer; text-align: left; font: inherit; }
+.kpi-mini:hover { border-color: var(--primary-100); box-shadow: inset 0 -2px 0 var(--pink); }
+.kpi-mini b { font-size: 24px; letter-spacing: -0.02em; }
+.metric-list { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; margin: 0; font-size: 13px; }
+.metric-list dt { color: var(--fg-2); }
+.metric-list dd { margin: 0; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.metric-list dd small { font-weight: 500; }
+.metric-panels { align-items: start; gap: 16px; }
+.table .group-row td { background: var(--primary-50); border-top: 1px solid var(--primary-100); color: var(--primary-700); }
+.table .total-row td { border-top: 2px solid var(--line); background: #f9fbfb; }
+.signer-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.signer-picker fieldset { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.signer-picker legend { font-size: 12.5px; font-weight: 600; color: var(--fg-2); padding: 0 4px; }
+@media (max-width: 1180px) { .kpi-status { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 860px) { .signer-picker { grid-template-columns: minmax(0, 1fr); } }

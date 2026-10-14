@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CheckCircle2, FileClock, Loader2, Plus, Receipt, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { ReassignModal } from "../components/ReassignModal";
+import { SignerPicker } from "../components/SignerPicker";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
 import { FIELD_LABEL, ISSUE_LABEL, plainNumber, rupiah, tanggal, waktu } from "../format";
-import type { DocumentDetail, Extraction, Issue } from "../types";
+import type { DocumentDetail, Extraction, Issue, Signatory, Vendor } from "../types";
 
 const HEADER_FIELDS = ["vendor_name", "invoice_no", "invoice_date", "total"] as const;
 const PAYMENT_FIELDS = ["bank_name", "account_no", "account_name"] as const;
@@ -105,6 +106,10 @@ export function DocumentPage() {
               <dt>Tanggal pengajuan</dt><dd>{tanggal(d.submitted_date)}</dd>
               <dt>Tenggat</dt><dd>{tanggal(d.due_date)}</dd>
               <dt>Finance Reviewer</dt><dd>{d.assigned_reviewer ?? "-"}</dd>
+              <dt>Vendor</dt>
+              <dd>{d.vendor_name ?? "-"} {d.vendor
+                ? <span className="chip ok">terdaftar di data referensi</span>
+                : d.vendor_name && <span className="chip gray">belum terdaftar</span>}</dd>
               {d.extraction?.duration_ms != null && <><dt>Dibaca AI</dt><dd>{(d.extraction.duration_ms / 1000).toFixed(1)} detik · {waktu(d.extraction.extracted_at)}</dd></>}
               {d.voucher && <><dt>Voucher</dt><dd className="mono">{d.voucher.voucher_no}</dd></>}
             </dl>
@@ -136,6 +141,8 @@ export function DocumentPage() {
             </section>
           )}
 
+          <SignersPanel doc={d} onChange={(n) => update(n, { kind: "ok", text: "Penanda tangan voucher diperbarui." })} />
+
           {canFix && <FixForm doc={d} onDone={(n) => update(n, { kind: "info", text: "Perbaikan terkirim. Dokumen kembali ke ekstraksi dengan Request ID yang sama." })} />}
 
           {d.extraction && (canReview
@@ -143,6 +150,8 @@ export function DocumentPage() {
             : <ReadOnlyData doc={d} />)}
         </div>
       </div>
+
+      <VendorOptions clientId={d.client.id} />
 
       {reassign && (
         <ReassignModal doc={d} onClose={() => setReassign(false)}
@@ -264,7 +273,7 @@ function ReviewForm({ doc, onChange, onNotice }: {
     <div className="field" key={k}>
       <label htmlFor={`f-${k}`}>{FIELD_LABEL[k]} {k in doc.pic_overrides && <span className="chip gray">diisi PIC</span>}</label>
       <input id={`f-${k}`} className={`input ${flags.has(k) ? "flag" : ""} ${k === "account_no" ? "mono" : ""}`}
-             type={inputType(k)} step={k === "total" ? "0.01" : undefined}
+             type={inputType(k)} step={k === "total" ? "0.01" : undefined} list={k === "vendor_name" ? "vendor-options" : undefined}
              value={fields[k]} onChange={(e) => setFields({ ...fields, [k]: e.target.value })} />
     </div>
   );
@@ -374,6 +383,7 @@ function FixForm({ doc, onDone }: { doc: DocumentDetail; onDone: (d: DocumentDet
           <div className="field" key={k}>
             <label htmlFor={`fix-${k}`}>{FIELD_LABEL[k]}</label>
             <input id={`fix-${k}`} className={`input ${flags.has(k) ? "flag" : ""}`} type={inputType(k)}
+                   list={k === "vendor_name" ? "vendor-options" : undefined}
                    placeholder={current[k] || "kosong"} value={values[k] ?? ""}
                    onChange={(e) => setValues({ ...values, [k]: e.target.value })} />
             {k === "total" && <small>Angka tanpa titik ribuan, mis. 1250000</small>}
@@ -437,5 +447,67 @@ function ReasonModal({ title, label, placeholder, submitLabel, onClose, onSubmit
         }}>{submitLabel}</button>
       </div>
     </Modal>
+  );
+}
+
+/** Saran nama vendor dari data referensi klien untuk kolom nama vendor (datalist). */
+function VendorOptions({ clientId }: { clientId: string }) {
+  const vendors = useApi(() => api.get<Vendor[]>("/vendors", { client_id: clientId }), [clientId]);
+  return <datalist id="vendor-options">{vendors.data?.map((v) => <option key={v.id} value={v.name} />)}</datalist>;
+}
+
+const KIND_TITLE = { PENGAJU: "Diajukan oleh", PENYETUJU: "Disetujui oleh" } as const;
+
+/** Penanda tangan yang akan dicetak di voucher; PIC/Intake bisa mengubah sebelum voucher terbit. */
+function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: DocumentDetail) => void }) {
+  const { has } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [ids, setIds] = useState<string[]>([]);
+  const [initial, setInitial] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const locked = doc.status === "AMIGA_REVIEWED" || doc.status === "SENT_TO_CLIENT";
+  const canEdit = has("PIC_KLIEN", "INTAKE_SUPPORT") && !locked;
+
+  async function open() {
+    // Pilihan awal = penanda tangan dokumen saat ini (dicocokkan dari nama + jabatan)
+    const list = await api.get<Signatory[]>("/signatories", { client_id: doc.client.id });
+    setInitial(list.filter((s) => doc.signers.some((x) => x.kind === s.kind && x.name === s.full_name && x.position === s.position))
+      .map((s) => s.id));
+    setEditing(true);
+  }
+
+  async function save() {
+    setError(null);
+    try {
+      onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/signers`, { signatory_ids: ids }));
+      setEditing(false);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  return (
+    <section className="card panel">
+      <div className="panel-head">
+        <div><h2>Penanda tangan voucher</h2><p>{locked ? "Sudah tercetak di voucher." : "Dicetak di kotak tanda tangan voucher."}</p></div>
+        {canEdit && !editing && <button className="btn sm" onClick={open}>Ubah</button>}
+      </div>
+      {editing && initial ? (
+        <>
+          {error && <Alert>{error}</Alert>}
+          <SignerPicker clientId={doc.client.id} initial={initial} onChange={setIds} />
+          <div className="actions" style={{ justifyContent: "flex-end" }}>
+            <button className="btn" onClick={() => setEditing(false)}>Batal</button>
+            <button className="btn primary" onClick={save}>Simpan</button>
+          </div>
+        </>
+      ) : !doc.signers.length ? (
+        <p className="muted" style={{ margin: 0 }}>Belum dipilih. Kotak tanda tangan klien dicetak kosong untuk diisi manual.</p>
+      ) : (
+        <dl className="meta">
+          {doc.signers.map((s, i) => (
+            <Fragment key={i}><dt>{KIND_TITLE[s.kind]}</dt><dd><b>{s.name}</b> <span className="muted">· {s.position}</span></dd></Fragment>
+          ))}
+        </dl>
+      )}
+    </section>
   );
 }

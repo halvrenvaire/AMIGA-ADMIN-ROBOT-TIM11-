@@ -28,7 +28,8 @@ function ListCard({ title, note, state, children, showReviewer, action }: {
 
 /** Pengajuan Saya — status, kode & alasan EXCEPTION (Layar 02, PIC Klien / Intake Support). */
 export function Submissions() {
-  const [status, setStatus] = useState<DocStatus | "">("");
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState<DocStatus | "">((params.get("status") as DocStatus | null) ?? "");
   const docs = useDocs({ status }, [status]);
   const all = useDocs({}, []);
   const exceptions = all.data?.filter((d) => d.status === "EXCEPTION").length ?? 0;
@@ -67,21 +68,6 @@ export function MyReviews() {
       </div>
       <ListCard title="Siap ditinjau" note="Ditugaskan kepada Anda" state={docs} showReviewer={false}
                 action={(d) => <Link className="btn sm primary" to={`/dokumen/${d.id}`}>Tinjau</Link>} />
-    </>
-  );
-}
-
-/** Daftar voucher (Layar 04): dokumen yang sudah disetujui. */
-export function Vouchers() {
-  const docs = useDocs({}, []);
-  const done = { ...docs, data: docs.data?.filter((d) => d.status === "AMIGA_REVIEWED" || d.status === "SENT_TO_CLIENT") ?? null };
-  return (
-    <>
-      <div className="page-head">
-        <div><h1>Voucher</h1><p>Voucher dari invoice yang sudah disetujui Finance Reviewer.</p></div>
-      </div>
-      <ListCard title="Voucher tersedia" note="Disetujui = belum diunduh klien · Diserahkan = sudah diunduh" state={done}
-                action={(d) => <Link className="btn sm" to={`/dokumen/${d.id}/voucher`}>Pratinjau</Link>} />
     </>
   );
 }

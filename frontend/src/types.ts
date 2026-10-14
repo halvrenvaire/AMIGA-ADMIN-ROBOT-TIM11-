@@ -69,6 +69,8 @@ export interface DocumentDetail extends DocumentSummary {
   extraction: Extraction | null;
   pic_overrides: Record<string, string>;
   voucher: { voucher_no: string; generated_at: string } | null;
+  vendor: ClientRef | null;
+  signers: Signer[];
 }
 
 export interface AuditItem {
@@ -103,4 +105,79 @@ export interface AskAgentResponse {
   memory_note: string;
   used_queue_data: boolean;
   sources: { source: string; score: number; preview: string }[];
+}
+
+// --- Data referensi, penanda tangan, voucher, metrik (permintaan owner 14 Okt 2026) ---
+
+export interface Vendor {
+  id: string;
+  client: ClientRef;
+  name: string;
+  npwp: string | null;
+  address: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  bank_name: string | null;
+  account_no: string | null;
+  account_name: string | null;
+  notes: string | null;
+  is_active: boolean;
+  documents: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SignatoryKind = "PENGAJU" | "PENYETUJU";
+
+export interface Signatory {
+  id: string;
+  client_id: string;
+  kind: SignatoryKind;
+  full_name: string;
+  position: string;
+  is_default: boolean;
+  is_active: boolean;
+}
+
+export interface Signer { kind: SignatoryKind; name: string; position: string }
+
+export interface VoucherRow {
+  document_id: string;
+  voucher_no: string;
+  generated_at: string;
+  request_id: string;
+  client: ClientRef;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  invoice_no: string | null;
+  invoice_date: string | null;
+  total: string | null;
+  status: DocStatus;
+  approved_by: string;
+}
+
+export interface DashboardMetrics {
+  period_days: number;
+  start: string;
+  end: string;
+  status_counts: Record<DocStatus, number>;
+  received: number;
+  received_prev: number;
+  approved: number;
+  approved_prev: number;
+  trend: { date: string; received: number; approved: number; exception: number }[];
+  avg_hours_to_voucher: number | null;
+  avg_extraction_seconds: number | null;
+  sla_on_time: number;
+  sla_total: number;
+  first_pass: number;
+  first_pass_total: number;
+  top_issues: { code: IssueCode; count: number }[];
+  corrected_docs: number;
+  reviewed_docs: number;
+  total_value: string;
+  total_value_prev: string;
+  value_by_client: { client: string; value: string; count: number }[];
+  top_vendors: { vendor: string; value: string; count: number }[];
 }

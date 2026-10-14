@@ -48,8 +48,7 @@ export function useAuth() {
 
 /** Halaman awal sesuai peran utama. */
 export function homePath(roles: Role[]): string {
-  if (roles.includes("SERVICE_LEAD") || roles.includes("FINANCE_REVIEWER")) return "/antrean";
-  if (roles.includes("PIC_KLIEN") || roles.includes("INTAKE_SUPPORT")) return "/pengajuan";
+  if (roles.some((r) => r !== "SYSTEM_ADMIN")) return "/dashboard";
   if (roles.includes("SYSTEM_ADMIN")) return "/admin/pengguna";
   return "/login";
 }

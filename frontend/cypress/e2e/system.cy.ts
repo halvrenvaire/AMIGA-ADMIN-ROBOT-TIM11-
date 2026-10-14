@@ -42,8 +42,9 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.get("#password").type(pw, { log: false });
     });
     cy.contains("button", "Masuk").click();
-    cy.location("pathname").should("eq", "/antrean");
-    cy.contains("h1", "Selamat datang, Hendra");
+    cy.location("pathname").should("eq", "/dashboard");
+    cy.contains("h1", "Dashboard");
+    cy.get(".user").should("contain.text", "Hendra");
   });
 
   it("TS-002 Login dengan password salah", () => {
@@ -71,7 +72,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   // --- Hak akses & navigasi ---
   it("TS-005 Menu sesuai peran dan URL terlarang dialihkan", () => {
     cy.visitAs("pic.alpha@amiga.test", "/antrean");
-    cy.location("pathname").should("eq", "/pengajuan");
+    cy.location("pathname").should("eq", "/dashboard");
     cy.get(".nav").should("not.contain.text", "Dashboard Antrean").and("contain.text", "Unggah Dokumen");
     cy.get(".fab").should("not.exist"); // Asisten hanya untuk peran internal
   });
@@ -304,6 +305,76 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.get("main input.input").type("pt klien alpha");
     cy.contains("button", "Tambah").click();
     cy.contains(".alert", "sudah terdaftar");
+  });
+
+  // --- Fitur tambahan permintaan owner (14 Okt 2026) ---
+  it("TS-029 Dashboard metrik menampilkan KPI status, tren, dan panel kinerja", () => {
+    cy.visitAs("lead@amiga.test", "/dashboard");
+    cy.get(".kpi-status .kpi-mini").should("have.length", 6);
+    cy.contains(".stat", "Invoice masuk").find(".stat-val").invoke("text").then((t) => expect(Number(t)).to.be.greaterThan(0));
+    cy.contains("h2", "Tren harian");
+    cy.get(".recharts-line").should("have.length", 3);
+    cy.contains("h2", "Kecepatan proses");
+    cy.contains("h2", "Kualitas & kendala");
+    cy.contains("h2", "Nilai pembayaran");
+    cy.contains(".seg button", "7 hari").click();
+    cy.contains("p", "Kinerja back office");
+    cy.contains(".kpi-mini", "Siap ditinjau").click();
+    cy.location("search").should("eq", "?status=READY_FOR_REVIEW");
+  });
+
+  it("TS-030 PIC mendaftarkan vendor; nama yang sudah ada tidak perlu ditambahkan", () => {
+    cy.visitAs("pic.alpha@amiga.test", "/referensi/vendor");
+    cy.contains("button", "Tambah vendor").click();
+    cy.get("#v-name").type("PT Vendor Uji Sistem");
+    cy.get("#v-npwp").type("01.234.567.8-901.000");
+    cy.get("#v-bank_name").type("BCA");
+    cy.get("#v-account_no").type("5550001111");
+    cy.contains(".modal button", "Simpan").click();
+    cy.contains("tr", "PT Vendor Uji Sistem").should("contain.text", "5550001111");
+    cy.contains("button", "Tambah vendor").click();
+    cy.get("#v-name").type("pt. VENDOR uji-sistem");
+    cy.contains(".modal .alert", "sudah terdaftar");
+    cy.contains(".modal button", "Simpan").should("be.disabled");
+  });
+
+  it("TS-031 PIC mendaftarkan penanda tangan; default terpilih otomatis saat unggah", () => {
+    cy.visitAs("pic.alpha@amiga.test", "/referensi/penanda-tangan");
+    cy.contains("section", "Disetujui oleh").contains("button", "Tambah").click();
+    cy.get("#s-name").type("Dian Pratama");
+    cy.get("#s-pos").type("Bendahara");
+    cy.contains(".modal button", "Simpan").click();
+    cy.contains("section", "Disetujui oleh").should("contain.text", "Dian Pratama");
+    cy.visitAs("pic.alpha@amiga.test", "/unggah");
+    cy.contains(".signer-picker label", "Dian Pratama").find("input").should("be.checked");
+  });
+
+  it("TS-032 Penanda tangan dokumen bisa diubah sebelum voucher terbit", () => {
+    cy.then(() => {
+      cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.c1.id}`);
+      cy.contains("section", "Penanda tangan voucher").within(() => {
+        cy.contains("button", "Ubah").click();
+        cy.contains("label", "Dian Pratama").find("input").check();
+        cy.contains("button", "Simpan").click();
+      });
+      cy.contains(".alert", "Penanda tangan voucher diperbarui");
+      cy.contains("section", "Penanda tangan voucher").should("contain.text", "Dian Pratama").and("contain.text", "Bendahara");
+    });
+  });
+
+  it("TS-033 Manajemen voucher: filter dan pengelompokan", () => {
+    cy.visitAs("reviewer1@amiga.test", "/voucher");
+    cy.get("table.docs tr.group-row").should("have.length.at.least", 1).first().should("contain.text", "PT Klien Alpha");
+    cy.get("select[aria-label=Kelompokkan]").select("Status");
+    cy.get("tr.group-row").should("contain.text", "Disetujui");
+    // Voucher dari TS-018 (disetujui, belum diunduh klien) selalu ada di spec ini
+    cy.get("select[aria-label=Status]").select("AMIGA_REVIEWED");
+    // Tabel dimuat ulang setelah filter berubah: tunggu sampai semua badge sesuai
+    cy.get("table.docs tbody .badge").should(($badges) => {
+      expect($badges.length).to.be.greaterThan(0);
+      $badges.each((_, b) => { expect(b.textContent).to.eq("Disetujui"); });
+    });
+    cy.contains("tr.total-row", "Total");
   });
 
   // --- Logout ---

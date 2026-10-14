@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { FileUp, UploadCloud } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { SignerPicker } from "../components/SignerPicker";
 import { Alert } from "../components/ui";
 import { todayIso } from "../format";
 import type { DocumentSummary } from "../types";
@@ -23,6 +24,7 @@ export function Upload() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DocumentSummary | null>(null);
+  const [signers, setSigners] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function pick(f: File | undefined) {
@@ -50,6 +52,7 @@ export function Upload() {
     form.set("channel", channel);
     form.set("submitted_date", submittedDate);
     if (dueDate) form.set("due_date", dueDate);
+    form.set("signatory_ids", signers.join(","));
     form.set("file", file);
     setBusy(true);
     setError(null);
@@ -115,6 +118,9 @@ export function Upload() {
             <input id="due" className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
         </div>
+
+        <div className="section-title">Penanda tangan voucher</div>
+        {clientId && <SignerPicker key={clientId} clientId={clientId} onChange={setSigners} />}
 
         <div className={`drop ${over ? "over" : ""}`} onClick={() => inputRef.current?.click()}
              onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}

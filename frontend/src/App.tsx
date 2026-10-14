@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, homePath, useAuth } from "./auth";
 import { Layout } from "./components/Layout";
@@ -6,12 +6,17 @@ import { Loading } from "./components/ui";
 import { AdminClients, AdminUsers } from "./pages/Admin";
 import { DocumentPage } from "./pages/DocumentPage";
 import { HistoryPage } from "./pages/HistoryPage";
-import { Histories, MyReviews, SearchResults, Submissions, Vouchers } from "./pages/Lists";
+import { Histories, MyReviews, SearchResults, Submissions } from "./pages/Lists";
+import { Signatories, Vendors } from "./pages/Reference";
+import { VoucherTable } from "./pages/VoucherTable";
 import { Login } from "./pages/Login";
 import { Queue } from "./pages/Queue";
 import { Upload } from "./pages/Upload";
 import { VoucherPage } from "./pages/VoucherPage";
 import type { Role } from "./types";
+
+// Dashboard memuat library grafik (Recharts); dimuat terpisah agar halaman lain tetap ringan
+const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.Metrics })));
 
 function Protected({ roles, children }: { roles?: Role[]; children: ReactNode }) {
   const { user, loading, has } = useAuth();
@@ -39,7 +44,10 @@ export function App() {
             <Route path="peninjauan" element={<Protected roles={["FINANCE_REVIEWER"]}><MyReviews /></Protected>} />
             <Route path="unggah" element={<Protected roles={["PIC_KLIEN", "INTAKE_SUPPORT"]}><Upload /></Protected>} />
             <Route path="pengajuan" element={<Protected roles={["PIC_KLIEN", "INTAKE_SUPPORT"]}><Submissions /></Protected>} />
-            <Route path="voucher" element={<Vouchers />} />
+            <Route path="dashboard" element={<Protected roles={["SERVICE_LEAD", "FINANCE_REVIEWER", "PIC_KLIEN", "INTAKE_SUPPORT"]}><Suspense fallback={<Loading />}><Metrics /></Suspense></Protected>} />
+            <Route path="voucher" element={<VoucherTable />} />
+            <Route path="referensi/vendor" element={<Vendors />} />
+            <Route path="referensi/penanda-tangan" element={<Protected roles={["PIC_KLIEN", "INTAKE_SUPPORT"]}><Signatories /></Protected>} />
             <Route path="riwayat" element={<Histories />} />
             <Route path="cari" element={<SearchResults />} />
             <Route path="dokumen/:id" element={<DocumentPage />} />

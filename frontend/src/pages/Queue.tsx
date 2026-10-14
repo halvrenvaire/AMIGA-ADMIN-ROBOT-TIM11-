@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangle, CalendarClock, ClipboardCheck, Clock } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
@@ -12,7 +12,8 @@ import type { DashboardSummary, DocStatus, DocumentSummary } from "../types";
 /** Layar 01 — Dashboard Antrean (Service Lead, Finance Reviewer). */
 export function Queue() {
   const { user, has } = useAuth();
-  const [status, setStatus] = useState<DocStatus | "">("");
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState<DocStatus | "">((params.get("status") as DocStatus | null) ?? "");
   const [clientId, setClientId] = useState("");
   const [reviewerId, setReviewerId] = useState("");
   const [problem, setProblem] = useState(false);
