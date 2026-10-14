@@ -39,3 +39,17 @@ def test_many_lines_continue_on_next_page_with_total():
     last = reader.pages[-1].extract_text()
     assert "TOTAL DIBAYARKAN" in last and "BATAS OTORISASI" in last
     assert "Uraian" in last  # header tabel diulang di halaman lanjutan
+
+
+def test_signature_blocks_for_amiga_and_optional_client():
+    reader = _render([_line(1, "Ongkir")])
+    text = re.sub(r"\s+", " ", reader.pages[0].extract_text())
+    assert "Disetujui oleh AMIGA" in text and "Finance Reviewer AMIGA" in text and "Dewi" in text
+    assert "Persetujuan Klien (opsional)" in text and "Jabatan: Client Approver" in text
+
+
+def test_signature_blocks_stay_together_on_last_page():
+    reader = _render([_line(n, LONG) for n in range(1, 31)])
+    last = re.sub(r"\s+", " ", reader.pages[-1].extract_text())
+    assert "Disetujui oleh AMIGA" in last and "Persetujuan Klien (opsional)" in last
+    assert "Tanggal:" in last
