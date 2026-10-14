@@ -22,9 +22,9 @@ from app.models import (
     DocStatus, Document, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
-    ClientRef, DocumentDetail, DocumentSummary, ExtractionOut, FixRequest, IssueItem, VoucherOut,
+    ClientRef, DocumentDetail, DocumentSummary, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
 )
-from app.services import audit_service, storage
+from app.services import audit_service, signer_service, storage
 from app.services.access_rules import accessible_client_ids
 from app.services.document_processing import PIC_FIELDS, parse_pic_value, process_document, set_status
 
@@ -77,6 +77,8 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         extraction=ExtractionOut.model_validate(doc.extraction) if doc.extraction else None,
         pic_overrides=doc.pic_overrides or {},
         voucher=VoucherOut.model_validate(doc.voucher) if doc.voucher else None,
+        vendor=ClientRef(id=doc.vendor.id, name=doc.vendor.name) if doc.vendor else None,
+        signers=doc.signers or [],
     )
 
 
@@ -123,6 +125,8 @@ async def upload_document(
     submitted_date: Annotated[date, Form(description="Tanggal pengajuan")],
     file: Annotated[UploadFile, File(description="Invoice PDF, maksimal 5 halaman")],
     due_date: Annotated[date | None, Form(description="Tenggat (opsional)")] = None,
+    signatory_ids: Annotated[str | None, Form(
+        description="ID penanda tangan dipisah koma. Tidak dikirim = default klien; kosong = tanpa penanda tangan")] = None,
     user: User = Depends(uploader_roles),
     db: Session = Depends(get_db),
 ):
@@ -145,6 +149,8 @@ async def upload_document(
         on_behalf_of = db.scalar(select(UserClientAssignment.delegated_by).where(
             UserClientAssignment.user_id == user.id, UserClientAssignment.client_id == client_id))
 
+    signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids))
+
     request_id = _new_request_id(db)
     file_key = f"invoices/{request_id}.pdf"
     try:
@@ -157,6 +163,7 @@ async def upload_document(
         request_type=request_type.strip(), channel=channel, submitted_date=submitted_date, due_date=due_date,
         status=DocStatus.QUEUED, file_key=file_key,
         original_filename=(file.filename or "invoice.pdf")[:300], page_count=pages, pic_overrides={},
+        signers=signers,
     )
     db.add(doc)
     db.flush()
@@ -298,4 +305,20 @@ def reprocess_document(
     db.commit()
 
     background.add_task(process_document, doc.id, request.app.state.extractor)
+    return _detail(db, doc)
+
+
+@router.put("/{document_id}/signers", response_model=DocumentDetail)
+def set_signers(document_id: uuid.UUID, body: SignersUpdate, user: User = Depends(uploader_roles),
+                db: Session = Depends(get_db)):
+    """Ganti penanda tangan voucher selama voucher belum terbit (PIC Klien / Intake Support)."""
+    doc = _get_document(db, user, document_id)
+    if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Voucher sudah terbit; penanda tangan tidak bisa diubah.")
+    new = signer_service.resolve(db, doc.client_id, body.signatory_ids)
+    describe = lambda items: "; ".join(f"{s['name']} ({s['position']})" for s in items) or "-"  # noqa: E731
+    audit_service.record(db, user, "SIGNERS_CHANGED", document_id=doc.id, client_id=doc.client_id,
+                         field="signers", old_value=describe(doc.signers or []), new_value=describe(new))
+    doc.signers = new
+    db.commit()
     return _detail(db, doc)

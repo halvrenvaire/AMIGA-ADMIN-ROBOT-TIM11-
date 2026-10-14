@@ -91,9 +91,12 @@ def tx(monkeypatch, tmp_path):
     transaction = connection.begin()
     # Dokumen yang sudah ada di database dev dipindah sementara ke klien tersembunyi (ikut
     # di-rollback), supaya hitungan antrean, duplikat, dan beban reviewer hanya dari data test
-    connection.execute(text(
-        "WITH hidden AS (INSERT INTO clients (id, name) VALUES (gen_random_uuid(), 'zz-test-' || gen_random_uuid()) "
-        "RETURNING id) UPDATE documents SET client_id = (SELECT id FROM hidden), assigned_reviewer_id = NULL"))
+    hidden = connection.execute(text(
+        "INSERT INTO clients (id, name) VALUES (gen_random_uuid(), 'zz-test-' || gen_random_uuid()) RETURNING id")).scalar()
+    connection.execute(text("UPDATE documents SET client_id = :c, assigned_reviewer_id = NULL"), {"c": hidden})
+    # Data referensi (vendor, penanda tangan) dari seed/dev juga disembunyikan
+    connection.execute(text("UPDATE vendors SET client_id = :c"), {"c": hidden})
+    connection.execute(text("UPDATE signatories SET client_id = :c"), {"c": hidden})
     monkeypatch.setattr(db_module, "SessionLocal", sessionmaker(
         bind=connection, join_transaction_mode="create_savepoint", autoflush=False, expire_on_commit=False))
     _pending.clear()

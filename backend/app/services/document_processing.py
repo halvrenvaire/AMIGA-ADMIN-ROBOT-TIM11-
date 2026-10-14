@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import select, update
 
 from app import db as db_module
-from app.models import DocStatus, Document, Extraction, IssueCode, LineItem, ValidationIssue
+from app.models import DocStatus, Document, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
 from app.services import audit_service, storage
 from app.services.extraction_service import ExtractedInvoice, ExtractionError, InvoiceExtractor
 from app.services.reviewer_assignment import pick_reviewer
@@ -100,6 +100,8 @@ def run_verification(db, doc: Document) -> list:
     extraction = doc.extraction
     extraction.vendor_norm = normalize(extraction.vendor_name)
     extraction.invoice_no_norm = normalize(extraction.invoice_no)
+    doc.vendor_id = db.scalar(select(Vendor.id).where(
+        Vendor.client_id == doc.client_id, Vendor.name_norm == extraction.vendor_norm)) if extraction.vendor_norm else None
     invoice = InvoiceData(
         vendor_name=extraction.vendor_name, invoice_no=extraction.invoice_no,
         invoice_date=extraction.invoice_date, total=extraction.total,

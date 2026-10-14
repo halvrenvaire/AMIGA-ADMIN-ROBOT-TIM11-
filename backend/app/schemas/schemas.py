@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import DocStatus, IssueCode, Role
+from app.models import DocStatus, IssueCode, Role, SignatoryKind
 
 
 class AskRequest(BaseModel):
@@ -235,6 +235,8 @@ class DocumentDetail(DocumentSummary):
     # Field yang sudah diisi/diperbaiki PIC (didahulukan atas hasil AI)
     pic_overrides: dict[str, str]
     voucher: VoucherOut | None
+    vendor: ClientRef | None = None  # vendor di data referensi (id, name) bila cocok
+    signers: list[Signer] = []
 
 
 class FixRequest(BaseModel):
@@ -302,3 +304,119 @@ class DashboardSummary(BaseModel):
 class ReassignRequest(BaseModel):
     reviewer_id: uuid.UUID
     reason: str | None = Field(None, max_length=1000)
+
+
+# --- Data referensi vendor dan penanda tangan (permintaan owner 14 Okt 2026) ---
+
+class VendorIn(BaseModel):
+    name: str = Field(min_length=2, max_length=300)
+    npwp: str | None = Field(None, max_length=30)
+    address: str | None = Field(None, max_length=1000)
+    contact_name: str | None = Field(None, max_length=200)
+    phone: str | None = Field(None, max_length=50)
+    email: str | None = Field(None, max_length=200)
+    bank_name: str | None = Field(None, max_length=100)
+    account_no: str | None = Field(None, max_length=50)
+    account_name: str | None = Field(None, max_length=200)
+    notes: str | None = Field(None, max_length=1000)
+
+
+class VendorCreate(VendorIn):
+    client_id: uuid.UUID
+
+
+class VendorOut(VendorIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    client: ClientRef
+    is_active: bool
+    documents: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class VendorCheck(BaseModel):
+    exists: bool
+    vendor: VendorOut | None
+
+
+class SignatoryIn(BaseModel):
+    kind: SignatoryKind
+    full_name: str = Field(min_length=2, max_length=200)
+    position: str = Field(min_length=2, max_length=120)
+    is_default: bool = False
+
+
+class SignatoryCreate(SignatoryIn):
+    client_id: uuid.UUID
+
+
+class SignatoryOut(SignatoryIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    client_id: uuid.UUID
+    is_active: bool
+
+
+class Signer(BaseModel):
+    """Salinan penanda tangan pada dokumen/voucher."""
+    kind: SignatoryKind
+    name: str
+    position: str
+
+
+class SignersUpdate(BaseModel):
+    signatory_ids: list[uuid.UUID]
+
+
+class VoucherRow(BaseModel):
+    document_id: uuid.UUID
+    voucher_no: str
+    generated_at: datetime
+    request_id: str
+    client: ClientRef
+    vendor_id: uuid.UUID | None
+    vendor_name: str | None
+    invoice_no: str | None
+    invoice_date: date | None
+    total: Decimal | None
+    status: DocStatus
+    approved_by: str
+
+
+class TrendPoint(BaseModel):
+    date: date
+    received: int
+    approved: int
+    exception: int
+
+
+class DashboardMetrics(BaseModel):
+    period_days: int
+    start: date
+    end: date
+    status_counts: dict[str, int]
+    received: int
+    received_prev: int
+    approved: int
+    approved_prev: int
+    trend: list[TrendPoint]
+    avg_hours_to_voucher: float | None
+    avg_extraction_seconds: float | None
+    sla_on_time: int
+    sla_total: int
+    first_pass: int
+    first_pass_total: int
+    top_issues: list[dict]
+    corrected_docs: int
+    reviewed_docs: int
+    total_value: Decimal
+    total_value_prev: Decimal
+    value_by_client: list[dict]
+    top_vendors: list[dict]
+
+
+# DocumentDetail merujuk Signer yang didefinisikan di bawahnya
+DocumentDetail.model_rebuild()

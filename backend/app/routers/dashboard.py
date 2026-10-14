@@ -1,7 +1,7 @@
 """Dashboard antrean dan pengalihan reviewer oleh Service Lead (F6, Layar 01)."""
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_roles
@@ -9,10 +9,13 @@ from app.config import settings
 from app.db import get_db
 from app.models import DocStatus, Role, User
 from app.routers.documents import _detail, _get_document
-from app.schemas.schemas import DashboardSummary, DocumentDetail, ReassignRequest, ReviewerLoadOut
+from app.schemas.schemas import (
+    DashboardMetrics, DashboardSummary, DocumentDetail, ReassignRequest, ReviewerLoadOut, TrendPoint,
+)
 from app.services import audit_service
 from app.services.access_rules import accessible_client_ids
 from app.services.document_processing import uploader_ids
+from app.services import metrics_service
 from app.services.queue_service import summarize
 
 router = APIRouter(tags=["Dashboard Antrean"])
@@ -28,6 +31,23 @@ def dashboard_summary(user: User = Depends(require_roles(Role.SERVICE_LEAD, Role
         reviewers=[ReviewerLoadOut.model_validate(r) for r in s.reviewers],
         overload_threshold=settings.reviewer_overload_threshold, due_soon_days=settings.due_soon_days,
     )
+
+
+@router.get("/dashboard/metrics", response_model=DashboardMetrics)
+def dashboard_metrics(
+    days: int = Query(30, ge=7, le=365, description="Panjang periode (hari)"),
+    client_id: uuid.UUID | None = None,
+    user: User = Depends(require_roles(Role.SERVICE_LEAD, Role.FINANCE_REVIEWER, Role.PIC_KLIEN, Role.INTAKE_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    """Metrik utama: status, tren harian, kecepatan proses, kualitas, dan nilai pembayaran,
+    dibandingkan dengan periode sebelumnya yang sama panjang."""
+    ids = accessible_client_ids(db, user)
+    if client_id is not None:
+        ids &= {client_id}
+    m = metrics_service.compute(db, ids, days)
+    return DashboardMetrics(**{k: v for k, v in vars(m).items() if k != "trend"},
+                            trend=[TrendPoint(**t) for t in m.trend])
 
 
 @router.get("/documents/{document_id}/reviewer-options", response_model=list[ReviewerLoadOut])

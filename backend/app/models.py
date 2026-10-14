@@ -102,6 +102,54 @@ class UserClientAssignment(Base):
     client: Mapped[Client] = relationship()
 
 
+class Vendor(Base):
+    """Data referensi vendor milik satu klien, didaftarkan PIC Klien. Nama unik per klien (dinormalisasi)."""
+    __tablename__ = "vendors"
+    __table_args__ = (UniqueConstraint("client_id", "name_norm"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    name: Mapped[str] = mapped_column(String(300))
+    name_norm: Mapped[str] = mapped_column(String(300))
+    npwp: Mapped[str | None] = mapped_column(String(30))
+    address: Mapped[str | None] = mapped_column(Text)
+    contact_name: Mapped[str | None] = mapped_column(String(200))
+    phone: Mapped[str | None] = mapped_column(String(50))
+    email: Mapped[str | None] = mapped_column(String(200))
+    bank_name: Mapped[str | None] = mapped_column(String(100))
+    account_no: Mapped[str | None] = mapped_column(String(50))
+    account_name: Mapped[str | None] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    client: Mapped[Client] = relationship()
+
+
+class SignatoryKind(str, enum.Enum):
+    PENGAJU = "PENGAJU"      # kotak "Diajukan oleh" (pihak PIC Klien)
+    PENYETUJU = "PENYETUJU"  # kotak "Disetujui oleh" (direktur, bendahara, dll.)
+
+
+class Signatory(Base):
+    """Penanda tangan voucher milik satu klien, didaftarkan PIC Klien."""
+    __tablename__ = "signatories"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    kind: Mapped[SignatoryKind] = mapped_column(Enum(SignatoryKind, name="signatory_kind"))
+    full_name: Mapped[str] = mapped_column(String(200))
+    position: Mapped[str] = mapped_column(String(120))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -116,6 +164,11 @@ class Document(Base):
     channel: Mapped[str | None] = mapped_column(String(30))
     # Field yang diisi/diperbaiki PIC; didahulukan atas hasil ekstraksi ulang AI (UAT 8)
     pic_overrides: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Vendor di data referensi klien yang cocok dengan hasil ekstraksi (nama dinormalisasi)
+    vendor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("vendors.id"), index=True)
+    # Salinan penanda tangan voucher saat dipilih: [{"kind": "PENGAJU"|"PENYETUJU", "name", "position"}].
+    # Disalin (bukan dirujuk) supaya voucher lama tidak berubah bila daftar penanda tangan diedit.
+    signers: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     submitted_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[DocStatus] = mapped_column(Enum(DocStatus, name="doc_status"), index=True)
@@ -129,6 +182,7 @@ class Document(Base):
     )
 
     client: Mapped[Client] = relationship()
+    vendor: Mapped["Vendor | None"] = relationship()
     extraction: Mapped["Extraction | None"] = relationship(back_populates="document", uselist=False)
     issues: Mapped[list["ValidationIssue"]] = relationship(back_populates="document")
     voucher: Mapped["Voucher | None"] = relationship(back_populates="document", uselist=False)
