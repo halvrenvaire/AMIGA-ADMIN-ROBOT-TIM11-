@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Membuat role & database PostgreSQL lokal sesuai DATABASE_URL di backend/.env.
 # Jalankan dari folder backend/:  bash scripts/create_db.sh   (akan meminta password sudo)
+# Database lain dengan role yang sama, mis. untuk E2E:  bash scripts/create_db.sh amiga_robot_admin_test
 set -euo pipefail
 cd "$(dirname "$0")/.."
 URL=$(grep '^DATABASE_URL=' .env | cut -d= -f2-)
@@ -11,6 +12,7 @@ u = urlparse(sys.argv[1])
 print(unquote(u.username), unquote(u.password), u.path.lstrip("/"))
 PY
 )
+DB_NAME="${1:-$DB_NAME}"
 sudo -u postgres psql -v ON_ERROR_STOP=1 -v u="$DB_USER" -v p="$DB_PASS" -v d="$DB_NAME" <<'SQL'
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'u', :'p')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'u') \gexec

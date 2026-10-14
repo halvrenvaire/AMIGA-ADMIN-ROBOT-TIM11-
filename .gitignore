@@ -15,6 +15,7 @@ dist/
 
 # File unggahan lokal & voucher hasil generate
 storage/
+storage-e2e/
 
 # Editor / OS
 .vscode/
@@ -23,3 +24,6 @@ storage/
 
 # Index FAISS hasil build (dibuat ulang lewat /reindex)
 backend/data/
+frontend/cypress/downloads/
+frontend/cypress/screenshots/
+frontend/cypress/logs/

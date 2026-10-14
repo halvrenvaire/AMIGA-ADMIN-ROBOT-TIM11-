@@ -156,7 +156,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | 5 ✅ | F4, F5, F8: layar review, setujui/kembalikan, cek SoD + pengalihan otomatis, voucher PDF, pencatatan audit |
 | 6 ✅ | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
 | 7 ✅ | Frontend 5 layar + tombol chat asisten |
-| 8 | UAT 8 skenario, lalu Demo Day |
+| 8 🔄 | UAT 8 skenario ✅ (Cypress E2E), lalu Demo Day |
 
 ---
 
@@ -166,14 +166,14 @@ PoC dinyatakan siap demo bila **8 skenario** di bawah lulus semua dan target wak
 
 | No | Skenario | Langkah | Hasil yang diharapkan | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Alur normal | Unggah → ekstraksi → lolos verifikasi → disetujui | Voucher terunduh, status SENT_TO_CLIENT | 🔄 lulus test API; menunggu UI |
-| 2 | Multi-line item | Invoice dengan ≥ 3 jenis barang | Semua baris terbaca, total benar | 🔄 lulus test API + Nova; menunggu UI |
-| 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | 🔄 lulus test API + Nova; menunggu UI |
-| 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | 🔄 lulus test API + Nova; menunggu UI |
-| 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | 🔄 lulus test API (akun `multi@amiga.test`); menunggu UI |
-| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | 🔄 lulus test API (dokumen & file PDF); menunggu UI |
-| 7 | Jejak audit | Reviewer mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | 🔄 lulus test API; menunggu UI |
-| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | 🔄 lulus test API; menunggu UI |
+| 1 | Alur normal | Unggah → ekstraksi → lolos verifikasi → disetujui | Voucher terunduh, status SENT_TO_CLIENT | ✅ lulus E2E (Cypress) |
+| 2 | Multi-line item | Invoice dengan ≥ 3 jenis barang | Semua baris terbaca, total benar | ✅ lulus E2E (Cypress) |
+| 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | ✅ lulus E2E (Cypress) |
+| 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | ✅ lulus E2E (Cypress) |
+| 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | ✅ lulus E2E (Cypress) |
+| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | ✅ lulus E2E (Cypress) |
+| 7 | Jejak audit | Reviewer mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | ✅ lulus E2E (Cypress) |
+| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | ✅ lulus E2E (Cypress) |
 
 Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD v2, tetapi tetap diuji dengan test otomatis.
 
@@ -199,7 +199,7 @@ Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD
 | AI (menjawab, nantinya ekstraksi) | Amazon Bedrock — **Amazon Nova Lite** (`ap-southeast-1`) |
 | Embedding Asisten SOP | Amazon Bedrock — **Titan Text Embeddings v2** (`us-east-1`) |
 | Pencarian dokumen Asisten SOP | FAISS (index disimpan di `backend/data/`) |
-| Testing | pytest (rencana: Cypress untuk end-to-end) |
+| Testing | pytest (unit & API), Cypress (8 skenario UAT end-to-end) |
 
 Semua library dan tools yang dipakai bersifat **open source**. Satu-satunya layanan berbayar adalah Amazon Bedrock.
 
@@ -220,6 +220,7 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
 ├── docs/
 │   └── sop.md                  # SOP v1.1 — juga sumber pengetahuan Asisten SOP
 ├── samples/invoices/           # Invoice PDF dummy untuk UAT
+├── scripts/run_e2e.sh          # Menjalankan 8 skenario UAT (Cypress) end-to-end
 ├── frontend/                   # React + Vite (lihat "Menjalankan frontend")
 │   └── src/
 │       ├── pages/              # Login, Queue (01), Upload + Lists (02), DocumentPage (03), VoucherPage (04), HistoryPage (05), Admin
@@ -238,7 +239,7 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
     │   └── services/           # Ekstraksi AI, verifikasi, proses dokumen, pemilihan reviewer, penyimpanan file,
     │                           # aturan akses, jejak audit, Bedrock, RAG (loader, chunker, FAISS, indexing), riwayat, memori
     ├── alembic/                # Migrasi database
-    ├── scripts/                # create_db.sh (role & database lokal), make_dummy_invoices.py
+    ├── scripts/                # create_db.sh, make_dummy_invoices.py, e2e_server.sh (backend E2E :8001)
     ├── seed.py                 # Data dummy: 2 klien, 8 pengguna
     ├── tests/                  # pytest
     ├── requirements.txt
@@ -316,6 +317,22 @@ cd backend
 .venv/bin/python -m pytest -m "not integration"   # cepat, tanpa AWS
 .venv/bin/python -m pytest                        # termasuk integration test ke Bedrock (ekstraksi Nova)
 ```
+
+### Test end-to-end (8 skenario UAT)
+
+Cypress menjalankan 8 skenario UAT lewat UI dengan **ekstraksi Nova sungguhan**, plus target waktu (ekstraksi ≤ 15 detik, voucher ≤ 3 detik, antrean & layar review ≤ 2 detik). E2E memakai database **terpisah** `amiga_robot_admin_test` yang dikosongkan setiap kali dijalankan, sehingga data dev/demo tidak tersentuh.
+
+```bash
+# Sekali saja: buat database test (meminta password sudo)
+cd backend && bash scripts/create_db.sh amiga_robot_admin_test && cd ..
+
+# Jalankan E2E (backend :8001 + frontend :5174 dinyalakan dan dimatikan otomatis, sekitar 30 detik)
+bash scripts/run_e2e.sh
+# Mode interaktif Cypress
+bash scripts/run_e2e.sh --open
+```
+
+Log server E2E ada di `frontend/cypress/logs/`.
 
 Test dokumen berjalan di dalam satu transaksi database yang di-rollback, sehingga database dev tidak terisi dokumen test (jejak audit yang append-only membuat dokumen yang sudah di-commit tidak bisa dihapus).
 
