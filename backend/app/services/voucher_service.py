@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from fpdf import FPDF
+from fpdf import FPDF, FontFace
+from fpdf.enums import TableCellFillMode
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -73,23 +74,34 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         pdf.cell(0, 6, f": {_t(value)}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
-    widths = (10, 84, 18, 38, 40)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_fill_color(235, 245, 246)
-    for w, h in zip(widths, ("No", "Uraian", "Qty", "Harga Satuan", "Subtotal")):
-        pdf.cell(w, 7, h, border=1, fill=True, align="C")
-    pdf.ln()
+    # Tabel fpdf2: uraian panjang dibungkus ke baris berikutnya dan tinggi baris menyesuaikan,
+    # sehingga teks tidak meluber ke kolom lain. Header diulang bila tabel berlanjut ke halaman baru.
+    pdf.set_draw_color(150, 160, 165)
+    pdf.set_fill_color(255, 255, 255)
     pdf.set_font("Helvetica", "", 9)
-    for line in ex.line_items:
-        qty = "-" if line.qty is None else f"{line.qty.normalize():f}"
-        for w, text, align in zip(widths, (str(line.position), _t(line.description)[:60], qty,
-                                           _money(line.unit_price), _money(line.subtotal)),
-                                  ("C", "L", "C", "R", "R")):
-            pdf.cell(w, 7, text, border=1, align=align)
-        pdf.ln()
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(sum(widths[:4]), 8, "TOTAL DIBAYARKAN", border=1, align="R")
-    pdf.cell(widths[4], 8, _money(ex.total), border=1, align="R")
+    with pdf.table(
+        cell_fill_mode=TableCellFillMode.NONE,
+        col_widths=(10, 84, 18, 38, 40),
+        text_align=("CENTER", "LEFT", "CENTER", "RIGHT", "RIGHT"),
+        headings_style=FontFace(emphasis="BOLD", fill_color=(235, 245, 246)),
+        line_height=5,
+        padding=1.5,
+        v_align="MIDDLE",
+        first_row_as_headings=True,
+        repeat_headings=1,
+    ) as table:
+        header = table.row()
+        for title in ("No", "Uraian", "Qty", "Harga Satuan", "Subtotal"):
+            header.cell(title, align="CENTER")
+        for line in ex.line_items:
+            qty = "-" if line.qty is None else f"{line.qty.normalize():f}"
+            row = table.row()
+            for text in (str(line.position), _t(line.description), qty,
+                         _money(line.unit_price), _money(line.subtotal)):
+                row.cell(text)
+        total = table.row(style=FontFace(emphasis="BOLD", size_pt=10))
+        total.cell("TOTAL DIBAYARKAN", colspan=4, align="RIGHT")
+        total.cell(_money(ex.total))
     pdf.ln(12)
 
     pdf.set_font("Helvetica", "B", 10)
