@@ -12,16 +12,19 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-ganti"
     jwt_expire_minutes: int = 480
 
-    storage_backend: str = "local"
-    local_storage_dir: str = "../storage"
+    storage_backend: str = "local"  # "local" atau "s3" (memakai AWS_BUCKET)
+    local_storage_dir: str = "../storage"  # relatif terhadap folder backend/
 
     aws_access_key: str = ""
     aws_secret_access_key: str = ""
     aws_bucket: str = ""
     aws_region: str = "ap-southeast-1"
+    # Kosong = memakai LLM_MODEL (Nova Lite), yang bisa membaca PDF langsung
     extraction_model_id: str = ""
+    extraction_max_tokens: int = 4096
 
     max_pdf_pages: int = 5
+    max_upload_mb: int = 10
 
     # RAG /ask
     # Titan Text sudah end of life, jadi LLM memakai Amazon Nova (tersedia di ap-southeast-1).

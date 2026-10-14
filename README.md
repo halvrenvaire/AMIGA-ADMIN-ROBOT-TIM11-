@@ -134,9 +134,9 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 
 | Fitur (PRD §4) | Prioritas | Status | Keterangan |
 | --- | --- | --- | --- |
-| F1. Unggah invoice dan antrean | P0 | ⏳ | Tabel `documents` (Request ID, status, pengunggah, atas nama) sudah ada. Kolom **saluran** belum ditambahkan |
-| F2. Ekstraksi AI | P0 | ⏳ | Tabel `extractions` dan `line_items` sudah ada |
-| F3. Verifikasi otomatis oleh sistem | P0 | ⏳ | Tabel `validation_issues` dan kode kendala sudah ada |
+| F1. Unggah invoice dan antrean | P0 | ✅ | `POST /documents`: PDF ≤ 5 halaman, field wajib termasuk saluran, Request ID, QUEUED, unggah atas nama PIC oleh Intake Support |
+| F2. Ekstraksi AI | P0 | ✅ | Nova Lite membaca PDF langsung (2–4 detik per invoice dummy). Gagal baca → dokumen tetap tersimpan, Finance Reviewer bisa proses ulang. Ekstraksi ulang memakai Request ID sama |
+| F3. Verifikasi otomatis oleh sistem | P0 | ✅ | Kelengkapan, angka, duplikasi (dinormalisasi). Kode + alasan berbahasa sederhana. Perbaikan PIC didahulukan atas hasil AI |
 | F4. Peninjauan oleh Finance Reviewer | P0 | ⏳ | |
 | F5. Voucher PDF dan serah terima | P0 | ⏳ | Tabel `vouchers` sudah ada |
 | F6. Dashboard antrean | P1 | ⏳ | |
@@ -152,7 +152,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Tahap | Isi |
 | --- | --- |
 | 3 ✅ | Login, peran ganda, isolasi klien, API System Admin (aturan SoD saat menyetujui dibangun di Tahap 5) |
-| 4 | F1–F3: unggah, ekstraksi AI, verifikasi (termasuk ekstraksi ulang dengan Request ID sama) |
+| 4 ✅ | F1–F3: unggah, ekstraksi AI, verifikasi (termasuk ekstraksi ulang dengan Request ID sama) |
 | 5 | F4, F5, F8: layar review, setujui/kembalikan, cek SoD + pengalihan otomatis, voucher PDF, pencatatan audit |
 | 6 | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
 | 7 | Frontend 5 layar + tombol chat asisten |
@@ -167,15 +167,25 @@ PoC dinyatakan siap demo bila **8 skenario** di bawah lulus semua dan target wak
 | No | Skenario | Langkah | Hasil yang diharapkan | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Alur normal | Unggah → ekstraksi → lolos verifikasi → disetujui | Voucher terunduh, status SENT_TO_CLIENT | ⏳ |
-| 2 | Multi-line item | Invoice dengan ≥ 3 jenis barang | Semua baris terbaca, total benar | ⏳ |
-| 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | ⏳ |
-| 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | ⏳ |
+| 2 | Multi-line item | Invoice dengan ≥ 3 jenis barang | Semua baris terbaca, total benar | 🔄 lulus test API + Nova; menunggu UI |
+| 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | 🔄 lulus test API + Nova; menunggu UI |
+| 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | 🔄 lulus test API + Nova; menunggu UI |
 | 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | ⏳ |
-| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | 🔄 aturan & test di level klien siap; endpoint dokumen di Tahap 4 |
+| 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | 🔄 lulus test API (dokumen & file PDF); menunggu UI |
 | 7 | Jejak audit | Reviewer mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | 🔄 tabel append-only siap |
-| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | ⏳ |
+| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | 🔄 lulus test API; menunggu UI |
 
 Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD v2, tetapi tetap diuji dengan test otomatis.
+
+**Invoice dummy untuk UAT** ada di [`samples/invoices/`](samples/invoices/) (semua data fiktif), dibuat ulang dengan `backend/.venv/bin/python backend/scripts/make_dummy_invoices.py`:
+
+| File | Untuk | Hasil yang diharapkan |
+| --- | --- | --- |
+| `01_normal_3_baris.pdf` | UAT 1, 2 | READY_FOR_REVIEW, 3 baris terbaca |
+| `02_tanpa_rekening.pdf` | UAT 3, 8 | MISSING_EVIDENCE (nomor rekening) |
+| `03_duplikat_dari_01.pdf` | UAT 4 (unggah setelah 01, klien sama) | POSSIBLE_DUPLICATE |
+| `04_selisih_total.pdf` | Aturan angka | CALCULATION_DISCREPANCY |
+| `05_normal_jasa.pdf` | UAT 5, 7 | READY_FOR_REVIEW |
 
 ---
 
@@ -209,6 +219,7 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
 ├── readme/                     # Dokumen acuan: BRD v1.1, PRD v2, BPMN revisi
 ├── docs/
 │   └── sop.md                  # SOP v1.1 — juga sumber pengetahuan Asisten SOP
+├── samples/invoices/           # Invoice PDF dummy untuk UAT
 └── backend/
     ├── app/
     │   ├── main.py             # Entry point FastAPI
@@ -216,11 +227,12 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
     │   ├── db.py, models.py    # Koneksi dan model database
     │   ├── security.py         # Hash password
     │   ├── auth.py             # Token JWT, cek peran & isolasi klien (dependency FastAPI)
-    │   ├── routers/            # health, auth, clients, admin, ask, ask_agent, reindex, database
+    │   ├── routers/            # health, auth, clients, documents, admin, ask, ask_agent, reindex, database
     │   ├── schemas/            # Model request/response
-    │   └── services/           # Aturan akses, jejak audit, Bedrock, loader dokumen, chunker, FAISS, indexing, riwayat, memori tanya-jawab
+    │   └── services/           # Ekstraksi AI, verifikasi, proses dokumen, pemilihan reviewer, penyimpanan file,
+    │                           # aturan akses, jejak audit, Bedrock, RAG (loader, chunker, FAISS, indexing), riwayat, memori
     ├── alembic/                # Migrasi database
-    ├── scripts/create_db.sh    # Membuat role & database PostgreSQL lokal
+    ├── scripts/                # create_db.sh (role & database lokal), make_dummy_invoices.py
     ├── seed.py                 # Data dummy: 2 klien, 8 pengguna
     ├── tests/                  # pytest
     ├── requirements.txt
@@ -284,8 +296,12 @@ Semua akun memakai password dari `SEED_DEFAULT_PASSWORD` di `.env`.
 ```bash
 cd backend
 .venv/bin/python -m pytest -m "not integration"   # cepat, tanpa AWS
-.venv/bin/python -m pytest                        # termasuk integration test ke Bedrock
+.venv/bin/python -m pytest                        # termasuk integration test ke Bedrock (ekstraksi Nova)
 ```
+
+Test dokumen berjalan di dalam satu transaksi database yang di-rollback, sehingga database dev tidak terisi dokumen test (jejak audit yang append-only membuat dokumen yang sudah di-commit tidak bisa dihapus).
+
+File PDF yang diunggah disimpan di folder `storage/` (di root repo) atau di bucket S3 bila `STORAGE_BACKEND=s3`.
 
 ---
 
@@ -305,6 +321,12 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PUT | `/admin/users/{id}/clients` | System Admin: ubah penugasan klien |
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
+| POST | `/documents` | PIC Klien / Intake Support: unggah invoice PDF (form: `client_id`, `request_type`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `file`). Mengembalikan Request ID dan status QUEUED |
+| GET | `/documents` | Dokumen milik klien yang ditugaskan; filter `status`, `client_id` |
+| GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
+| GET | `/documents/{id}/file` | PDF asli |
+| POST | `/documents/{id}/fix` | PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}` |
+| POST | `/documents/{id}/reprocess` | Finance Reviewer: proses ulang dokumen yang gagal dibaca AI |
 | POST | `/ask` | Tanya Asisten SOP. Body: `{"question": "...", "session_id": "..."}` |
 | POST | `/ask-agent` | Seperti `/ask`, ditambah **memori tanya-jawab lintas sesi** (arahan mentor): pertanyaan lama yang mirip ikut dipakai sebagai referensi. Respons menambahkan `answer_id` dan `memory_refs` |
 | POST | `/ask-agent/feedback` | Beri 👍/👎 pada jawaban `/ask-agent`. Body: `{"answer_id": 17, "helpful": true}` |
@@ -321,7 +343,7 @@ Endpoint `/db/*` hanya untuk **melihat** isi database selama pengembangan dan ha
 
 `session_id` mengelompokkan riwayat percakapan. Gunakan nilai unik per orang/percakapan.
 
-Endpoint invoice → voucher (unggah, ekstraksi, review, voucher, dashboard) dibangun mulai Tahap 4.
+Setelah unggah, ekstraksi dan verifikasi berjalan di background: cek `GET /documents/{id}` beberapa detik kemudian. Endpoint review, voucher, dan dashboard dibangun di Tahap 5–6.
 
 ---
 
@@ -337,6 +359,11 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Isi token login | Token hanya berisi ID pengguna; peran dan status aktif dibaca ulang dari database di setiap request | Perubahan peran atau penonaktifan akun oleh System Admin langsung berlaku tanpa menunggu token kedaluwarsa |
 | Akses lintas klien | Ditolak dengan **403 "Akses ditolak"** dan dicatat sebagai `ACCESS_DENIED` di jejak audit | Sesuai UAT 6, dan percobaan akses bisa ditelusuri |
 | System Admin dan akunnya sendiri | Tidak bisa mengubah peran, penugasan klien, atau status akunnya sendiri | Perluasan aturan "admin tidak boleh memberi peran ke diri sendiri" |
+| Penugasan reviewer | Saat lolos verifikasi, dokumen ditugaskan ke Finance Reviewer klien itu dengan antrean READY_FOR_REVIEW paling sedikit, **bukan** pengunggah atau PIC yang diwakili | Mencegah SoD sejak awal; cek SoD saat menyetujui tetap dijalankan (Tahap 5) |
+| Cakupan cek duplikat | Hanya di antara invoice **klien yang sama** | Risiko bayar ganda ada per klien; pesan duplikat menyebut Request ID lain sehingga tidak boleh lintas klien |
+| AI gagal membaca | Status **EXCEPTION** dengan kode `EXTRACTION_FAILED`; Finance Reviewer bisa memproses ulang | Hanya ada 6 status di PRD; dokumen tetap tersimpan (FR-2.5) |
+| Pilihan saluran | Email, WhatsApp, Lainnya | PRD menyebut "mis. Email/WhatsApp" |
+| Format Request ID | `REQ-YYYYMMDD-XXXXXX` (6 karakter heksadesimal acak) | Mudah dibaca dan dicatat PIC |
 | `POSSIBLE_DUPLICATE` | Membuat status **EXCEPTION** | Sesuai PRD v2 dan target "0 duplikat lolos" |
 | Kembalikan ke PIC | Kode kendala `RETURNED_BY_REVIEWER` + alasan wajib | PRD v2 tidak memberi nama kode |
 | Jejak audit permanen | Ditegakkan dengan **trigger database**, bukan hanya di aplikasi | Bahkan akses langsung ke database tidak bisa mengubah atau menghapus catatan |

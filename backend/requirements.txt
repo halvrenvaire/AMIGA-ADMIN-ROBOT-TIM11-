@@ -8,6 +8,7 @@ python-multipart==0.0.20
 python-dotenv==1.1.1
 boto3==1.40.45
 pypdf==6.1.1
+fpdf2==2.8.4
 pyjwt==2.10.1
 bcrypt==5.0.0
 pytest==8.4.2

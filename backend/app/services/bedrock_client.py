@@ -52,3 +52,19 @@ class BedrockClient:
         except (ClientError, BotoCoreError) as e:
             raise BedrockError(f"Generate jawaban gagal: {e}") from e
         return response["output"]["message"]["content"][0]["text"].strip()
+
+    def read_pdf(self, system_prompt: str, pdf_bytes: bytes, instruction: str, max_tokens: int) -> str:
+        """Kirim PDF langsung ke model (Converse API, blok dokumen) dan kembalikan teks jawabannya."""
+        try:
+            response = self.llm_runtime.converse(
+                modelId=settings.extraction_model_id or settings.llm_model,
+                system=[{"text": system_prompt}],
+                messages=[{"role": "user", "content": [
+                    {"document": {"format": "pdf", "name": "invoice", "source": {"bytes": pdf_bytes}}},
+                    {"text": instruction},
+                ]}],
+                inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
+            )
+        except (ClientError, BotoCoreError) as e:
+            raise BedrockError(f"Membaca PDF gagal: {e}") from e
+        return response["output"]["message"]["content"][0]["text"].strip()

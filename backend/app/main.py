@@ -5,8 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from app.routers import admin, ask, ask_agent, auth, clients, database, health, reindex
+from app.routers import admin, ask, ask_agent, auth, clients, database, documents, health, reindex
 from app.services.bedrock_client import BedrockClient
+from app.services.extraction_service import InvoiceExtractor
 from app.services.indexing_service import IndexingService
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     app.state.bedrock = BedrockClient()
     app.state.indexing = IndexingService(app.state.bedrock)
+    app.state.extractor = InvoiceExtractor(app.state.bedrock)
     try:
         # Muat index dari disk; bangun baru hanya bila belum pernah ada
         app.state.indexing.build_index(force=False)
@@ -49,6 +51,7 @@ def root():
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(clients.router)
+app.include_router(documents.router)
 app.include_router(admin.router)
 app.include_router(ask.router)
 app.include_router(ask_agent.router)

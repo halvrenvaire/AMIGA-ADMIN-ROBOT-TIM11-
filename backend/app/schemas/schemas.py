@@ -1,9 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import Role
+from app.models import DocStatus, IssueCode, Role
 
 
 class AskRequest(BaseModel):
@@ -160,3 +161,73 @@ class ActiveUpdate(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+# --- Dokumen invoice (F1–F3) ---
+
+class DocumentSummary(BaseModel):
+    id: uuid.UUID
+    request_id: str
+    client: ClientRef
+    status: DocStatus
+    request_type: str | None
+    channel: str | None
+    submitted_date: date | None
+    due_date: date | None
+    original_filename: str
+    page_count: int
+    uploaded_by: str
+    on_behalf_of: str | None
+    assigned_reviewer: str | None
+    vendor_name: str | None
+    total: Decimal | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IssueItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: IssueCode
+    field: str | None
+    message: str
+    created_at: datetime
+
+
+class LineItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    position: int
+    description: str | None
+    qty: Decimal | None
+    unit_price: Decimal | None
+    subtotal: Decimal | None
+
+
+class ExtractionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    vendor_name: str | None
+    invoice_no: str | None
+    invoice_date: date | None
+    total: Decimal | None
+    bank_name: str | None
+    account_no: str | None
+    account_name: str | None
+    line_items: list[LineItemOut]
+    extracted_at: datetime | None
+    duration_ms: int | None
+
+
+class DocumentDetail(DocumentSummary):
+    # Kendala yang masih terbuka: kode + alasan berbahasa sederhana (FR-3.3)
+    issues: list[IssueItem]
+    extraction: ExtractionOut | None
+    # Field yang sudah diisi/diperbaiki PIC (didahulukan atas hasil AI)
+    pic_overrides: dict[str, str]
+
+
+class FixRequest(BaseModel):
+    """Perbaikan oleh PIC Klien / Intake Support saat EXCEPTION (FR-3.4)."""
+    fields: dict[str, str] = {}
+    note: str | None = Field(None, max_length=1000)

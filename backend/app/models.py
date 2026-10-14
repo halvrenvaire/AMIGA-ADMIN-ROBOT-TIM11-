@@ -112,6 +112,10 @@ class Document(Base):
     # PIC Klien yang diwakili bila diunggah oleh Intake Support
     on_behalf_of: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     request_type: Mapped[str | None] = mapped_column(String(100))
+    # Asal pengajuan (FR-1.2), mis. Email atau WhatsApp; wajib diisi lewat formulir unggah
+    channel: Mapped[str | None] = mapped_column(String(30))
+    # Field yang diisi/diperbaiki PIC; didahulukan atas hasil ekstraksi ulang AI (UAT 8)
+    pic_overrides: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     submitted_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[DocStatus] = mapped_column(Enum(DocStatus, name="doc_status"), index=True)
