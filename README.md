@@ -145,7 +145,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Asisten AI (SOP) | Tambahan | ✅ | `POST /ask`: menjawab dari SOP dengan sumber dan riwayat percakapan |
 | Asisten AI Agent (memori tanya-jawab) | Tambahan | ✅ | `POST /ask-agent`: memakai tanya-jawab lama yang mirip sebagai referensi, dengan 👍/👎 |
 | Asisten AI Agent (data antrean) | Tambahan | ✅ | `/ask-agent` menjawab pertanyaan antrean dari data sistem, hanya klien yang ditugaskan; System Admin SOP saja |
-| Frontend (5 layar) | P0 | ⏳ | React + Vite |
+| Frontend (5 layar) | P0 | ✅ | React + Vite + TypeScript: login, Dashboard Antrean, Unggah & Pengajuan, Peninjauan split-screen, Voucher, Riwayat, layar System Admin, tombol chat Asisten |
 
 ### Rencana tahap berikutnya
 
@@ -155,7 +155,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | 4 ✅ | F1–F3: unggah, ekstraksi AI, verifikasi (termasuk ekstraksi ulang dengan Request ID sama) |
 | 5 ✅ | F4, F5, F8: layar review, setujui/kembalikan, cek SoD + pengalihan otomatis, voucher PDF, pencatatan audit |
 | 6 ✅ | Asisten AI membaca data antrean (sesuai hak akses), F6 dashboard |
-| 7 | Frontend 5 layar + tombol chat asisten |
+| 7 ✅ | Frontend 5 layar + tombol chat asisten |
 | 8 | UAT 8 skenario, lalu Demo Day |
 
 ---
@@ -195,7 +195,7 @@ Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD
 | --- | --- |
 | Backend | Python, FastAPI, SQLAlchemy, Alembic |
 | Database | PostgreSQL |
-| Frontend (rencana) | React + Vite |
+| Frontend | React 19 + Vite 8 + TypeScript, React Router, ikon lucide-react |
 | AI (menjawab, nantinya ekstraksi) | Amazon Bedrock — **Amazon Nova Lite** (`ap-southeast-1`) |
 | Embedding Asisten SOP | Amazon Bedrock — **Titan Text Embeddings v2** (`us-east-1`) |
 | Pencarian dokumen Asisten SOP | FAISS (index disimpan di `backend/data/`) |
@@ -220,6 +220,12 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
 ├── docs/
 │   └── sop.md                  # SOP v1.1 — juga sumber pengetahuan Asisten SOP
 ├── samples/invoices/           # Invoice PDF dummy untuk UAT
+├── frontend/                   # React + Vite (lihat "Menjalankan frontend")
+│   └── src/
+│       ├── pages/              # Login, Queue (01), Upload + Lists (02), DocumentPage (03), VoucherPage (04), HistoryPage (05), Admin
+│       ├── components/         # Layout + sidebar per peran, Asisten, tabel dokumen, modal, penampil PDF
+│       ├── api.ts, auth.tsx    # Klien API (token di localStorage) dan konteks login
+│       └── styles.css          # Token desain: navy, teal, Inter
 └── backend/
     ├── app/
     │   ├── main.py             # Entry point FastAPI
@@ -290,6 +296,18 @@ Semua akun memakai password dari `SEED_DEFAULT_PASSWORD` di `.env`.
 | `multi@amiga.test` | Intake Support + Finance Reviewer (peran ganda, untuk UAT 5) | PT Klien Alpha |
 | `lead@amiga.test` | Service Lead | Alpha, Beta |
 | `admin@amiga.test` | System Admin | — |
+
+### Menjalankan frontend
+
+Butuh Node.js 20.19+ atau 22.12+. Backend harus berjalan di port 8000.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Buka <http://localhost:5173> dan login dengan akun dummy di atas. Request ke `/api/*` diteruskan Vite ke `http://localhost:8000` (ubah lewat `VITE_API_TARGET`). Cek tipe dan build produksi: `npm run build`.
 
 ### Menjalankan test
 

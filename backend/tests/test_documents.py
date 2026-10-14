@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
 from app import db as db_module
@@ -89,6 +89,11 @@ def tx(monkeypatch, tmp_path):
     """
     connection = db_module.engine.connect()
     transaction = connection.begin()
+    # Dokumen yang sudah ada di database dev dipindah sementara ke klien tersembunyi (ikut
+    # di-rollback), supaya hitungan antrean, duplikat, dan beban reviewer hanya dari data test
+    connection.execute(text(
+        "WITH hidden AS (INSERT INTO clients (id, name) VALUES (gen_random_uuid(), 'zz-test-' || gen_random_uuid()) "
+        "RETURNING id) UPDATE documents SET client_id = (SELECT id FROM hidden), assigned_reviewer_id = NULL"))
     monkeypatch.setattr(db_module, "SessionLocal", sessionmaker(
         bind=connection, join_transaction_mode="create_savepoint", autoflush=False, expire_on_commit=False))
     _pending.clear()
