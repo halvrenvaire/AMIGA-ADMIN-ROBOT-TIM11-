@@ -2,6 +2,11 @@
    font Figtree. Teal asli dipakai untuk aksen; tombol dan teks memakai teal lebih gelap agar kontrasnya
    memenuhi WCAG AA (#367F89 = 4,6:1 terhadap putih). */
 :root {
+  /* Label status (catatan desain owner 16 Okt 2026): gaya stabilo, mudah dibaca dan tidak menyilaukan.
+     Disetujui = teks hitam di hijau, Siap ditinjau = teks hitam di kuning, Ada kendala = teks merah di merah muda. */
+  --st-ok-bg: #cdf0d6; --st-ok-fg: #111827; --st-ok-dot: #15803d; --st-ok-line: #a3dcb4;
+  --st-wait-bg: #fff1a6; --st-wait-fg: #111827; --st-wait-dot: #a16207; --st-wait-line: #f0d763;
+  --st-err-bg: #ffe1e7; --st-err-fg: #b91c1c; --st-err-dot: #dc2626; --st-err-line: #f8b8c5;
   --bg: #f4f7f8;
   --surface: #ffffff;
   --line: #dfe6e9;
@@ -47,6 +52,10 @@
 /* Mode gelap: latar teal sangat gelap, teks terang; teal teks dibuat lebih terang agar kontras,
    tombol tetap teal #367f89 supaya teks putih di atasnya terbaca */
 :root[data-theme="dark"] {
+  /* Mode gelap: warna stabilo sedikit diredam supaya tidak menyilaukan; teks tetap gelap/merah */
+  --st-ok-bg: #b9e3c5; --st-ok-fg: #0b1220; --st-ok-dot: #166534; --st-ok-line: #8fcfa2;
+  --st-wait-bg: #efdf8f; --st-wait-fg: #0b1220; --st-wait-dot: #854d0e; --st-wait-line: #d9c45f;
+  --st-err-bg: #f6d3da; --st-err-fg: #a11818; --st-err-dot: #c81e1e; --st-err-line: #e7a9b6;
   --bg: #0c1517;
   --surface: #132024;
   --surface-muted: #0f1b1e;
@@ -192,9 +201,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.QUEUED, .badge.PROCESSING { background: var(--gray-50); color: var(--fg-2); }
-.badge.READY_FOR_REVIEW { background: var(--primary-50); color: var(--primary-700); }
-.badge.AMIGA_REVIEWED { background: var(--pink-50); color: var(--pink-700); }
-.badge.EXCEPTION { background: var(--amber-50); color: var(--amber); }
+.badge.READY_FOR_REVIEW { background: var(--st-wait-bg); color: var(--st-wait-fg); box-shadow: inset 0 0 0 1px var(--st-wait-line); }
+.badge.READY_FOR_REVIEW::before { background: var(--st-wait-dot); }
+.badge.AMIGA_REVIEWED { background: var(--st-ok-bg); color: var(--st-ok-fg); box-shadow: inset 0 0 0 1px var(--st-ok-line); }
+.badge.AMIGA_REVIEWED::before { background: var(--st-ok-dot); }
+.badge.EXCEPTION { background: var(--st-err-bg); color: var(--st-err-fg); box-shadow: inset 0 0 0 1px var(--st-err-line); }
+.badge.EXCEPTION::before { background: var(--st-err-dot); }
 .badge.SENT_TO_CLIENT { background: var(--teal-50); color: var(--teal); }
 .badge.PROCESSING::before { animation: pulse 1s ease-in-out infinite; }
 .chip { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 5px; background: var(--primary-50); color: var(--primary); white-space: nowrap; }
@@ -496,3 +508,12 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .pdf-preview iframe { width: 100%; height: 72vh; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .plain-list { margin: 0; padding-left: 18px; }
 @media (max-width: 1100px) { .preview-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Rekap voucher (Service Lead) */
+.report-filter { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.report-dates { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.report-dates label { font-weight: 600; color: var(--fg-2); font-size: 13px; }
+.report-dates .input { width: auto; }
+.report-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.stat-value { font-size: 22px; letter-spacing: -0.02em; }
+@media (max-width: 980px) { .report-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

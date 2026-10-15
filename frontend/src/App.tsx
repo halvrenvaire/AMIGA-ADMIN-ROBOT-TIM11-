@@ -10,6 +10,7 @@ import { DocumentPage } from "./pages/DocumentPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { Histories, MyReviews, SearchResults, Submissions } from "./pages/Lists";
 import { Signatories, Vendors } from "./pages/Reference";
+import { VoucherReport } from "./pages/VoucherReport";
 import { VoucherTable } from "./pages/VoucherTable";
 import { Login } from "./pages/Login";
 import { Queue } from "./pages/Queue";
@@ -49,6 +50,7 @@ export function App() {
             <Route path="pengajuan" element={<Protected roles={["PIC_KLIEN", "INTAKE_SUPPORT"]}><Submissions /></Protected>} />
             <Route path="dashboard" element={<Protected roles={["SERVICE_LEAD", "FINANCE_REVIEWER", "PIC_KLIEN", "INTAKE_SUPPORT"]}><Suspense fallback={<Loading />}><Metrics /></Suspense></Protected>} />
             <Route path="voucher" element={<VoucherTable />} />
+            <Route path="rekap-voucher" element={<Protected roles={["SERVICE_LEAD"]}><VoucherReport /></Protected>} />
             <Route path="referensi/vendor" element={<Vendors />} />
             <Route path="referensi/penanda-tangan" element={<Protected roles={["PIC_KLIEN", "INTAKE_SUPPORT"]}><Signatories /></Protected>} />
             <Route path="riwayat" element={<Histories />} />

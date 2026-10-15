@@ -384,6 +384,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | POST | `/documents/{id}/reassign` | Service Lead: alihkan ke reviewer lain (status tetap). Body: `{"reviewer_id": "...", "reason": "..."}` |
 | GET | `/dashboard/metrics` | Metrik dashboard (`days`=7–365, `client_id`) untuk Service Lead, Finance Reviewer, PIC Klien, Intake |
 | GET | `/vouchers` | Daftar voucher; filter `client_id`, `vendor_id`, `vendor`, `status`, `date_from`, `date_to`, `q` |
+| GET | `/vouchers/report` | Service Lead: rekap voucher PDF (`period` = 1 / 7 / 30 hari terakhir, atau `custom` + `date_from` & `date_to`, maks. 366 hari, tanggal WIB). Berisi ringkasan, rekap per perusahaan dan per reviewer, serta daftar voucher; unduhan tercatat di jejak audit |
 | GET/POST | `/vendors` | Data referensi vendor (POST oleh PIC Klien/Intake; 409 bila nama sudah terdaftar) |
 | GET | `/vendors/check` | Cek nama vendor sudah terdaftar (`client_id`, `name`) |
 | PUT / PATCH | `/vendors/{id}`, `/vendors/{id}/active` | Ubah / nonaktifkan vendor |

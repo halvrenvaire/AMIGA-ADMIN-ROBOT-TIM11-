@@ -462,6 +462,55 @@ describe("System Testing AMIGA Robot Admin", () => {
     });
   });
 
+  it("TS-041 Service Lead membuat dan mengunduh rekap voucher PDF", () => {
+    cy.visitAs("lead@amiga.test", "/rekap-voucher");
+    cy.contains("h1", "Rekap voucher");
+    cy.contains(".seg button", "30 hari").click().should("have.attr", "aria-pressed", "true");
+    // Voucher dari TS-018 terbit hari ini
+    cy.contains(".stat", "Jumlah voucher").find(".stat-value").invoke("text").then(Number).should("be.gte", 1);
+    cy.contains(".seg button", "Kustom").click();
+    cy.get("#r-from").type("2026-10-10");
+    cy.get("#r-to").clear().type("2026-10-01");
+    cy.contains(".alert", "tanggal mulai tidak boleh setelah");
+    cy.contains("button", "Unduh rekap PDF").should("be.disabled");
+    cy.contains(".seg button", "Hari ini").click();
+    cy.contains("button", "Unduh rekap PDF").should("be.enabled");
+    cy.token("lead@amiga.test").then((t) =>
+      cy.request({ url: "/api/vouchers/report?period=7", headers: { Authorization: `Bearer ${t}` } }).then((r) => {
+        expect(r.headers["content-type"]).to.eq("application/pdf");
+        expect(r.headers["content-disposition"]).to.match(/rekap-voucher_\d{8}-\d{8}\.pdf/);
+      }));
+    // Hanya Service Lead
+    cy.token("reviewer1@amiga.test").then((t) =>
+      cy.request({ url: "/api/vouchers/report", headers: { Authorization: `Bearer ${t}` }, failOnStatusCode: false })
+        .its("status").should("eq", 403));
+  });
+
+  it("TS-042 Label status mudah dibaca: Disetujui hijau, Siap ditinjau kuning, Ada kendala merah muda", () => {
+    cy.visitAs("lead@amiga.test", "/voucher");
+    cy.get(".badge.AMIGA_REVIEWED, .badge.SENT_TO_CLIENT").should("exist");
+    cy.document().then((doc) => {
+      const probe = (cls: string) => {
+        const el = doc.createElement("span");
+        el.className = `badge ${cls}`;
+        doc.body.appendChild(el);
+        const st = getComputedStyle(el);
+        const out = [st.color, st.backgroundColor];
+        el.remove();
+        return out;
+      };
+      doc.documentElement.dataset.theme = "light";
+      expect(probe("AMIGA_REVIEWED")).to.deep.eq(["rgb(17, 24, 39)", "rgb(205, 240, 214)"]);
+      expect(probe("READY_FOR_REVIEW")).to.deep.eq(["rgb(17, 24, 39)", "rgb(255, 241, 166)"]);
+      expect(probe("EXCEPTION")).to.deep.eq(["rgb(185, 28, 28)", "rgb(255, 225, 231)"]);
+      // Mode gelap: stabilo diredam, teks tetap hitam/merah
+      doc.documentElement.dataset.theme = "dark";
+      expect(probe("AMIGA_REVIEWED")).to.deep.eq(["rgb(11, 18, 32)", "rgb(185, 227, 197)"]);
+      expect(probe("READY_FOR_REVIEW")).to.deep.eq(["rgb(11, 18, 32)", "rgb(239, 223, 143)"]);
+      expect(probe("EXCEPTION")).to.deep.eq(["rgb(161, 24, 24)", "rgb(246, 211, 218)"]);
+    });
+  });
+
   // --- Pengaturan akun (akun baru per run agar akun seed tidak berubah) ---
   const run = Date.now();
   // Email awal dipakai saat membuat akun; email baru setelah TS-034 menggantinya

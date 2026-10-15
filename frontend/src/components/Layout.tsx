@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  BarChart3, Building2, ClipboardCheck, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
+  BarChart3, Building2, ClipboardCheck, FileBarChart, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
   Upload, Users,
 } from "lucide-react";
 import { useAuth } from "../auth";
@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { to: "/unggah", label: "Unggah Dokumen", icon: Upload, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/pengajuan", label: "Pengajuan Saya", icon: FileText, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/voucher", label: "Voucher", icon: Receipt, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
+  { to: "/rekap-voucher", label: "Rekap Voucher", icon: FileBarChart, roles: ["SERVICE_LEAD"] },
   { to: "/riwayat", label: "Riwayat & Audit", icon: FileClock, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
 ];
 const REFERENCE_NAV: NavItem[] = [
@@ -40,7 +41,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/referensi\/vendor/, "Data Referensi / Vendor"], [/^\/referensi\/penanda-tangan/, "Data Referensi / Penanda tangan"], [/^\/peninjauan/, "Peninjauan Saya"],
   [/^\/unggah/, "Unggah Dokumen"], [/^\/pengajuan/, "Pengajuan Saya"], [/^\/voucher/, "Voucher"],
   [/^\/riwayat/, "Riwayat & Audit"], [/^\/cari/, "Hasil Pencarian"],
-  [/^\/akun/, "Pengaturan Akun"], [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],
+  [/^\/akun/, "Pengaturan Akun"], [/^\/rekap-voucher/, "Rekap Voucher"], [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],
 ];
 
 export function Layout() {
