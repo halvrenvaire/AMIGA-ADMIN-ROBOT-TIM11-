@@ -217,6 +217,8 @@ class DocumentFile(Base):
     page_count: Mapped[int] = mapped_column(Integer)
     # Nomor invoice file ini (dinormalisasi) untuk cek duplikasi per invoice
     invoice_no_norm: Mapped[str | None] = mapped_column(String(500), index=True)
+    # Kapan AI selesai membaca file ini pada proses terakhir (progres per file di layar detail)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     document: Mapped[Document] = relationship(back_populates="files")
 

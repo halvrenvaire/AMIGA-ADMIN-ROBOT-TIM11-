@@ -77,7 +77,7 @@ export interface DocumentDetail extends DocumentSummary {
   voucher: { voucher_no: string; generated_at: string } | null;
   vendor: ClientRef | null;
   signers: Signer[];
-  files: { position: number; original_filename: string; page_count: number }[];
+  files: { position: number; original_filename: string; page_count: number; read_at: string | null }[];
   cancellation?: { by: string; at: string; reason: string } | null;
 }
 

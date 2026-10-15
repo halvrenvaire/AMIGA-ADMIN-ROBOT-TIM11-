@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Ban, CheckCircle2, FileClock, Loader2, Plus, Receipt, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, FileClock, Plus, Receipt, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
+import { AiProcessingCard, AiResultCard, AiScanOverlay } from "../components/AiProcessing";
 import { ReassignModal } from "../components/ReassignModal";
 import { SignerPicker } from "../components/SignerPicker";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
@@ -42,6 +43,16 @@ export function DocumentPage() {
   const [reassign, setReassign] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const d = doc.data;
+  // Ringkasan hasil AI dianimasikan bila prosesnya selesai saat halaman ini terbuka
+  const sawProcessing = useRef(false);
+  const [fresh, setFresh] = useState(false);
+  const [resultClosed, setResultClosed] = useState(false);
+  useEffect(() => {
+    if (!d) return;
+    const busy = d.status === "QUEUED" || d.status === "PROCESSING";
+    if (busy) { sawProcessing.current = true; setResultClosed(false); }
+    else if (sawProcessing.current) { sawProcessing.current = false; setFresh(true); }
+  }, [d?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ekstraksi dan verifikasi berjalan di background: muat ulang sampai selesai
   useEffect(() => {
@@ -115,7 +126,10 @@ export function DocumentPage() {
             <b>PDF asli</b>
             <span className="muted">{d.files.length > 1 ? `${d.files.length} invoice` : d.original_filename} · {d.page_count} hal.</span>
           </div>
-          <PdfFrame path={`/documents/${id}/file`} title={`Invoice ${d.request_id}`} />
+          <div className="pdf-body">
+            <PdfFrame path={`/documents/${id}/file`} title={`Invoice ${d.request_id}`} />
+            {processing && <AiScanOverlay label={d.status === "QUEUED" ? "Menunggu giliran AI" : "AI membaca invoice"} />}
+          </div>
         </section>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
@@ -140,9 +154,9 @@ export function DocumentPage() {
             </dl>
           </section>
 
-          {processing && (
-            <Alert kind="info"><span><Loader2 className="spin" size={14} style={{ verticalAlign: "-2px" }} /> AI sedang membaca invoice dan sistem
-              memverifikasinya. Halaman ini diperbarui otomatis.</span></Alert>
+          {processing && <AiProcessingCard doc={d} />}
+          {!processing && !resultClosed && d.extraction && (fresh || d.status === "READY_FOR_REVIEW" || d.status === "EXCEPTION") && (
+            <AiResultCard doc={d} fresh={fresh} onClose={() => setResultClosed(true)} />
           )}
 
           {d.issues.length > 0 && (

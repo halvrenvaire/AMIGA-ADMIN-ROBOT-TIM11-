@@ -80,6 +80,14 @@ def test_one_unreadable_invoice_fails_the_batch_with_its_name(extractor):
     extractor.result = [invoice(), ExtractionError("timeout")]
     doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
     assert codes(doc) == [("EXTRACTION_FAILED", None)]
+    # Progres per file untuk layar detail: file pertama sempat terbaca, file kedua tidak
+    assert [bool(f["read_at"]) for f in doc["files"]] == [True, False]
+
+
+def test_every_file_is_marked_read_after_processing(extractor):
+    extractor.result = [invoice(), second_invoice()]
+    doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
+    assert all(f["read_at"] for f in doc["files"])
 
 
 def not_invoice():

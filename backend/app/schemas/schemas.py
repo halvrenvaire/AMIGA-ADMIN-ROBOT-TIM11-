@@ -291,6 +291,7 @@ class DocumentFileOut(BaseModel):
     position: int
     original_filename: str
     page_count: int
+    read_at: datetime | None = None  # selesai dibaca AI pada proses terakhir
 
 
 class CancellationOut(BaseModel):

@@ -235,7 +235,9 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
             return
         if doc.status != DocStatus.PROCESSING:
             set_status(db, doc, DocStatus.PROCESSING, "AI mulai membaca invoice")
-            db.commit()
+        for f in doc.files or []:
+            f.read_at = None
+        db.commit()
 
         started = time.monotonic()
         files = doc.files or []
@@ -248,6 +250,9 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
                     except ExtractionError as e:
                         raise ExtractionError(f"{f.original_filename}: {e}" if len(files) > 1 else str(e)) from e
                     f.invoice_no_norm = normalize(parts[-1].invoice_no)
+                    # Disimpan per file supaya layar detail menampilkan progres yang nyata
+                    f.read_at = datetime.now(timezone.utc)
+                    db.commit()
                 names = [f.original_filename for f in files]
             else:
                 parts, names = [extractor.extract(storage.load(doc.file_key))], [doc.original_filename]
