@@ -119,3 +119,38 @@ def test_total_read_with_thousand_dots_as_decimal_is_corrected():
     assert inv.total == Decimal(2695000) and inv.raw["total_corrected_from"] == "2695"
     # Selisih lain tidak dikoreksi: tetap dilaporkan verifikasi sistem
     assert parse_response('{"total": 2600000, "line_items": [{"subtotal": 2695000}]}').total == Decimal(2600000)
+
+
+def test_discount_is_always_negative():
+    inv = parse_response('{"total": "Rp 720.000", "line_items": ['
+                         '{"kind": "item", "description": "Kaos", "subtotal": "Rp 750.000"},'
+                         '{"kind": "discount", "description": "DISKON", "subtotal": "Rp 100.000"},'
+                         '{"kind": "tax", "description": "PAJAK", "subtotal": "Rp 70.000"}]}')
+    assert [line.subtotal for line in inv.line_items] == [Decimal(750000), Decimal(-100000), Decimal(70000)]
+    assert sum(line.subtotal for line in inv.line_items) == inv.total
+    # Sudah negatif tetap negatif
+    inv = parse_response('{"line_items": [{"kind": "discount", "subtotal": "-50.000"}]}')
+    assert inv.line_items[0].subtotal == Decimal(-50000)
+
+
+def test_document_type_overrides_inconsistent_is_invoice():
+    inv = parse_response('{"is_invoice": true, "document_type": "Voucher Pembayaran Vendor", "line_items": []}')
+    assert inv.is_invoice is False and "Voucher Pembayaran Vendor" in inv.not_invoice_reason
+    assert parse_response('{"is_invoice": true, "document_type": "Struk kasir belanja"}').is_invoice is False
+    # Jenis yang memang tagihan tidak terpengaruh
+    assert parse_response('{"is_invoice": true, "document_type": "Faktur"}').is_invoice is True
+    assert parse_response('{"is_invoice": true, "document_type": "Invoice pembayaran"}').is_invoice is True
+
+
+def test_change_line_marks_cashier_receipt():
+    inv = parse_response('{"is_invoice": true, "document_type": "Invoice", "total": "70.300", "line_items": ['
+                         '{"kind": "item", "description": "GULA", "subtotal": "70.300"},'
+                         '{"kind": "summary", "description": "KEMBALI", "subtotal": "29.700"}]}')
+    assert inv.is_invoice is False and inv.document_type == "Struk kasir"
+
+
+def test_discount_recognised_by_description_even_if_labelled_fee():
+    inv = parse_response('{"line_items": [{"kind": "fee", "description": "DISKON", "subtotal": "Rp 100,000"},'
+                         '{"kind": "fee", "description": "Potongan member", "subtotal": "5.000"},'
+                         '{"kind": "fee", "description": "Biaya layanan", "subtotal": "2.000"}]}')
+    assert [line.subtotal for line in inv.line_items] == [Decimal(-100000), Decimal(-5000), Decimal(2000)]

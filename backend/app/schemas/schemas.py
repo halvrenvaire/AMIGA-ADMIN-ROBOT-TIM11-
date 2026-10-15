@@ -258,6 +258,12 @@ class DocumentFileOut(BaseModel):
     page_count: int
 
 
+class CancellationOut(BaseModel):
+    by: str
+    at: datetime
+    reason: str
+
+
 class DocumentDetail(DocumentSummary):
     # Kendala yang masih terbuka: kode + alasan berbahasa sederhana (FR-3.3)
     issues: list[IssueItem]
@@ -268,6 +274,7 @@ class DocumentDetail(DocumentSummary):
     vendor: ClientRef | None = None  # vendor di data referensi (id, name) bila cocok
     signers: list[Signer] = []
     files: list[DocumentFileOut] = []  # file invoice yang digabung dalam voucher ini
+    cancellation: CancellationOut | None = None  # siapa, kapan, dan alasan bila dibatalkan
 
 
 class FixRequest(BaseModel):

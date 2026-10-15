@@ -29,6 +29,8 @@ class DocStatus(str, enum.Enum):
     EXCEPTION = "EXCEPTION"
     AMIGA_REVIEWED = "AMIGA_REVIEWED"
     SENT_TO_CLIENT = "SENT_TO_CLIENT"
+    # Dibatalkan pengaju sebelum disetujui (mis. salah unggah). Data dan jejak audit tetap tersimpan.
+    CANCELLED = "CANCELLED"
 
 
 class IssueCode(str, enum.Enum):

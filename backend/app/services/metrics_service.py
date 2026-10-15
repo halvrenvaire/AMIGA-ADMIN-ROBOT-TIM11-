@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.models import AuditLog, Client, DocStatus, Document, Extraction, ValidationIssue, Voucher
 
 WIB = ZoneInfo("Asia/Jakarta")
-DONE = (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT)
+DONE = (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED)
 
 
 def _wib_day(column):
@@ -106,7 +106,7 @@ def compute(db: Session, client_ids: set[uuid.UUID], days: int, today: date | No
 
     # --- Kualitas: lolos verifikasi pertama, kendala teratas, koreksi reviewer ---
     processed = select(Document.id).where(scope, in_period, Document.status.not_in(
-        (DocStatus.QUEUED, DocStatus.PROCESSING))).subquery()
+        (DocStatus.QUEUED, DocStatus.PROCESSING, DocStatus.CANCELLED))).subquery()
     first_pass_total = db.scalar(select(func.count()).select_from(processed))
     with_issue = db.scalar(select(func.count(func.distinct(ValidationIssue.document_id)))
                            .where(ValidationIssue.document_id.in_(select(processed.c.id))))

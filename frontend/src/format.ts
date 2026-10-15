@@ -15,10 +15,11 @@ export const STATUS_LABEL: Record<DocStatus, string> = {
   EXCEPTION: "Ada kendala",
   AMIGA_REVIEWED: "Disetujui",
   SENT_TO_CLIENT: "Diserahkan",
+  CANCELLED: "Dibatalkan",
 };
 
 export const STATUS_ORDER: DocStatus[] = [
-  "QUEUED", "PROCESSING", "READY_FOR_REVIEW", "EXCEPTION", "AMIGA_REVIEWED", "SENT_TO_CLIENT",
+  "QUEUED", "PROCESSING", "READY_FOR_REVIEW", "EXCEPTION", "AMIGA_REVIEWED", "SENT_TO_CLIENT", "CANCELLED",
 ];
 
 export const ISSUE_LABEL: Record<IssueCode, string> = {

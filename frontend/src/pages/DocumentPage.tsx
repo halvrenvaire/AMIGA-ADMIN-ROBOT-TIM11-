@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { CheckCircle2, FileClock, Loader2, Plus, Receipt, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, FileClock, Loader2, Plus, Receipt, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { ReassignModal } from "../components/ReassignModal";
@@ -40,6 +40,7 @@ export function DocumentPage() {
   const doc = useApi(() => api.get<DocumentDetail>(`/documents/${id}`), [id]);
   const [notice, setNotice] = useState<{ kind: "ok" | "info" | "error" | "warn"; text: string } | null>(null);
   const [reassign, setReassign] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const d = doc.data;
 
   // Ekstraksi dan verifikasi berjalan di background: muat ulang sampai selesai
@@ -60,6 +61,8 @@ export function DocumentPage() {
   const canReprocess = isReviewer && d.status === "EXCEPTION" && codes.has("EXTRACTION_FAILED");
   const canDismissDup = isReviewer && d.status === "EXCEPTION" && codes.size === 1 && codes.has("POSSIBLE_DUPLICATE");
   const hasVoucher = d.status === "AMIGA_REVIEWED" || d.status === "SENT_TO_CLIENT";
+  // Pengaju boleh membatalkan selama voucher belum terbit (setelah AI selesai membaca)
+  const canCancel = has("PIC_KLIEN", "INTAKE_SUPPORT") && (d.status === "EXCEPTION" || d.status === "READY_FOR_REVIEW");
 
   const update = (next: DocumentDetail, message?: typeof notice) => {
     doc.setData(next);
@@ -83,12 +86,28 @@ export function DocumentPage() {
         </div>
         <div className="actions">
           {has("SERVICE_LEAD") && d.status === "READY_FOR_REVIEW" && <button className="btn" onClick={() => setReassign(true)}>Alihkan reviewer</button>}
+          {canCancel && <button className="btn danger" onClick={() => setCancelling(true)}><Ban /> Batalkan pengajuan</button>}
           <Link className="btn" to={`/dokumen/${id}/riwayat`}><FileClock /> Riwayat</Link>
           {hasVoucher && !has("SERVICE_LEAD") && <Link className="btn primary" to={`/dokumen/${id}/voucher`}><Receipt /> Voucher</Link>}
         </div>
       </div>
 
       {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
+      {d.cancellation && (
+        <Alert kind="warn">
+          Pengajuan ini <b>dibatalkan</b> oleh {d.cancellation.by} pada {waktu(d.cancellation.at)}. Alasan: {d.cancellation.reason}
+        </Alert>
+      )}
+      {cancelling && (
+        <ReasonModal title="Batalkan pengajuan" label="Alasan pembatalan (wajib, tercatat di jejak audit)"
+                     placeholder="mis. Salah unggah: file ini struk belanja, bukan invoice vendor." submitLabel="Batalkan pengajuan"
+                     onClose={() => setCancelling(false)}
+                     onSubmit={async (reason) => {
+                       const next = await api.post<DocumentDetail>(`/documents/${id}/cancel`, { reason });
+                       setCancelling(false);
+                       update(next, { kind: "ok", text: "Pengajuan dibatalkan. Data dan riwayatnya tetap tersimpan; invoice yang benar bisa diajukan ulang." });
+                     }} />
+      )}
 
       <div className="split">
         <section className="card pdf-pane" aria-label="PDF asli">
@@ -471,7 +490,7 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
   const [ids, setIds] = useState<string[]>([]);
   const [initial, setInitial] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const locked = doc.status === "AMIGA_REVIEWED" || doc.status === "SENT_TO_CLIENT";
+  const locked = doc.status === "AMIGA_REVIEWED" || doc.status === "SENT_TO_CLIENT" || doc.status === "CANCELLED";
   const canEdit = has("PIC_KLIEN", "INTAKE_SUPPORT") && !locked;
 
   async function open() {
@@ -495,7 +514,7 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
   return (
     <section className="card panel">
       <div className="panel-head">
-        <div><h2>Penanda tangan voucher</h2><p>{locked ? "Sudah tercetak di voucher." : "Dicetak di kotak tanda tangan voucher."}</p></div>
+        <div><h2>Penanda tangan voucher</h2><p>{doc.status === "CANCELLED" ? "Pengajuan dibatalkan." : locked ? "Sudah tercetak di voucher." : "Dicetak di kotak tanda tangan voucher."}</p></div>
         {canEdit && !editing && <button className="btn sm" onClick={open}>Ubah</button>}
       </div>
       {editing && initial ? (

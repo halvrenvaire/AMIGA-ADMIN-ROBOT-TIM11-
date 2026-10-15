@@ -208,6 +208,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .badge.EXCEPTION { background: var(--st-err-bg); color: var(--st-err-fg); box-shadow: inset 0 0 0 1px var(--st-err-line); }
 .badge.EXCEPTION::before { background: var(--st-err-dot); }
 .badge.SENT_TO_CLIENT { background: var(--teal-50); color: var(--teal); }
+.badge.CANCELLED { background: var(--gray-50); color: var(--fg-3); text-decoration: line-through; text-decoration-thickness: 1px; }
 .badge.PROCESSING::before { animation: pulse 1s ease-in-out infinite; }
 .chip { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 5px; background: var(--primary-50); color: var(--primary); white-space: nowrap; }
 .chip.warn { background: var(--amber-50); color: var(--amber); }
@@ -269,7 +270,7 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .stat-val { font-size: 28px; font-weight: 750; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--fg); }
 .stat-foot { font-size: 12px; color: var(--fg-3); }
 
-.status-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+.status-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; }
 .status-strip button {
   background: none; border: 0; border-left: 1px solid var(--line-soft); padding: 10px 14px; text-align: left;
   cursor: pointer; display: flex; flex-direction: column; gap: 4px;
@@ -418,7 +419,7 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--surface); }
 .seg button { border: 0; background: none; padding: 5px 12px; border-radius: 999px; font-weight: 600; font-size: 12.5px; color: var(--fg-2); cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--primary); color: #fff; }
-.kpi-status { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.kpi-status { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
 .kpi-mini { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; cursor: pointer; text-align: left; font: inherit; }
 .kpi-mini:hover { border-color: var(--primary-100); box-shadow: inset 0 -2px 0 var(--pink); }
 .kpi-mini b { font-size: 24px; letter-spacing: -0.02em; }

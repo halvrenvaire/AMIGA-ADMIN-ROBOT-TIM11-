@@ -10,13 +10,13 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Document, Role, User, UserRole
+from app.models import DocStatus, Document, Role, User, UserRole
 
 
 def pick_reviewer(db: Session, client_id: uuid.UUID, exclude: set[uuid.UUID]) -> User | None:
     cases = (
         select(Document.assigned_reviewer_id, func.count().label("n"))
-        .where(Document.assigned_reviewer_id.is_not(None))
+        .where(Document.assigned_reviewer_id.is_not(None), Document.status != DocStatus.CANCELLED)
         .group_by(Document.assigned_reviewer_id)
         .subquery()
     )

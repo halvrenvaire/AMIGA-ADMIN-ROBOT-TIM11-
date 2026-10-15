@@ -15,7 +15,7 @@ from app.models import (
     Client, DocStatus, Document, Extraction, Role, User, UserRole, ValidationIssue,
 )
 
-DONE = (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT)
+DONE = (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED)
 
 
 @dataclass

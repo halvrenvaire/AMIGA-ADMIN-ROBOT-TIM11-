@@ -109,3 +109,15 @@ def test_subtotal_row_is_not_counted_twice(extractor):
     assert sum(line.subtotal for line in result.line_items) == Decimal(2695000)
     assert len(result.line_items) == 4
     assert "tiket.com" in (result.vendor_name or "").lower()
+
+
+@pytest.mark.parametrize("kind,title,body", [
+    ("struk kasir", "INDOGROSIR PADALARANG", "Struk belanja\nGULA PASIR 1KG   2 x 15.900   31.800\nMINYAK GORENG 2L   1 x 38.500   38.500\n"
+     "TOTAL 70.300\nTUNAI 100.000\nKEMBALI 29.700\nKasir: 0123  Terima kasih telah berbelanja"),
+    ("voucher", "AMIGA Robot Admin - Voucher Pembayaran Vendor", "VOUCHER VCH/2026/10/0001\nKlien: PT Klien Alpha\n"
+     "Vendor: PT Sumber Kertas\nTOTAL DIBAYARKAN Rp 2.020.000\nDiajukan oleh / Disetujui oleh: Tanda tangan\n"
+     "BATAS OTORISASI: Voucher ini bukan persetujuan pembayaran."),
+])
+def test_receipts_and_vouchers_are_not_invoices(extractor, kind, title, body):
+    result = extractor.extract(_text_pdf(title, body))
+    assert result.is_invoice is False, (kind, result.raw)

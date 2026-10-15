@@ -54,7 +54,7 @@ AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi
 
 ## Alur dokumen (BPMN)
 
-Setiap invoice melewati **6 status** dengan **3 titik keputusan**: verifikasi sistem, keputusan reviewer, dan cek Segregation of Duties.
+Setiap invoice melewati **6 status** dengan **3 titik keputusan**: verifikasi sistem, keputusan reviewer, dan cek Segregation of Duties. Selama voucher belum terbit, pengaju bisa **membatalkan** pengajuan (status `CANCELLED`, alasan wajib); datanya tetap tersimpan dan invoice yang sama boleh diajukan ulang.
 
 ```mermaid
 flowchart TD
@@ -374,6 +374,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
 | GET | `/documents/{id}/file` | PDF asli |
 | POST | `/documents/{id}/fix` | PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}` |
+| POST | `/documents/{id}/cancel` | PIC Klien / Intake Support: batalkan pengajuan saat EXCEPTION atau READY_FOR_REVIEW. Body: `{"reason": "..."}` (min. 5 karakter). Status → CANCELLED, kendala ditutup, tercatat di jejak audit; tidak dihitung sebagai duplikat |
 | POST | `/documents/{id}/reprocess` | Finance Reviewer: proses ulang dokumen yang gagal dibaca AI |
 | PUT | `/documents/{id}/extraction` | Finance Reviewer: **Simpan & verifikasi ulang**. Body: `{"fields": {"total": "950000"}, "line_items": [...]}` (`line_items` opsional, menggantikan seluruh rincian) |
 | POST | `/documents/{id}/approve` | Finance Reviewer: **Setujui**. Pengunggah ditolak (403) dan dokumen dialihkan otomatis; bila lolos → AMIGA_REVIEWED + voucher |

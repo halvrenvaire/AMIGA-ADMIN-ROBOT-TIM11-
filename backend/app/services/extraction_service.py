@@ -19,8 +19,8 @@ Tugasmu dua, berurutan:
    rincian barang/jasa, jumlah yang harus dibayar, dan biasanya rekening tujuan pembayaran.
    Invoice, faktur, tagihan, dan nota tagihan termasuk invoice, dalam bahasa apa pun.
    BUKAN invoice: penawaran harga (quotation), purchase order, surat jalan / delivery note,
-   bukti transfer / bukti bayar, kontrak, surat, CV, laporan, artikel, materi presentasi, formulir,
-   foto atau dokumen lain yang tidak menagih pembayaran.
+   bukti transfer / bukti bayar, struk kasir belanja, voucher pembayaran, kontrak, surat, CV, laporan, artikel, materi presentasi, formulir, foto atau
+   dokumen lain yang tidak menagih pembayaran.
    Nilai dari isi dan bentuk dokumen, bukan dari nama file. Bila dokumen jelas sebuah tagihan meski
    ada data yang kurang, tetap anggap invoice (kekurangan data diperiksa sistem, bukan olehmu).
 
@@ -60,6 +60,15 @@ Network)"), BUKAN judul bagian seperti "Penjual", "Vendor", "Dari", atau "Seller
   menjumlahkan item sebelumnya juga "summary".
 Untuk "description", tulis teks baris itu sendiri (mis. "Subtotal Tiket"), bukan judul bagiannya.
 Pada invoice yang benar, jumlah subtotal semua baris selain "summary" sama dengan "total"."""
+
+
+# Jenis dokumen (dari jawaban AI) yang jelas bukan tagihan vendor, dan yang jelas tagihan
+NON_INVOICE_TYPE = re.compile(
+    r"struk|receipt|voucher|purchase order|\bpo\b|penawaran|quotation|surat jalan|delivery|bukti (transfer|bayar|pembayaran)"
+    r"|kontrak|lamaran|\bcv\b|laporan|notulen|sertifikat|sertifikasi|presentasi|formulir", re.IGNORECASE)
+DISCOUNT_DESC = re.compile(r"\b(diskon|discount|potongan|rabat)\b", re.IGNORECASE)
+CHANGE_LINE = re.compile(r"\bkembali(an)?\b|\bchange\b", re.IGNORECASE)
+INVOICE_TYPE = re.compile(r"invoice|faktur|tagihan|nota tagihan|bill\b", re.IGNORECASE)
 
 
 class ExtractionError(Exception):
@@ -180,6 +189,11 @@ def parse_response(text: str) -> ExtractedInvoice:
             unit_price=to_decimal(item.get("unit_price")),
             subtotal=to_decimal(item.get("subtotal")),
         )
+        # Diskon/potongan selalu mengurangi tagihan, walau di invoice ditulis tanpa tanda minus dan walau
+        # AI melabelinya "fee" (dikenali juga dari deskripsinya)
+        if str(item.get("kind") or "").lower() == "discount" or DISCOUNT_DESC.search(line.description or ""):
+            line.subtotal = -abs(line.subtotal) if line.subtotal is not None else None
+            line.unit_price = -abs(line.unit_price) if line.unit_price is not None else None
         if any(v is not None for v in vars(line).values()):
             lines.append(line)
 
@@ -195,6 +209,23 @@ def parse_response(text: str) -> ExtractedInvoice:
         data = {**data, "total_corrected_from": str(total)}
         total = line_sum
 
+    # Hanya false yang eksplisit dianggap bukan invoice, supaya jawaban AI yang tidak lengkap tidak
+    # menolak invoice yang sah. Pengaman: AI kadang menyebut jenis dokumen "Struk kasir" atau "Voucher
+    # pembayaran" tetapi tetap menandai is_invoice true; jenis yang jelas bukan tagihan diikuti.
+    document_type = to_text(data.get("document_type"))
+    reason = to_text(data.get("not_invoice_reason"))
+    is_invoice = data.get("is_invoice") is not False
+    if is_invoice and document_type and NON_INVOICE_TYPE.search(document_type) \
+            and not INVOICE_TYPE.search(document_type):
+        is_invoice = False
+        reason = reason or f"Dokumen terbaca sebagai {document_type}, bukan tagihan dari vendor."
+    # Ciri pasti struk kasir: ada uang kembalian (sudah dibayar di tempat, bukan tagihan)
+    descriptions = " ".join(str(i.get("description") or "") for i in data.get("line_items") or [] if isinstance(i, dict))
+    if is_invoice and CHANGE_LINE.search(descriptions):
+        is_invoice = False
+        document_type = "Struk kasir"
+        reason = "Ada baris uang kembalian (KEMBALI): ini struk kasir yang sudah dibayar, bukan tagihan dari vendor."
+
     return ExtractedInvoice(
         vendor_name=to_text(data.get("vendor_name")),
         invoice_no=to_text(data.get("invoice_no")),
@@ -204,11 +235,9 @@ def parse_response(text: str) -> ExtractedInvoice:
         bank_name=to_text(data.get("bank_name")),
         account_no=to_text(data.get("account_no")),
         account_name=to_text(data.get("account_name")),
-        # Hanya false yang eksplisit dianggap bukan invoice, supaya jawaban AI yang tidak lengkap
-        # tidak menolak invoice yang sah
-        is_invoice=data.get("is_invoice") is not False,
-        document_type=to_text(data.get("document_type")),
-        not_invoice_reason=to_text(data.get("not_invoice_reason")),
+        is_invoice=is_invoice,
+        document_type=document_type,
+        not_invoice_reason=reason,
         raw=data,
     )
 

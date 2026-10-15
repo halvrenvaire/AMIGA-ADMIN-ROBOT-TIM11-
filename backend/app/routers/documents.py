@@ -12,17 +12,17 @@ from fastapi import (
 from fastapi.responses import Response
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.auth import ensure_client_access, ensure_submit_access, get_current_user, require_roles
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
+    AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
-    ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
+    CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ReasonRequest, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
 )
 from app.services import audit_service, signer_service, storage
 from app.services.access_rules import accessible_client_ids
@@ -80,7 +80,16 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         vendor=ClientRef(id=doc.vendor.id, name=doc.vendor.name) if doc.vendor else None,
         signers=doc.signers or [],
         files=[DocumentFileOut.model_validate(f) for f in doc.files],
+        cancellation=_cancellation(db, doc),
     )
+
+
+def _cancellation(db: Session, doc: Document) -> CancellationOut | None:
+    if doc.status != DocStatus.CANCELLED:
+        return None
+    log = db.scalars(select(AuditLog).where(AuditLog.document_id == doc.id, AuditLog.action == "DOCUMENT_CANCELLED")
+                     .order_by(AuditLog.created_at.desc()).limit(1)).first()
+    return CancellationOut(by=log.actor_label, at=log.created_at, reason=log.note or "-") if log else None
 
 
 def _get_document(db: Session, user: User, document_id: uuid.UUID) -> Document:
@@ -244,7 +253,7 @@ def list_documents(
     if due_within_days is not None:
         query = query.where(
             Document.due_date <= date.today() + timedelta(days=due_within_days),
-            Document.status.not_in((DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT)),
+            Document.status.not_in((DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED)),
         )
     if q and q.strip():
         pattern = f"%{q.strip()}%"
@@ -355,8 +364,9 @@ def set_signers(document_id: uuid.UUID, body: SignersUpdate, user: User = Depend
     """Ganti penanda tangan voucher selama voucher belum terbit (PIC Klien / Intake Support)."""
     doc = _get_document(db, user, document_id)
     ensure_submit_access(db, user, doc.client_id)
-    if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Voucher sudah terbit; penanda tangan tidak bisa diubah.")
+    if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Voucher sudah terbit atau pengajuan dibatalkan; penanda tangan tidak bisa diubah.")
     # Kotak "Diajukan oleh" (PIC) tetap; hanya kotak "Disetujui oleh" yang diganti
     pengaju = [s for s in doc.signers or [] if s["kind"] == "PENGAJU"]
     new = pengaju + signer_service.resolve(db, doc.client_id, body.signatory_ids, None)
@@ -364,5 +374,32 @@ def set_signers(document_id: uuid.UUID, body: SignersUpdate, user: User = Depend
     audit_service.record(db, user, "SIGNERS_CHANGED", document_id=doc.id, client_id=doc.client_id,
                          field="signers", old_value=describe(doc.signers or []), new_value=describe(new))
     doc.signers = new
+    db.commit()
+    return _detail(db, doc)
+
+
+CANCELLABLE = (DocStatus.EXCEPTION, DocStatus.READY_FOR_REVIEW)
+
+
+@router.post("/{document_id}/cancel", response_model=DocumentDetail)
+def cancel_document(document_id: uuid.UUID, body: ReasonRequest, user: User = Depends(uploader_roles),
+                    db: Session = Depends(get_db)):
+    """Batalkan pengajuan (mis. salah unggah) dengan alasan wajib, selama voucher belum terbit.
+    Dokumen tidak dihapus: status menjadi CANCELLED, kendala ditutup, dan pembatalan tercatat di jejak audit.
+    Pengajuan yang dibatalkan tidak dihitung sebagai duplikat, sehingga invoice bisa diajukan ulang."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status in (DocStatus.QUEUED, DocStatus.PROCESSING):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "AI sedang membaca invoice ini. Tunggu sampai selesai (beberapa detik), lalu batalkan.")
+    if doc.status not in CANCELLABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Pengajuan tidak bisa dibatalkan karena berstatus {doc.status.value}.")
+    db.execute(update(ValidationIssue).where(ValidationIssue.document_id == doc.id,
+                                             ValidationIssue.resolved.is_(False)).values(resolved=True))
+    audit_service.record(db, user, "DOCUMENT_CANCELLED", document_id=doc.id, client_id=doc.client_id,
+                         status_before=doc.status.value, status_after=DocStatus.CANCELLED.value,
+                         note=body.reason.strip())
+    set_status(db, doc, DocStatus.CANCELLED, f"Dibatalkan oleh {user.full_name}")
     db.commit()
     return _detail(db, doc)

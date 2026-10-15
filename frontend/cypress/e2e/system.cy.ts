@@ -113,7 +113,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-010 Dashboard Antrean menampilkan semua widget", () => {
     cy.visitAs("lead@amiga.test", "/antrean");
     cy.get(".stats .stat").should("have.length", 4);
-    cy.get(".status-strip button").should("have.length", 6);
+    cy.get(".status-strip button").should("have.length", 7);
     cy.contains("h2", "Beban reviewer");
     cy.contains("h2", "Antrean dokumen");
     cy.then(() => cy.contains("table", docs.a.requestId));
@@ -330,7 +330,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   // --- Fitur tambahan permintaan owner (14 Okt 2026) ---
   it("TS-029 Dashboard metrik menampilkan KPI status, tren, dan panel kinerja", () => {
     cy.visitAs("lead@amiga.test", "/dashboard");
-    cy.get(".kpi-status .kpi-mini").should("have.length", 6);
+    cy.get(".kpi-status .kpi-mini").should("have.length", 7);
     cy.contains(".stat", "Invoice masuk").find(".stat-val").invoke("text").then((t) => expect(Number(t)).to.be.greaterThan(0));
     cy.contains("h2", "Tren harian");
     cy.get(".recharts-line").should("have.length", 3);
@@ -459,6 +459,26 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.token("multi@amiga.test").then((t) =>
         cy.request({ method: "POST", url: `/api/documents/${docs.e.id}/approve`, failOnStatusCode: false,
                      headers: { Authorization: `Bearer ${t}` } }).its("status").should("eq", 403));
+    });
+  });
+
+  it("TS-043 PIC membatalkan pengajuan yang salah unggah", () => {
+    cy.then(() => {
+      cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.e.id}`); // dari TS-039, siap ditinjau
+      cy.contains("button", "Batalkan pengajuan").click();
+      cy.contains(".modal button", "Batalkan pengajuan").should("be.disabled");
+      cy.get("#reason").type("Salah unggah, file ganda.");
+      cy.contains(".modal button", "Batalkan pengajuan").click();
+      cy.contains(".page-head .badge", "Dibatalkan");
+      cy.contains(".alert.warn", "dibatalkan").and("contain.text", "Salah unggah, file ganda.");
+      cy.contains("button", "Batalkan pengajuan").should("not.exist");
+      // Reviewer tidak bisa lagi menyetujuinya
+      cy.token("reviewer1@amiga.test").then((t) =>
+        cy.request({ method: "POST", url: `/api/documents/${docs.e.id}/approve`, failOnStatusCode: false,
+                     headers: { Authorization: `Bearer ${t}` } }).its("status").should("eq", 409));
+      cy.visitAs("pic.alpha@amiga.test", "/pengajuan");
+      cy.contains("button", "Dibatalkan").click();
+      cy.contains("tr", docs.e.requestId).should("contain.text", "Dibatalkan");
     });
   });
 

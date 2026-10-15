@@ -142,6 +142,7 @@ def _duplicate_of(db, doc: Document, extraction: Extraction) -> str | None:
         .where(
             Document.client_id == doc.client_id,
             Document.id != doc.id,
+            Document.status != DocStatus.CANCELLED,  # pengajuan batal boleh diajukan ulang
             Extraction.vendor_norm == extraction.vendor_norm,
             (Extraction.invoice_no_norm.in_(norms) | DocumentFile.invoice_no_norm.in_(norms)),
         )

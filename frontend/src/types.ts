@@ -3,7 +3,7 @@
 export type Role = "PIC_KLIEN" | "INTAKE_SUPPORT" | "FINANCE_REVIEWER" | "SERVICE_LEAD" | "SYSTEM_ADMIN";
 
 export type DocStatus =
-  | "QUEUED" | "PROCESSING" | "READY_FOR_REVIEW" | "EXCEPTION" | "AMIGA_REVIEWED" | "SENT_TO_CLIENT";
+  | "QUEUED" | "PROCESSING" | "READY_FOR_REVIEW" | "EXCEPTION" | "AMIGA_REVIEWED" | "SENT_TO_CLIENT" | "CANCELLED";
 
 export type IssueCode =
   | "MISSING_EVIDENCE" | "CALCULATION_DISCREPANCY" | "POSSIBLE_DUPLICATE" | "EXTRACTION_FAILED"
@@ -75,6 +75,7 @@ export interface DocumentDetail extends DocumentSummary {
   vendor: ClientRef | null;
   signers: Signer[];
   files: { position: number; original_filename: string; page_count: number }[];
+  cancellation?: { by: string; at: string; reason: string } | null;
 }
 
 export interface AuditItem {
