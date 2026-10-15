@@ -3,7 +3,7 @@
 Isi: ringkasan, rekap per perusahaan, rekap per Finance Reviewer, dan daftar lengkap voucher.
 """
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -28,6 +28,7 @@ class Group:
     name: str
     count: int = 0
     total: Decimal = Decimal(0)
+    pics: list[str] = field(default_factory=list)
 
 
 def _groups(rows: list[VoucherRow], key) -> list[Group]:
@@ -37,7 +38,13 @@ def _groups(rows: list[VoucherRow], key) -> list[Group]:
         g.name = key(r)
         g.count += 1
         g.total += r.total or 0
+        if r.pic_name and r.pic_name not in g.pics:
+            g.pics.append(r.pic_name)
     return sorted(groups.values(), key=lambda g: (-g.total, g.name))
+
+
+def company_with_pic(name: str, pics: list[str]) -> str:
+    return f"{name}\nPIC: {', '.join(pics)}" if pics else name
 
 
 def _table(pdf: FPDF, headings: tuple[str, ...], widths: tuple[float, ...], aligns: tuple[str, ...],
@@ -140,7 +147,8 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
     _section(pdf, "Rekap per perusahaan")
     groups = _groups(rows, lambda r: r.client.name)
     _table(pdf, ("Perusahaan", "Jumlah voucher", "Total nilai"), (110, 35, 50), ("LEFT", "CENTER", "RIGHT"),
-           [(g.name, str(g.count), _money(g.total)) for g in groups], ("Total", str(len(rows)), _money(total)))
+           [(company_with_pic(g.name, g.pics), str(g.count), _money(g.total)) for g in groups],
+           ("Total", str(len(rows)), _money(total)))
 
     _section(pdf, "Rekap per Finance Reviewer (penyetuju)")
     groups = _groups(rows, lambda r: r.approved_by)
@@ -149,12 +157,12 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
 
     _section(pdf, "Daftar voucher")
     detail = [(str(i), r.voucher_no, r.generated_at.astimezone(WIB).strftime("%d-%m-%Y %H:%M"), r.request_id,
-               r.client.name, r.vendor_name or "-", r.invoice_no or "-", _money(r.total), r.approved_by,
+               company_with_pic(r.client.name, [r.pic_name] if r.pic_name else []), r.vendor_name or "-", r.invoice_no or "-", _money(r.total), r.approved_by,
                STATUS_TEXT.get(r.status, r.status.value))
               for i, r in enumerate(sorted(rows, key=lambda r: r.generated_at), start=1)]
     _table(pdf, ("No", "No. Voucher", "Terbit", "Request ID", "Perusahaan", "Vendor", "No. Invoice", "Total",
                  "Disetujui oleh", "Status"),
-           (9, 30, 26, 37, 30, 34, 28, 27, 32, 24),
+           (9, 30, 25, 36, 38, 31, 27, 27, 31, 23),
            ("CENTER", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "RIGHT", "LEFT", "LEFT"),
            detail, ("", "", "", "", "", "", "Total", _money(total), "", ""))
 

@@ -159,6 +159,8 @@ export interface VoucherRow {
   total: string | null;
   status: DocStatus;
   approved_by: string;
+  /** PIC Klien pengaju (pengunggah, atau PIC yang diwakili Intake Support). */
+  pic_name?: string | null;
 }
 
 export interface DashboardMetrics {

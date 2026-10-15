@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_roles
@@ -23,12 +24,14 @@ WIB = ZoneInfo("Asia/Jakarta")
 
 def _rows(db: Session, ids: set[uuid.UUID], *, vendor_id=None, vendor=None, status_filter=None,
           date_from: date | None = None, date_to: date | None = None, q=None) -> list[VoucherRow]:
+    approver, pic = aliased(User), aliased(User)
     query = (
-        select(Voucher, Document, Client, Extraction, User.full_name)
+        select(Voucher, Document, Client, Extraction, approver.full_name, pic.full_name)
         .join(Document, Document.id == Voucher.document_id)
         .join(Client, Client.id == Document.client_id)
         .outerjoin(Extraction, Extraction.document_id == Document.id)
-        .join(User, User.id == Voucher.generated_by)
+        .join(approver, approver.id == Voucher.generated_by)
+        .join(pic, pic.id == func.coalesce(Document.on_behalf_of, Document.uploaded_by))
         .where(Document.client_id.in_(ids))
         .order_by(Voucher.generated_at.desc())
     )
@@ -52,9 +55,9 @@ def _rows(db: Session, ids: set[uuid.UUID], *, vendor_id=None, vendor=None, stat
             client=ClientRef(id=client.id, name=client.name), vendor_id=doc.vendor_id,
             vendor_name=ex.vendor_name if ex else None, invoice_no=ex.invoice_no if ex else None,
             invoice_date=ex.invoice_date if ex else None, total=ex.total if ex else None,
-            status=doc.status, approved_by=approver,
+            status=doc.status, approved_by=approved_by, pic_name=pic_name,
         )
-        for v, doc, client, ex, approver in db.execute(query).all()
+        for v, doc, client, ex, approved_by, pic_name in db.execute(query).all()
     ]
 
 

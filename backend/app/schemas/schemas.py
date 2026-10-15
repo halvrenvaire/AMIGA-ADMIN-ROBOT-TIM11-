@@ -415,6 +415,7 @@ class VoucherRow(BaseModel):
     total: Decimal | None
     status: DocStatus
     approved_by: str
+    pic_name: str | None = None  # PIC Klien pengaju: pengunggah, atau PIC yang diwakili Intake Support
 
 
 class TrendPoint(BaseModel):

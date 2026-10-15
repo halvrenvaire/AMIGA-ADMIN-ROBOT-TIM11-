@@ -34,7 +34,7 @@ def test_report_lists_vouchers_with_summary(extractor):
     text = text_of(r.content)
     for expected in ("REKAP VOUCHER HARI INI", "Jumlah voucher", "Rekap per perusahaan", "PT Klien Alpha",
                      "PT Klien Beta", "Rekap per Finance Reviewer", "Daftar voucher", "INV-REKAP-0",
-                     "INV-REKAP-1", "Rp 1.800.000"):
+                     "INV-REKAP-1", "Rp 1.800.000", "PIC: Rina (PIC Alpha)", "PIC: Budi (PIC Beta)"):
         assert expected in text, expected
 
 
@@ -55,3 +55,9 @@ def test_custom_period_validation_and_role(tx):
                                                 "date_to": "2026-01-01"}).status_code == 422
     for email in ("reviewer1@amiga.test", "pic.alpha@amiga.test", "admin@amiga.test"):
         assert api(email).get("/vouchers/report").status_code == 403
+
+
+def test_intake_upload_lists_delegating_pic(extractor):
+    approve(detail(upload(email="intake@amiga.test").json()["id"]))
+    rows = api("lead@amiga.test").get("/vouchers").json()
+    assert rows[0]["pic_name"] == "Rina (PIC Alpha)"

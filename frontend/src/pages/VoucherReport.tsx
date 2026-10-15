@@ -42,11 +42,12 @@ export function VoucherReport() {
 
   const summary = useMemo(() => {
     const list = rows.data ?? [];
-    const byClient = new Map<string, { count: number; total: number }>();
+    const byClient = new Map<string, { count: number; total: number; pics: string[] }>();
     for (const r of list) {
-      const g = byClient.get(r.client.name) ?? { count: 0, total: 0 };
+      const g = byClient.get(r.client.name) ?? { count: 0, total: 0, pics: [] };
       g.count += 1;
       g.total += Number(r.total) || 0;
+      if (r.pic_name && !g.pics.includes(r.pic_name)) g.pics.push(r.pic_name);
       byClient.set(r.client.name, g);
     }
     return {
@@ -129,7 +130,7 @@ export function VoucherReport() {
               <thead><tr><th>Perusahaan</th><th className="right">Jumlah voucher</th><th className="right">Total nilai</th></tr></thead>
               <tbody>
                 {summary.clients.map(([name, g]) => (
-                  <tr key={name}><td>{name}</td><td className="right">{g.count}</td><td className="right mono">{rupiah(g.total)}</td></tr>
+                  <tr key={name}><td>{name}{g.pics.length > 0 && <div className="muted" style={{ fontSize: 12 }}>PIC: {g.pics.join(", ")}</div>}</td><td className="right">{g.count}</td><td className="right mono">{rupiah(g.total)}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -148,7 +149,7 @@ export function VoucherReport() {
                   <tr key={r.document_id}>
                     <td className="mono"><Link to={`/dokumen/${r.document_id}`}>{r.voucher_no}</Link></td>
                     <td>{waktu(r.generated_at)}</td>
-                    <td>{r.client.name}</td>
+                    <td>{r.client.name}{r.pic_name && <div className="muted" style={{ fontSize: 12 }}>PIC: {r.pic_name}</div>}</td>
                     <td>{r.vendor_name ?? "-"}</td>
                     <td className="right mono">{rupiah(r.total)}</td>
                     <td>{r.approved_by}</td>
