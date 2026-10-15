@@ -83,3 +83,39 @@ def test_parse_response_reads_document_check():
     assert inv.document_type == "Surat lamaran" and inv.not_invoice_reason == "Berisi lamaran kerja."
     # Jawaban tanpa is_invoice tidak dianggap bukan invoice
     assert parse_response('{"vendor_name": "PT A"}').is_invoice is True
+
+
+def test_summary_lines_are_not_line_items():
+    inv = parse_response('{"total": 2695000, "line_items": ['
+                         '{"kind": "item", "description": "Tiket CGK-DPS", "subtotal": 1200000},'
+                         '{"kind": "item", "description": "Tiket DPS-CGK", "subtotal": 1200000},'
+                         '{"kind": "summary", "description": "Subtotal Tiket", "subtotal": 2400000},'
+                         '{"kind": "fee", "description": "Biaya Layanan", "subtotal": 50000},'
+                         '{"kind": "tax", "description": "PPN 10%", "subtotal": 245000},'
+                         '{"kind": "summary", "description": "Total Bayar", "subtotal": 2695000}]}')
+    assert [line.description for line in inv.line_items] == ["Tiket CGK-DPS", "Tiket DPS-CGK", "Biaya Layanan", "PPN 10%"]
+    assert sum(line.subtotal for line in inv.line_items) == inv.total
+    assert inv.raw["summary_lines_skipped"] == ["Subtotal Tiket", "Total Bayar"]
+
+
+def test_running_subtotal_marked_as_item_is_dropped_only_when_it_fixes_the_total():
+    rows = ('{"description": "Tiket A", "subtotal": 1200000}, {"description": "Tiket B", "subtotal": 1200000},'
+            '{"description": "Ringkasan Biaya", "subtotal": 2400000}, {"description": "PPN", "subtotal": 245000}')
+    inv = parse_response('{"total": 2645000, "line_items": [' + rows + ']}')
+    assert [line.description for line in inv.line_items] == ["Tiket A", "Tiket B", "PPN"]
+    # Total tidak cocok setelah dibuang → rincian dibiarkan; selisih dilaporkan verifikasi sistem
+    inv = parse_response('{"total": 9999, "line_items": [' + rows + ']}')
+    assert len(inv.line_items) == 4
+
+
+def test_item_equal_to_previous_item_is_kept_when_total_matches():
+    inv = parse_response('{"total": 200, "line_items": ['
+                         '{"description": "A", "subtotal": 100}, {"description": "B", "subtotal": 100}]}')
+    assert len(inv.line_items) == 2
+
+
+def test_total_read_with_thousand_dots_as_decimal_is_corrected():
+    inv = parse_response('{"total": 2695, "line_items": [{"subtotal": 2400000}, {"subtotal": 295000}]}')
+    assert inv.total == Decimal(2695000) and inv.raw["total_corrected_from"] == "2695"
+    # Selisih lain tidak dikoreksi: tetap dilaporkan verifikasi sistem
+    assert parse_response('{"total": 2600000, "line_items": [{"subtotal": 2695000}]}').total == Decimal(2600000)

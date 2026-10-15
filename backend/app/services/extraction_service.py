@@ -36,7 +36,7 @@ INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentu
   "vendor_name": string|null,
   "invoice_no": string|null,
   "invoice_date": "YYYY-MM-DD"|null,
-  "line_items": [{"description": string|null, "qty": number|null, "unit_price": number|null, "subtotal": number|null}],
+  "line_items": [{"kind": "item"|"fee"|"tax"|"discount"|"summary", "description": string|null, "qty": number|null, "unit_price": number|null, "subtotal": number|null}],
   "total": number|null,
   "bank_name": string|null,
   "account_no": string|null,
@@ -44,9 +44,23 @@ INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentu
 }
 Aturan: "is_invoice" adalah hasil pemeriksaan langkah 1. "document_type" adalah jenis dokumen
 dalam bahasa Indonesia (mis. "Invoice", "Purchase order", "Surat lamaran"). "not_invoice_reason"
-diisi satu kalimat singkat bila is_invoice false, selain itu null. Angka ditulis tanpa pemisah ribuan dan tanpa "Rp" (contoh 1250000.50). "total" adalah total
-akhir yang tertulis di invoice. "account_no" adalah nomor rekening tujuan pembayaran, sebagai teks.
-"line_items" berisi setiap baris barang/jasa, berurutan seperti di invoice."""
+diisi satu kalimat singkat bila is_invoice false, selain itu null. Angka ditulis tanpa pemisah ribuan dan tanpa "Rp" (contoh 1250000.50). Pada invoice berformat
+Indonesia, titik adalah pemisah ribuan dan koma adalah desimal: "2.695.000" ditulis 2695000 dan
+"1.250.000,50" ditulis 1250000.50. 
+"vendor_name" adalah nama penjual/penerbit invoice yang sebenarnya (mis. "tiket.com (PT Global Tiket
+Network)"), BUKAN judul bagian seperti "Penjual", "Vendor", "Dari", atau "Seller".
+"total" adalah jumlah akhir yang harus dibayar (Total Bayar / Grand Total / Jumlah Tagihan / Amount Due).
+"account_no" adalah nomor rekening tujuan pembayaran, sebagai teks.
+"line_items" berisi setiap baris berangka di invoice, berurutan, dan setiap baris diberi "kind":
+- "item": barang/jasa yang dibeli (mis. tiket, kertas, jasa konsultasi)
+- "fee": biaya tambahan (biaya layanan, ongkos kirim, biaya admin)
+- "tax": pajak (PPN, PPh, Tax)
+- "discount": potongan/diskon, subtotal ditulis negatif
+- "summary": baris ringkasan yang nilainya penjumlahan baris lain, mis. "Subtotal", "Subtotal Tiket",
+  "Total", "Total Bayar", "Grand Total", "Jumlah". Baris di bawah judul seperti "Ringkasan Biaya" yang
+  menjumlahkan item sebelumnya juga "summary".
+Untuk "description", tulis teks baris itu sendiri (mis. "Subtotal Tiket"), bukan judul bagiannya.
+Pada invoice yang benar, jumlah subtotal semua baris selain "summary" sama dengan "total"."""
 
 
 class ExtractionError(Exception):
@@ -119,6 +133,28 @@ def to_text(value) -> str | None:
     return text or None
 
 
+def drop_running_subtotals(lines: list[ExtractedLine], total: Decimal | None) -> tuple[list[ExtractedLine], list[str]]:
+    """Pengaman bila AI tetap memasukkan baris subtotal sebagai item: baris yang nilainya persis jumlah
+    semua baris sebelumnya dibuang, HANYA bila setelah dibuang jumlah rincian menjadi sama dengan total
+    invoice. Selain itu rincian dibiarkan apa adanya (selisih tetap dilaporkan verifikasi sistem)."""
+    if total is None or not lines or any(line.subtotal is None for line in lines):
+        return lines, []
+    if sum((line.subtotal for line in lines), Decimal(0)) == total:
+        return lines, []
+    kept, removed, running, since = [], [], Decimal(0), 0
+    for line in lines:
+        # Subtotal menjumlahkan minimal 2 baris; dua item berharga sama tidak dianggap subtotal
+        if since >= 2 and line.subtotal == running and line.subtotal != 0:
+            removed.append(line)
+            continue
+        kept.append(line)
+        running += line.subtotal
+        since += 1
+    if not removed or running != total:
+        return lines, []
+    return kept, [line.description or "-" for line in removed]
+
+
 def parse_response(text: str) -> ExtractedInvoice:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
@@ -131,8 +167,13 @@ def parse_response(text: str) -> ExtractedInvoice:
         raise ExtractionError("JSON dari AI bukan objek")
 
     lines = []
+    summaries = []
     for item in data.get("line_items") or []:
         if not isinstance(item, dict):
+            continue
+        # Baris ringkasan (Subtotal/Total) bukan komponen tagihan; bila ikut, nilainya terhitung dua kali
+        if str(item.get("kind") or "").lower() == "summary":
+            summaries.append(to_text(item.get("description")) or "-")
             continue
         line = ExtractedLine(
             description=to_text(item.get("description")),
@@ -143,12 +184,24 @@ def parse_response(text: str) -> ExtractedInvoice:
         if any(v is not None for v in vars(line).values()):
             lines.append(line)
 
+    total = to_decimal(data.get("total"))
+    lines, removed = drop_running_subtotals(lines, total)
+    if summaries or removed:
+        data = {**data, "summary_lines_skipped": summaries + removed}
+    # Titik ribuan terbaca sebagai desimal ("2.695.000" → 2695): koreksi hanya bila total tepat
+    # 1000x lebih kecil dari jumlah rincian, ciri pasti salah baca format angka Indonesia
+    line_sum = sum((line.subtotal for line in lines if line.subtotal is not None), Decimal(0))
+    if (total is not None and lines and all(line.subtotal is not None for line in lines)
+            and total != line_sum and total * 1000 == line_sum):
+        data = {**data, "total_corrected_from": str(total)}
+        total = line_sum
+
     return ExtractedInvoice(
         vendor_name=to_text(data.get("vendor_name")),
         invoice_no=to_text(data.get("invoice_no")),
         invoice_date=to_date(data.get("invoice_date")),
         line_items=lines,
-        total=to_decimal(data.get("total")),
+        total=total,
         bank_name=to_text(data.get("bank_name")),
         account_no=to_text(data.get("account_no")),
         account_name=to_text(data.get("account_name")),

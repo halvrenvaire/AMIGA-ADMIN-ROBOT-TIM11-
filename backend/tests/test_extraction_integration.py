@@ -84,3 +84,28 @@ def test_documents_that_are_not_invoices_are_rejected(extractor, kind):
 @pytest.mark.parametrize("filename", SAMPLES)
 def test_all_sample_invoices_are_recognised_as_invoices(extractor, filename):
     assert extractor.extract(render(SAMPLES[filename])).is_invoice is True
+
+
+def test_subtotal_row_is_not_counted_twice(extractor):
+    """Invoice tiket: baris "Subtotal Tiket" di bagian Ringkasan Biaya tidak boleh jadi item."""
+    from fpdf import FPDF
+    pdf = FPDF(format="A4")
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "INVOICE", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    for text in ("No. Invoice: INV/2025/05/0187", "Tanggal: 18 Mei 2025", "", "Penjual",
+                 "tiket.com (PT Global Tiket Network)", "Jl. Jend. Sudirman Kav. 52-53, Jakarta", "",
+                 "Rincian Penerbangan", "Rute                         Maskapai     Harga (IDR)",
+                 "Jakarta (CGK) - Bali (DPS)   Garuda       1.200.000",
+                 "Bali (DPS) - Jakarta (CGK)   Garuda       1.200.000", "", "Ringkasan Biaya",
+                 "Subtotal Tiket               2.400.000", "Biaya Layanan tiket.com      50.000",
+                 "Tax (PPN 10%)                245.000", "Total Bayar                  2.695.000", "",
+                 "Metode Pembayaran: Transfer Bank BCA", "No. Rekening: 123-456-7890",
+                 "a.n. PT Global Tiket Network"):
+        pdf.cell(0, 6, text, new_x="LMARGIN", new_y="NEXT")
+    result = extractor.extract(bytes(pdf.output()))
+    assert result.total == Decimal(2695000)
+    assert sum(line.subtotal for line in result.line_items) == Decimal(2695000)
+    assert len(result.line_items) == 4
+    assert "tiket.com" in (result.vendor_name or "").lower()
