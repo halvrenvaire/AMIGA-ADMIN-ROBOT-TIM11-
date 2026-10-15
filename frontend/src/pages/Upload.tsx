@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Eye, FileText, Send, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Eye, FileText, Send, UploadCloud, X } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignerPicker } from "../components/SignerPicker";
@@ -116,7 +116,8 @@ export function Upload() {
         </Alert>
       )}
 
-      <form className="card panel" onSubmit={preview} style={{ maxWidth: 820 }}>
+      <div className="with-aside">
+      <form className="card panel" onSubmit={preview}>
         {error && <Alert>{error}</Alert>}
         {!clients.length && <Alert kind="warn">Akun Anda belum ditugaskan ke perusahaan mana pun. Hubungi System Admin.</Alert>}
         <div className="grid-2">
@@ -190,7 +191,54 @@ export function Upload() {
           <button className="btn primary" disabled={!clients.length || !files.length || !clientId}><Eye /> Preview</button>
         </div>
       </form>
+      <UploadAside company={company?.name} requestType={requestType} dueDate={dueDate} files={files} approvers={approvers} />
+      </div>
     </>
+  );
+}
+
+/** Panel samping Unggah: ringkasan pengajuan yang sedang diisi, dan hal yang sering membuat invoice tertahan. */
+function UploadAside({ company, requestType, dueDate, files, approvers }: {
+  company?: string; requestType: string; dueDate: string; files: File[]; approvers: Signatory[];
+}) {
+  const sizeKb = files.reduce((n, f) => n + f.size, 0) / 1024;
+  const checks: [boolean, string][] = [
+    [Boolean(company), company ? `Perusahaan: ${company}` : "Pilih perusahaan"],
+    [requestType.trim().length > 0, "Jenis permintaan diisi"],
+    [files.length > 0, files.length ? `${files.length} file invoice (${sizeKb < 1024 ? `${sizeKb.toFixed(0)} KB` : `${(sizeKb / 1024).toFixed(1)} MB`})` : "Tambahkan minimal 1 file PDF"],
+  ];
+  const ready = checks.every(([ok]) => ok);
+  return (
+    <aside className="aside sticky">
+      <section className="card panel">
+        <div className="panel-head">
+          <div><h2>Ringkasan pengajuan</h2><p>{ready ? "Siap dipreview" : "Lengkapi dulu sebelum preview"}</p></div>
+          <span className={`chip ${ready ? "ok" : "gray"}`}>{checks.filter(([ok]) => ok).length}/{checks.length}</span>
+        </div>
+        <ul className="checklist">
+          {checks.map(([ok, text]) => (
+            <li key={text} className={ok ? "ok" : undefined}>{ok ? <CheckCircle2 /> : <Circle />}<span>{text}</span></li>
+          ))}
+        </ul>
+        <dl className="meta compact">
+          <dt>Tenggat</dt><dd>{dueDate ? tanggal(dueDate) : <span className="muted">Tidak diisi</span>}</dd>
+          <dt>Disetujui oleh</dt>
+          <dd>{approvers.length ? approvers.map((a) => a.full_name).join(", ") : <span className="muted">Kotak kosong</span>}</dd>
+          <dt>TTD elektronik</dt>
+          <dd>{approvers.filter((a) => a.signature_updated_at).length} dari {approvers.length} penyetuju
+            {approvers.some((a) => !a.signature_updated_at) && <span className="muted"> · sisanya tanda tangan basah</span>}</dd>
+        </dl>
+      </section>
+      <section className="card panel">
+        <div className="panel-head"><div><h2>Agar tidak tertahan</h2><p>Penyebab kendala yang paling sering</p></div></div>
+        <ul className="tips">
+          <li><b>Satu voucher, satu vendor.</b> Semua invoice harus untuk vendor dan rekening tujuan yang sama.</li>
+          <li><b>Invoice, bukan struk.</b> Struk kasir atau voucher lain akan ditolak AI.</li>
+          <li><b>Rekening terbaca.</b> Pastikan nama bank dan nomor rekening vendor tertulis jelas.</li>
+          <li><b>Jangan unggah ulang.</b> Invoice yang pernah diajukan ditandai sebagai kemungkinan duplikat.</li>
+        </ul>
+      </section>
+    </aside>
   );
 }
 

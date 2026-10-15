@@ -5,7 +5,9 @@ pengguna yang punya akses ke klien itu, mis. untuk dropdown filter dan formulir.
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
@@ -13,9 +15,9 @@ from app.auth import ensure_client_access, get_current_user, require_roles
 from app.db import get_db
 from app.models import Document, Extraction, Role, Signatory, SignatoryKind, User, Vendor
 from app.schemas.schemas import (
-    ActiveUpdate, ClientRef, SignatoryCreate, SignatoryIn, SignatoryOut, VendorCheck, VendorCreate, VendorIn, VendorOut,
+    ActiveUpdate, ClientRef, SignatoryCreate, SignatoryIn, SignatoryOut, SignatureIn, VendorCheck, VendorCreate, VendorIn, VendorOut,
 )
-from app.services import audit_service
+from app.services import audit_service, signature_service
 from app.services.access_rules import accessible_client_ids
 from app.services.verification import normalize
 
@@ -221,6 +223,43 @@ def set_signatory_active(signatory_id: uuid.UUID, body: ActiveUpdate, user: User
             sig.is_default = False
         audit_service.record(db, user, "SIGNATORY_ACTIVATED" if body.is_active else "SIGNATORY_DEACTIVATED",
                              client_id=sig.client_id, note=f"{sig.full_name} ({sig.position})")
+        db.commit()
+        db.refresh(sig)
+    return sig
+
+
+@router.get("/signatories/{signatory_id}/signature")
+def get_signature(signatory_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Spesimen tanda tangan elektronik pemberi persetujuan (PNG)."""
+    sig = _get_signatory(db, user, signatory_id)
+    if sig.signature_png is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Belum ada tanda tangan elektronik.")
+    return Response(sig.signature_png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/signatories/{signatory_id}/signature", response_model=SignatoryOut)
+def set_signature(signatory_id: uuid.UUID, body: SignatureIn, user: User = Depends(signatory_editors),
+                  db: Session = Depends(get_db)):
+    """PIC Klien mendaftarkan tanda tangan elektronik pemberi persetujuan (digoreskan atau diunggah)."""
+    sig = _get_signatory(db, user, signatory_id)
+    replaced = sig.signature_png is not None
+    sig.signature_png = signature_service.normalize(body.image)
+    sig.signature_updated_at = datetime.now(timezone.utc)
+    audit_service.record(db, user, "SIGNATURE_UPDATED", client_id=sig.client_id, field="signature",
+                         note=f"Tanda tangan elektronik {sig.full_name} ({sig.position}) "
+                              + ("diganti" if replaced else "didaftarkan"))
+    db.commit()
+    db.refresh(sig)
+    return sig
+
+
+@router.delete("/signatories/{signatory_id}/signature", response_model=SignatoryOut)
+def delete_signature(signatory_id: uuid.UUID, user: User = Depends(signatory_editors), db: Session = Depends(get_db)):
+    sig = _get_signatory(db, user, signatory_id)
+    if sig.signature_png is not None:
+        sig.signature_png, sig.signature_updated_at = None, None
+        audit_service.record(db, user, "SIGNATURE_REMOVED", client_id=sig.client_id, field="signature",
+                             note=f"Tanda tangan elektronik {sig.full_name} ({sig.position}) dihapus")
         db.commit()
         db.refresh(sig)
     return sig

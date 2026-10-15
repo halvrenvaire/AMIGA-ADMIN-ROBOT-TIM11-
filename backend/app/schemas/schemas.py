@@ -33,6 +33,30 @@ class MemoryRef(BaseModel):
     feedback: int | None
 
 
+class DataTableOut(BaseModel):
+    """Hasil query data Asisten (text-to-query), ditampilkan sebagai tabel di chat."""
+    title: str
+    columns: list[str]
+    rows: list[list[str]]
+    note: str | None = None
+
+
+class AssistantSession(BaseModel):
+    """Satu percakapan Asisten milik pengguna; judulnya pertanyaan pertama."""
+    session_id: str
+    title: str
+    last_activity: datetime
+    messages: int
+
+
+class AssistantMessage(BaseModel):
+    role: str
+    content: str
+    created_at: datetime
+    query_label: str | None = None
+    data_tables: list[DataTableOut] = []
+
+
 class AskAgentResponse(AskResponse):
     # ID untuk memberi 👍/👎; None bila jawaban tidak disimpan ke memori
     answer_id: int | None
@@ -41,6 +65,9 @@ class AskAgentResponse(AskResponse):
     memory_refs: list[MemoryRef]
     # True bila jawaban memakai data antrean (sesuai hak akses pengguna)
     used_queue_data: bool = False
+    # Text-to-query: interpretasi pertanyaan dan tabel hasilnya (kosong bila menjawab dari SOP)
+    query_label: str | None = None
+    data_tables: list[DataTableOut] = []
 
 
 class FeedbackRequest(BaseModel):
@@ -121,6 +148,13 @@ class ClientRef(BaseModel):
     name: str
 
 
+class ClientOverview(ClientRef):
+    """Klien beserta pengguna pengaju yang ditugaskan (layar Klien System Admin)."""
+    created_at: datetime
+    pics: list[str]
+    intakes: list[str]
+
+
 class MeResponse(BaseModel):
     id: uuid.UUID
     email: str
@@ -128,6 +162,7 @@ class MeResponse(BaseModel):
     roles: list[Role]
     clients: list[ClientRef]  # perusahaan yang datanya bisa dilihat (Finance Reviewer: semua)
     upload_clients: list[ClientRef] = []  # perusahaan yang boleh diajukan (penugasan System Admin)
+    signature_updated_at: datetime | None = None  # spesimen tanda tangan elektronik (PIC Klien)
 
 
 class ProfileUpdate(BaseModel):
@@ -396,6 +431,13 @@ class SignatoryOut(SignatoryIn):
     id: uuid.UUID
     client_id: uuid.UUID
     is_active: bool
+    # Terisi bila spesimen tanda tangan elektronik sudah didaftarkan
+    signature_updated_at: datetime | None = None
+
+
+class SignatureIn(BaseModel):
+    """Gambar tanda tangan: data URL atau base64 PNG/JPEG (hasil canvas atau unggahan)."""
+    image: str = Field(min_length=20, max_length=3_000_000)
 
 
 class Signer(BaseModel):

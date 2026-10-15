@@ -2,6 +2,7 @@
 
 Teks batas otorisasi dicetak di dalam PDF sehingga tidak bisa dihapus dari layar (FR-5.2).
 """
+import io
 from datetime import datetime, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import BACKEND_DIR, settings
 from app.models import Document, User, Voucher
-from app.services import storage
+from app.services import audit_service, signature_service, storage
 from app.services.signer_service import COMPANY_POSITION
 from app.services.verification import rupiah
 
@@ -60,7 +61,9 @@ def _money(value: Decimal | None) -> str:
     return "-" if value is None else rupiah(value)
 
 
-def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: datetime) -> bytes:
+def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: datetime,
+                   signatures: list[bytes | None] | None = None) -> bytes:
+    """`signatures`: spesimen tanda tangan elektronik per penanda tangan di `doc.signers` (urutan sama)."""
     ex = doc.extraction
     approved_at = approved_at.astimezone(WIB)
     pdf = FPDF(format="A4")
@@ -125,7 +128,16 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         pdf.cell(0, 6, f": {_t(value)}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
 
-    _signature_blocks(pdf, doc)
+    signed = _signature_blocks(pdf, doc, signatures or [], approved_at)
+    if signed:
+        pdf.set_font("Helvetica", "I", 7)
+        pdf.set_text_color(90, 100, 105)
+        pdf.multi_cell(0, 3.6, f"Tanda tangan elektronik pada {signed} kotak dibubuhkan sistem AMIGA saat voucher terbit "
+                               f"({approved_at.strftime('%d-%m-%Y %H:%M')} WIB) dari spesimen yang didaftarkan PIC Klien. "
+                               f"Pembubuhan tercatat di jejak audit {doc.request_id}.",
+                       new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(15, 23, 42)
+        pdf.ln(2)
     pdf.ln(1)
 
     pdf.set_draw_color(*TEAL)
@@ -158,9 +170,21 @@ def _sign_boxes(doc: Document) -> list[tuple[str, str, list[str], bool]]:
     return boxes
 
 
-def _signature_blocks(pdf: FPDF, doc: Document) -> None:
-    """Kotak tanda tangan agar voucher sah. Satu baris kotak tidak pernah terbelah halaman."""
+def _box_images(doc: Document, signatures: list[bytes | None]) -> list[bytes | None]:
+    """Spesimen untuk tiap kotak dari _sign_boxes (pengaju dulu, lalu penyetuju)."""
+    signers = getattr(doc, "signers", None) or []
+    paired = list(zip(signers, signatures + [None] * len(signers)))
+    return ([img for s, img in paired if s["kind"] == "PENGAJU"] or [None]) + \
+           ([img for s, img in paired if s["kind"] == "PENYETUJU"] or [None])
+
+
+def _signature_blocks(pdf: FPDF, doc: Document, signatures: list[bytes | None], signed_at: datetime) -> int:
+    """Kotak tanda tangan agar voucher sah. Satu baris kotak tidak pernah terbelah halaman.
+    Kotak dengan spesimen elektronik berisi gambar tanda tangan; kotak lain kosong untuk tanda tangan basah.
+    Mengembalikan jumlah kotak yang ditandatangani secara elektronik."""
     boxes = _sign_boxes(doc)
+    images = _box_images(doc, signatures)
+    signed = 0
     # 2 atau 4 kotak → 2 per baris; selain itu maks. 3 per baris
     per_row = 2 if len(boxes) in (2, 4) else min(SIGN_MAX_PER_ROW, len(boxes))
     gap = 8
@@ -171,6 +195,11 @@ def _signature_blocks(pdf: FPDF, doc: Document) -> None:
         top = pdf.get_y()
         for i, (title, hint, lines, optional) in enumerate(boxes[row_start:row_start + per_row]):
             x = pdf.l_margin + i * (width + gap)
+            image = images[row_start + i] if row_start + i < len(images) else None
+            if image:
+                signed += 1
+                hint = "Tanda tangan elektronik"
+                lines = lines[:-1] + [f"Ditandatangani: {signed_at.strftime('%d-%m-%Y %H:%M')} WIB"]
             pdf.set_line_width(0.3)
             pdf.set_draw_color(150, 160, 165)
             if optional:
@@ -189,6 +218,10 @@ def _signature_blocks(pdf: FPDF, doc: Document) -> None:
             pdf.set_text_color(15, 23, 42)
 
             line_y = top + 29
+            if image:
+                # Gambar menyesuaikan kotak (rasio dijaga, rata tengah) di atas garis tanda tangan
+                pdf.image(io.BytesIO(image), x=x + 5, y=top + 11.5, w=width - 10, h=line_y - top - 12.5,
+                          keep_aspect_ratio=True)
             pdf.set_draw_color(120, 130, 135)
             pdf.line(x + 3, line_y, x + width - 3, line_y)
             pdf.set_y(line_y + 1.2)
@@ -198,13 +231,21 @@ def _signature_blocks(pdf: FPDF, doc: Document) -> None:
                 pdf.cell(width - 6, 4.6, text[:48], new_x="LMARGIN", new_y="NEXT")
         pdf.set_y(top + SIGN_BLOCK_H + 4)
     pdf.set_draw_color(*TEAL)
+    return signed
 
 
 def create_voucher(db: Session, doc: Document, approver: User) -> Voucher:
     now = datetime.now(timezone.utc)
     voucher_no = next_voucher_no(db, now)
     file_key = f"vouchers/{voucher_no.replace('/', '-')}.pdf"
-    storage.save(file_key, render_voucher(doc, voucher_no, approver, now))
+    signers = getattr(doc, "signers", None) or []
+    signatures = signature_service.for_signers(db, signers)
+    storage.save(file_key, render_voucher(doc, voucher_no, approver, now, signatures))
+    names = [s["name"] for s, img in zip(signers, signatures) if img]
+    if names:
+        audit_service.record(db, approver, "E_SIGNATURE_APPLIED", document_id=doc.id, client_id=doc.client_id,
+                             new_value="; ".join(names),
+                             note=f"Tanda tangan elektronik dibubuhkan pada voucher {voucher_no}")
     voucher = Voucher(document_id=doc.id, voucher_no=voucher_no, file_key=file_key, generated_by=approver.id)
     db.add(voucher)
     db.flush()

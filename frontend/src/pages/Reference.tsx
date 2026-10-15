@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Building2, Pencil, Plus, Star } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Building2, PenLine, Pencil, Plus, Star } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { SignatureImage, SignatureModal } from "../components/Signature";
 import { Alert, Loading, Modal, useApi } from "../components/ui";
-import type { ClientRef, Signatory, Vendor } from "../types";
+import type { ClientRef, Me, Signatory, Vendor } from "../types";
 
 const VENDOR_FIELDS: { key: keyof Vendor; label: string; hint?: string; wide?: boolean }[] = [
   { key: "name", label: "Nama perusahaan vendor", wide: true },
@@ -180,11 +182,20 @@ export function Signatories() {
   const clients = user?.clients ?? [];
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
   const [editing, setEditing] = useState<Signatory | "new" | null>(null);
+  const [signing, setSigning] = useState<Signatory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canEdit = has("PIC_KLIEN");
   const list = useApi(() => api.get<Signatory[]>("/signatories", { client_id: clientId, include_inactive: true }), [clientId]);
   const items = list.data ?? [];
   const clientName = clients.find((c) => c.id === clientId)?.name ?? "-";
+
+  async function removeSignature(s: Signatory) {
+    setError(null);
+    try {
+      await api.del(`/signatories/${s.id}/signature`);
+      list.reload();
+    } catch (e) { setError((e as Error).message); }
+  }
 
   async function toggle(s: Signatory) {
     setError(null);
@@ -204,27 +215,29 @@ export function Signatories() {
         <ClientPicker clients={clients} value={clientId} onChange={setClientId} />
       </div>
       {(error || list.error) && <Alert>{error ?? list.error}</Alert>}
-      <Alert kind="info">
-        Kotak <b>Diajukan oleh</b> di voucher otomatis berisi nama PIC Klien yang mengajukan (PIC Klien, <b>{clientName}</b>),
-        jadi tidak perlu didaftarkan di sini.
-      </Alert>
       {list.loading && !list.data ? <Loading /> : (
-        <section className="card panel" style={{ maxWidth: 760 }}>
+      <div className="with-aside">
+        <section className="card panel">
           <div className="panel-head">
             <div><h2>Disetujui oleh</h2><p>Direktur, bendahara, atau pejabat lain yang menyetujui. Maks. 5 kotak per voucher.</p></div>
             {canEdit && <button className="btn sm" onClick={() => setEditing("new")}><Plus /> Tambah</button>}
           </div>
           {!items.length ? <p className="muted" style={{ margin: 0 }}>Belum ada. Kotak "Disetujui oleh" dicetak kosong di voucher.</p> : (
             <table className="table compact">
+              <thead><tr><th>Nama</th><th>Status</th><th>Tanda tangan elektronik</th>{canEdit && <th className="right">Aksi</th>}</tr></thead>
               <tbody>
                 {items.map((s) => (
                   <tr key={s.id} style={s.is_active ? undefined : { opacity: 0.55 }}>
                     <td><b>{s.full_name}</b><div className="muted" style={{ fontSize: 12 }}>{s.position}</div></td>
                     <td>{s.is_default && s.is_active && <span className="chip ok"><Star size={11} /> Default</span>}
                       {!s.is_active && <span className="chip gray">Nonaktif</span>}</td>
+                    <td><SignatureImage path={`/signatories/${s.id}/signature`} version={s.signature_updated_at}
+                                        alt={`Tanda tangan ${s.full_name}`} /></td>
                     {canEdit && (
                       <td className="right">
                         <span className="actions" style={{ justifyContent: "flex-end" }}>
+                          <button className="btn sm" onClick={() => setSigning(s)}><PenLine />{s.signature_updated_at ? "Ganti TTD" : "Tanda tangan"}</button>
+                          {s.signature_updated_at && <button className="btn sm" onClick={() => removeSignature(s)}>Hapus TTD</button>}
                           <button className="btn sm" onClick={() => setEditing(s)}>Ubah</button>
                           <button className="btn sm" onClick={() => toggle(s)}>{s.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
                         </span>
@@ -236,12 +249,64 @@ export function Signatories() {
             </table>
           )}
         </section>
+        <SignatureAside clientName={clientName} items={items} me={user} isPic={canEdit} />
+      </div>
+      )}
+      {signing && (
+        <SignatureModal title={`Tanda tangan ${signing.full_name}`} signer={`${signing.full_name} (${signing.position})`}
+                        onClose={() => setSigning(null)}
+                        onSave={async (image) => { await api.put(`/signatories/${signing.id}/signature`, { image }); setSigning(null); list.reload(); }} />
       )}
       {editing && (
         <SignatoryModal value={editing === "new" ? null : editing} clientId={clientId} onClose={() => setEditing(null)}
                         onDone={() => { setEditing(null); list.reload(); }} />
       )}
     </>
+  );
+}
+
+/** Pratinjau baris tanda tangan di voucher, supaya PIC tahu hasil daftar ini di dokumen akhir. */
+function SignatureAside({ clientName, items, me, isPic }: {
+  clientName: string; items: Signatory[]; me: Me | null; isPic: boolean;
+}) {
+  const active = items.filter((s) => s.is_active);
+  const first = active.find((s) => s.is_default) ?? active[0];
+  const signed = active.filter((s) => s.signature_updated_at).length;
+  return (
+    <aside className="aside">
+      <section className="card panel">
+        <div className="panel-head"><div><h2>Pratinjau di voucher</h2><p>Baris tanda tangan saat unggah dengan pilihan default</p></div></div>
+        <div className="sign-preview">
+          <div>
+            <span>Diajukan oleh</span>
+            <i>{isPic && me && <SignatureImage path="/auth/me/signature" version={me.signature_updated_at ?? null} alt="Tanda tangan Anda" />}</i>
+            <b>{isPic && me ? me.full_name : "Nama PIC pengaju"}</b><small>PIC Klien, {clientName}</small>
+          </div>
+          <div>
+            <span>Disetujui oleh</span>
+            <i>{first && <SignatureImage path={`/signatories/${first.id}/signature`} version={first.signature_updated_at} alt={`Tanda tangan ${first.full_name}`} />}</i>
+            <b>{first?.full_name ?? "(kosong)"}</b><small>{first?.position ?? "diisi manual"}</small>
+          </div>
+        </div>
+        <small className="muted">
+          Kotak <b>Diajukan oleh</b> otomatis berisi PIC Klien yang mengajukan, jadi tidak perlu didaftarkan. Saat unggah,
+          "Disetujui oleh" bisa ditambah sampai 5 kotak.
+        </small>
+      </section>
+      <section className="card panel">
+        <div className="panel-head"><div><h2>Ringkasan</h2></div></div>
+        <dl className="meta compact">
+          <dt>Aktif</dt><dd>{active.length} orang</dd>
+          <dt>Nonaktif</dt><dd>{items.length - active.length} orang</dd>
+          <dt>Default</dt><dd>{active.find((s) => s.is_default)?.full_name ?? <span className="muted">Belum ada</span>}</dd>
+          <dt>TTD elektronik</dt><dd>{signed} dari {active.length} penyetuju</dd>
+        </dl>
+        {isPic && !me?.signature_updated_at && (
+          <small className="muted">Tanda tangan Anda untuk kotak "Diajukan oleh" belum ada. Daftarkan di{" "}
+            <Link to="/akun">Pengaturan akun</Link>.</small>
+        )}
+      </section>
+    </aside>
   );
 }
 

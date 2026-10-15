@@ -1,16 +1,27 @@
-import { useState } from "react";
-import { Plus, UserPlus } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+import { Building2, CheckCircle2, Plus, UserPlus, UserX, Users } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
-import { Alert, Loading, Modal, useApi } from "../components/ui";
-import { ROLE_LABEL } from "../format";
-import type { AdminUser, ClientRef, Role } from "../types";
+import { Alert, Loading, Modal, MultiSelect, useApi } from "../components/ui";
+import { ROLE_LABEL, tanggal } from "../format";
+import type { AdminUser, ClientOverview, ClientRef, Role } from "../types";
 
 const ROLES = Object.keys(ROLE_LABEL) as Role[];
 // Peran yang dibatasi per perusahaan. Finance Reviewer (kasus dibagi sistem) dan Service Lead (mengawasi
 // semua invoice) menangani semua perusahaan.
 const CLIENT_SCOPED: Role[] = ["PIC_KLIEN", "INTAKE_SUPPORT"];
 const needsClients = (roles: Role[]) => roles.some((r) => CLIENT_SCOPED.includes(r));
+
+/** Alasan peran tidak bisa ditambahkan ke pilihan saat ini (aturan kombinasi peran di backend). */
+function roleConflict(role: Role, selected: Role[]): string | null {
+  if (selected.includes(role)) return null;
+  if (role === "PIC_KLIEN" && selected.length) return "Tidak bisa digabung dengan peran internal";
+  if (role !== "PIC_KLIEN" && selected.includes("PIC_KLIEN")) return "Tidak bisa digabung dengan PIC Klien";
+  if (role === "FINANCE_REVIEWER" && selected.includes("SYSTEM_ADMIN")) return "Tidak bisa digabung dengan System Admin";
+  if (role === "SYSTEM_ADMIN" && selected.includes("FINANCE_REVIEWER")) return "Tidak bisa digabung dengan Finance Reviewer";
+  return null;
+}
 
 /** System Admin: kelola akun, peran, dan penugasan klien (FR-7.1). */
 export function AdminUsers() {
@@ -138,7 +149,6 @@ function UserModal({ user, clients, onClose, onDone }: {
   const [clientIds, setClientIds] = useState<string[]>(user?.clients.map((c) => c.id) ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const scoped = needsClients(roles);
 
   async function submit() {
@@ -173,19 +183,18 @@ function UserModal({ user, clients, onClose, onDone }: {
             <small>Minimal 8 karakter.</small></div>
         </>
       )}
-      <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-        <label>Peran</label>
-        {ROLES.map((r) => (
-          <label key={r} className="toggle"><input type="checkbox" checked={roles.includes(r)} onChange={() => setRoles(toggle(roles, r))} /> {ROLE_LABEL[r]}</label>
-        ))}
-      </fieldset>
+      <div className="field">
+        <label htmlFor="u-roles">Peran</label>
+        <MultiSelect id="u-roles" placeholder="Pilih satu atau beberapa peran" value={roles}
+                     onChange={(v) => setRoles(v as Role[])}
+                     options={ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r], disabled: roleConflict(r, roles) }))} />
+      </div>
       {scoped && (
-        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-          <label>Perusahaan yang ditugaskan{roles.some((r) => r === "FINANCE_REVIEWER" || r === "SERVICE_LEAD") && " (untuk PIC Klien / Intake Support)"}</label>
-          {clients.map((c) => (
-            <label key={c.id} className="toggle"><input type="checkbox" checked={clientIds.includes(c.id)} onChange={() => setClientIds(toggle(clientIds, c.id))} /> {c.name}</label>
-          ))}
-        </fieldset>
+        <div className="field">
+          <label htmlFor="u-clients">Perusahaan yang ditugaskan{roles.some((r) => r === "FINANCE_REVIEWER" || r === "SERVICE_LEAD") && " (untuk PIC Klien / Intake Support)"}</label>
+          <MultiSelect id="u-clients" bulk placeholder="Pilih perusahaan" value={clientIds} onChange={setClientIds}
+                       options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+        </div>
       )}
       {roles.includes("SERVICE_LEAD") && (
         <Alert kind="info">Service Lead mengawasi semua invoice dari semua perusahaan, tanpa penugasan perusahaan.</Alert>
@@ -205,11 +214,13 @@ function UserModal({ user, clients, onClose, onDone }: {
 }
 
 export function AdminClients() {
-  const clients = useApi(() => api.get<ClientRef[]>("/admin/clients"), []);
+  const clients = useApi(() => api.get<ClientOverview[]>("/admin/clients/overview"), []);
   const [name, setName] = useState("");
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  async function add() {
+  async function add(e: FormEvent) {
+    e.preventDefault();
     setError(null);
     try {
       await api.post("/admin/clients", { name });
@@ -218,21 +229,94 @@ export function AdminClients() {
     } catch (e) { setError((e as Error).message); }
   }
 
+  const all = clients.data ?? [];
+  const noPic = all.filter((c) => c.pics.length === 0);
+  const submitters = new Set(all.flatMap((c) => [...c.pics, ...c.intakes])).size;
+  const shown = all.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const people = (names: string[]) => (names.length
+    ? <span className="actions" style={{ gap: 4 }}>{names.map((n) => <span key={n} className="chip">{n}</span>)}</span>
+    : <span className="muted">-</span>);
+
   return (
     <>
       <div className="page-head"><div><h1>Klien</h1><p>Klien yang dilayani AMIGA. Tugaskan pengguna ke klien di menu Pengguna & Peran.</p></div></div>
-      <section className="card panel" style={{ maxWidth: 640 }}>
-        {error && <Alert>{error}</Alert>}
-        <div className="actions">
-          <input className="input" style={{ flex: 1 }} placeholder="Nama klien, mis. PT Klien Gamma" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary" disabled={!name.trim()} onClick={add}><Plus /> Tambah</button>
+      <section className="stats" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }} aria-label="Ringkasan klien">
+        <div className="card stat">
+          <div className="stat-top">Klien terdaftar<span className="stat-ic navy"><Building2 /></span></div>
+          <div className="stat-val">{all.length}</div><div className="stat-foot">perusahaan yang dilayani</div>
         </div>
-        {clients.loading && !clients.data ? <Loading /> : (
-          <table className="table compact"><tbody>
-            {(clients.data ?? []).map((c) => <tr key={c.id}><td>{c.name}</td><td className="mono muted right">{c.id.slice(0, 8)}</td></tr>)}
-          </tbody></table>
-        )}
+        <div className="card stat">
+          <div className="stat-top">Pengaju ditugaskan<span className="stat-ic teal"><Users /></span></div>
+          <div className="stat-val">{submitters}</div><div className="stat-foot">PIC Klien dan Intake Support aktif</div>
+        </div>
+        <div className="card stat">
+          <div className="stat-top">Klien tanpa PIC<span className={`stat-ic ${noPic.length ? "amber" : "teal"}`}><UserX /></span></div>
+          <div className="stat-val">{noPic.length}</div>
+          <div className="stat-foot">{noPic.length ? "belum bisa mengajukan invoice" : "semua klien punya PIC"}</div>
+        </div>
       </section>
+
+      <div className="with-aside">
+        <section className="card panel">
+          <div className="panel-head">
+            <div><h2>Daftar klien</h2><p>PIC Klien dan Intake Support yang ditugaskan ke setiap klien</p></div>
+          </div>
+          {(error || clients.error) && <Alert>{error ?? clients.error}</Alert>}
+          <div className="filters">
+            <form className="actions" style={{ flex: 1, minWidth: 280 }} onSubmit={add}>
+              <input className="input" style={{ flex: 1 }} placeholder="Nama klien baru, mis. PT Klien Gamma" aria-label="Nama klien baru"
+                     value={name} onChange={(e) => setName(e.target.value)} />
+              <button className="btn primary" disabled={!name.trim()}><Plus /> Tambah</button>
+            </form>
+            <input className="input" style={{ width: 220 }} placeholder="Cari klien…" aria-label="Cari klien"
+                   value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          {clients.loading && !clients.data ? <Loading /> : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Klien</th><th>PIC Klien</th><th>Intake Support</th><th>Terdaftar</th><th className="right">ID</th></tr></thead>
+                <tbody>
+                  {shown.map((c) => (
+                    <tr key={c.id}>
+                      <td><b>{c.name}</b></td>
+                      <td>{c.pics.length ? people(c.pics) : <span className="chip warn">Belum ada PIC</span>}</td>
+                      <td>{people(c.intakes)}</td>
+                      <td>{tanggal(c.created_at)}</td>
+                      <td className="mono muted right">{c.id.slice(0, 8)}</td>
+                    </tr>
+                  ))}
+                  {shown.length === 0 && <tr><td colSpan={5} className="empty">Tidak ada klien yang cocok.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <aside className="aside">
+          <section className="card panel">
+            <div className="panel-head"><div><h2>Perlu perhatian</h2><p>Klien yang belum punya PIC Klien</p></div></div>
+            {noPic.length === 0 ? (
+              <div className="muted" style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                <CheckCircle2 size={16} color="var(--teal)" /> Semua klien sudah punya PIC.
+              </div>
+            ) : (
+              <ul className="plain-list">
+                {noPic.map((c) => <li key={c.id}><span>{c.name}</span><span className="chip warn">Tanpa PIC</span></li>)}
+              </ul>
+            )}
+            {noPic.length > 0 && <Link className="btn sm" to="/admin/pengguna">Tugaskan di Pengguna & Peran</Link>}
+          </section>
+          <section className="card panel">
+            <div className="panel-head"><div><h2>Langkah menambah klien</h2></div></div>
+            <ol className="steps">
+              <li>Tambahkan nama klien di daftar ini.</li>
+              <li>Buat atau ubah akun PIC Klien, lalu tugaskan ke klien tersebut.</li>
+              <li>PIC Klien mendaftarkan vendor dan penanda tangan, lalu mulai mengunggah invoice.</li>
+            </ol>
+            <small className="muted">Finance Reviewer dan Service Lead otomatis menangani semua klien.</small>
+          </section>
+        </aside>
+      </div>
     </>
   );
 }

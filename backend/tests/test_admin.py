@@ -121,3 +121,10 @@ def test_admin_endpoints_reject_other_roles(email):
 
 def test_duplicate_client_name_is_rejected(admin):
     assert admin.post("/admin/clients", json={"name": "pt klien alpha"}).status_code == 409
+
+
+def test_clients_overview_lists_assigned_submitters(admin):
+    rows = {c["name"]: c for c in admin.get("/admin/clients/overview").json()}
+    assert "Rina (PIC Alpha)" in rows["PT Klien Alpha"]["pics"]
+    assert "Sari (Intake Support)" in rows["PT Klien Alpha"]["intakes"]
+    assert rows["PT Klien Beta"]["pics"] == ["Budi (PIC Beta)"]

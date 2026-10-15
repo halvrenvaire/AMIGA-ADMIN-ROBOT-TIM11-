@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, CheckCircle2, Info, Loader2, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronDown, Info, Loader2, Search, X } from "lucide-react";
 import { api } from "../api";
 import { STATUS_LABEL } from "../format";
 import type { DocStatus } from "../types";
@@ -80,4 +80,84 @@ export function PdfFrame({ path, title }: { path: string; title: string }) {
 
 export function initials(name: string) {
   return name.replace(/\(.*?\)/g, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("");
+}
+
+export interface SelectOption { value: string; label: string; disabled?: string | null }
+
+/** Pilihan ganda dalam satu kontrol: chip untuk yang terpilih, daftar dengan pencarian untuk memilih.
+ *  `disabled` pada opsi berisi alasan opsi tidak bisa dipilih (ditampilkan di daftar). */
+export function MultiSelect({ id, options, value, onChange, placeholder = "Pilih…", bulk = false }: {
+  id?: string; options: SelectOption[]; value: string[]; onChange: (v: string[]) => void;
+  placeholder?: string; bulk?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const searchable = options.length > 6;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const label = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const toggle = (v: string) => onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
+  const shown = options.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const selectable = shown.filter((o) => !o.disabled).map((o) => o.value);
+
+  return (
+    <div className="ms" ref={rootRef}
+         onKeyDown={(e) => { if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); } }}>
+      <div className={`ms-control${open ? " open" : ""}`} onClick={() => setOpen((o) => !o)}>
+        <div className="ms-values">
+          {value.length === 0 && <span className="ms-placeholder">{placeholder}</span>}
+          {value.map((v) => (
+            <span key={v} className="ms-chip">
+              {label(v)}
+              <button type="button" aria-label={`Hapus ${label(v)}`}
+                      onClick={(e) => { e.stopPropagation(); toggle(v); }}><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+        <button type="button" id={id} className="ms-caret" aria-haspopup="listbox" aria-expanded={open}
+                aria-label={open ? "Tutup pilihan" : "Buka pilihan"}><ChevronDown size={16} /></button>
+      </div>
+      {open && (
+        <div className="ms-menu">
+          {searchable && (
+            <div className="ms-search">
+              <Search size={14} />
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari…" aria-label="Cari pilihan" />
+            </div>
+          )}
+          {bulk && (
+            <div className="ms-bulk">
+              <span>{value.length} dipilih</span>
+              <button type="button" onClick={() => onChange([...new Set([...value, ...selectable])])}>Pilih semua</button>
+              <button type="button" disabled={!value.length} onClick={() => onChange([])}>Kosongkan</button>
+            </div>
+          )}
+          <ul role="listbox" aria-multiselectable="true">
+            {shown.map((o) => {
+              const on = value.includes(o.value);
+              return (
+                <li key={o.value} role="option" aria-selected={on} aria-disabled={!!o.disabled && !on}
+                    className={o.disabled && !on ? "off" : undefined}
+                    tabIndex={0} onClick={() => (!o.disabled || on) && toggle(o.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (!o.disabled || on) toggle(o.value); }
+                    }}>
+                  <span className={`ms-box${on ? " on" : ""}`}>{on && <Check size={12} />}</span>
+                  <span className="ms-label">{o.label}{o.disabled && !on && <small>{o.disabled}</small>}</span>
+                </li>
+              );
+            })}
+            {shown.length === 0 && <li className="off">Tidak ada yang cocok</li>}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }

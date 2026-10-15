@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, SmallInteger, String, Text,
+    Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, Numeric, SmallInteger, String, Text,
     UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, REAL, UUID
@@ -68,6 +68,9 @@ class User(Base):
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Spesimen tanda tangan elektronik PIC Klien (PNG transparan) untuk kotak "Diajukan oleh"
+    signature_png: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    signature_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     assignments: Mapped[list["UserClientAssignment"]] = relationship(
         back_populates="user", foreign_keys="UserClientAssignment.user_id"
@@ -154,6 +157,9 @@ class Signatory(Base):
     position: Mapped[str] = mapped_column(String(120))
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Spesimen tanda tangan elektronik (PNG transparan), ditempel di kotak "Disetujui oleh" saat voucher terbit
+    signature_png: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    signature_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -304,13 +310,17 @@ class AuditLog(Base):
 
 
 class ConversationMessage(Base):
-    """Riwayat percakapan endpoint /ask (asisten SOP), dikelompokkan per session_id."""
+    """Riwayat percakapan /ask dan /ask-agent, dikelompokkan per session_id."""
     __tablename__ = "conversation_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(100), index=True)
+    # Pemilik percakapan (layar Asisten menampilkan riwayat milik pengguna sendiri); None = data lama / API
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     role: Mapped[str] = mapped_column(String(20))  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text)
+    # Jawaban berbasis data: rencana query, label, dan tabel hasilnya (untuk ditampilkan ulang dan pertanyaan lanjutan)
+    data: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

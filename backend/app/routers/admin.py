@@ -14,7 +14,7 @@ from app.auth import require_roles
 from app.db import get_db
 from app.models import Client, Role, User, UserClientAssignment, UserRole
 from app.schemas.schemas import (
-    ActiveUpdate, AdminUser, ClientCreate, ClientRef, ClientsUpdate, PasswordReset, RolesUpdate, UserCreate,
+    ActiveUpdate, AdminUser, ClientCreate, ClientOverview, ClientRef, ClientsUpdate, PasswordReset, RolesUpdate, UserCreate,
 )
 from app.security import hash_password, password_problem
 from app.services import audit_service
@@ -172,6 +172,26 @@ def reset_password(user_id: uuid.UUID, body: PasswordReset, admin: User = Depend
 @router.get("/clients", response_model=list[ClientRef])
 def list_all_clients(admin: User = Depends(admin_only), db: Session = Depends(get_db)):
     return db.scalars(select(Client).order_by(Client.name)).all()
+
+
+@router.get("/clients/overview", response_model=list[ClientOverview])
+def clients_overview(admin: User = Depends(admin_only), db: Session = Depends(get_db)):
+    """Klien beserta PIC Klien dan Intake Support aktif yang ditugaskan, untuk memeriksa klien tanpa PIC."""
+    people: dict[uuid.UUID, dict[Role, list[str]]] = {}
+    for cid, name, role in db.execute(
+        select(UserClientAssignment.client_id, User.full_name, UserRole.role)
+        .join(User, User.id == UserClientAssignment.user_id)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(User.is_active.is_(True), UserRole.role.in_([Role.PIC_KLIEN, Role.INTAKE_SUPPORT]))
+        .order_by(User.full_name)
+    ):
+        people.setdefault(cid, {}).setdefault(role, []).append(name)
+    return [
+        ClientOverview(id=c.id, name=c.name, created_at=c.created_at,
+                       pics=people.get(c.id, {}).get(Role.PIC_KLIEN, []),
+                       intakes=people.get(c.id, {}).get(Role.INTAKE_SUPPORT, []))
+        for c in db.scalars(select(Client).order_by(Client.name))
+    ]
 
 
 @router.post("/clients", response_model=ClientRef, status_code=201)

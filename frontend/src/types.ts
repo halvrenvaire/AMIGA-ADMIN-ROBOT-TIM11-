@@ -10,6 +10,7 @@ export type IssueCode =
   | "RETURNED_BY_REVIEWER" | "VENDOR_MISMATCH" | "NOT_AN_INVOICE";
 
 export interface ClientRef { id: string; name: string }
+export interface ClientOverview extends ClientRef { created_at: string; pics: string[]; intakes: string[] }
 
 export interface Me {
   id: string;
@@ -20,6 +21,8 @@ export interface Me {
   clients: ClientRef[];
   /** Perusahaan yang boleh diajukan (penugasan System Admin; PIC Klien / Intake Support). */
   upload_clients?: ClientRef[];
+  /** Spesimen tanda tangan elektronik (PIC Klien), null bila belum ada. */
+  signature_updated_at?: string | null;
 }
 
 export interface AdminUser extends Me { is_active: boolean }
@@ -103,12 +106,21 @@ export interface DashboardSummary {
   due_soon_days: number;
 }
 
+export interface DataTable { title: string; columns: string[]; rows: string[][]; note: string | null }
+
+export interface AssistantSession { session_id: string; title: string; last_activity: string; messages: number }
+export interface AssistantMessage {
+  role: "user" | "assistant"; content: string; created_at: string; query_label: string | null; data_tables: DataTable[];
+}
+
 export interface AskAgentResponse {
   answer: string;
   session_id: string;
   answer_id: number | null;
   memory_note: string;
   used_queue_data: boolean;
+  query_label: string | null;
+  data_tables: DataTable[];
   sources: { source: string; score: number; preview: string }[];
 }
 
@@ -143,6 +155,7 @@ export interface Signatory {
   position: string;
   is_default: boolean;
   is_active: boolean;
+  signature_updated_at: string | null;
 }
 
 export interface Signer { kind: SignatoryKind; name: string; position: string }

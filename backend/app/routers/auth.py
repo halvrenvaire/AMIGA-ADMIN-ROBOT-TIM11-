@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -9,10 +9,10 @@ from app.auth import create_access_token, get_current_user
 from app.db import get_db
 from app.models import Client, Role, User
 from app.schemas.schemas import (
-    ClientRef, LoginResponse, MeResponse, PasswordChange, ProfileUpdate, TokenResponse,
+    ClientRef, LoginResponse, MeResponse, PasswordChange, ProfileUpdate, SignatureIn, TokenResponse,
 )
 from app.security import hash_password, password_problem, verify_password
-from app.services import audit_service
+from app.services import audit_service, signature_service
 from app.services.access_rules import accessible_client_ids, assigned_client_ids
 
 router = APIRouter(prefix="/auth", tags=["Login"])
@@ -27,6 +27,7 @@ def user_profile(db: Session, user: User) -> MeResponse:
         roles=sorted(user.roles, key=lambda r: r.value),
         clients=[ClientRef(id=c.id, name=c.name) for c in clients],
         upload_clients=[ClientRef(id=c.id, name=c.name) for c in clients if c.id in upload_ids],
+        signature_updated_at=user.signature_updated_at,
     )
 
 
@@ -63,6 +64,38 @@ def update_profile(body: ProfileUpdate, user: User = Depends(get_current_user), 
         audit_service.record(db, user, "PROFILE_UPDATED", field="email", old_value=user.email, new_value=email)
         user.email = email
     db.commit()
+    return user_profile(db, user)
+
+
+@router.get("/me/signature")
+def my_signature(user: User = Depends(get_current_user)):
+    """Spesimen tanda tangan elektronik milik sendiri (PNG)."""
+    if user.signature_png is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Belum ada tanda tangan elektronik.")
+    return Response(user.signature_png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/me/signature", response_model=MeResponse)
+def set_my_signature(body: SignatureIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """PIC Klien mendaftarkan tanda tangan elektroniknya untuk kotak "Diajukan oleh" di voucher."""
+    if Role.PIC_KLIEN not in user.roles:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Tanda tangan elektronik di kotak \"Diajukan oleh\" hanya untuk PIC Klien.")
+    replaced = user.signature_png is not None
+    user.signature_png = signature_service.normalize(body.image)
+    user.signature_updated_at = datetime.now(timezone.utc)
+    audit_service.record(db, user, "SIGNATURE_UPDATED", field="signature",
+                         note="Tanda tangan elektronik " + ("diganti" if replaced else "didaftarkan"))
+    db.commit()
+    return user_profile(db, user)
+
+
+@router.delete("/me/signature", response_model=MeResponse)
+def delete_my_signature(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.signature_png is not None:
+        user.signature_png, user.signature_updated_at = None, None
+        audit_service.record(db, user, "SIGNATURE_REMOVED", field="signature", note="Tanda tangan elektronik dihapus")
+        db.commit()
     return user_profile(db, user)
 
 

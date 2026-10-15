@@ -369,8 +369,8 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
   gap: 8px; font-weight: 600; cursor: pointer;
 }
 .chat {
-  position: fixed; right: 22px; bottom: 80px; z-index: 40; width: min(400px, calc(100vw - 32px));
-  height: min(560px, calc(100vh - 110px)); background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  position: fixed; right: 22px; bottom: 80px; z-index: 40; width: min(480px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 110px)); background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
   box-shadow: var(--shadow-pop); display: flex; flex-direction: column; overflow: hidden;
 }
 .chat-head { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
@@ -518,3 +518,128 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .report-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .stat-value { font-size: 22px; letter-spacing: -0.02em; }
 @media (max-width: 980px) { .report-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Pilihan ganda (MultiSelect) */
+.ms { position: relative; }
+.ms-control {
+  min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 6px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.ms-control.open, .ms-control:focus-within { border-color: var(--primary); outline: 2px solid var(--primary-100); }
+.ms-values { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.ms-placeholder { color: var(--fg-3); padding-left: 4px; font-size: 13px; }
+.ms-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border-radius: 99px;
+  background: var(--primary-50); color: var(--primary-700); font-size: 12.5px; font-weight: 600;
+}
+.ms-chip button { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.ms-chip button:hover { background: var(--primary-100); }
+.ms-caret { border: 0; background: transparent; color: var(--fg-3); cursor: pointer; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; }
+.ms-menu { margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; box-shadow: var(--card-shadow); }
+.ms-search { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); color: var(--fg-3); }
+.ms-search input { border: 0; outline: 0; background: transparent; flex: 1; min-width: 0; color: var(--fg); }
+.ms-bulk { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--fg-3); }
+.ms-bulk span { flex: 1; }
+.ms-bulk button { border: 0; background: transparent; color: var(--primary-700); font-weight: 600; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+.ms-bulk button:hover:not(:disabled) { background: var(--primary-50); }
+.ms-bulk button:disabled { color: var(--fg-3); cursor: default; }
+.ms-menu ul { list-style: none; margin: 0; padding: 4px; max-height: 220px; overflow-y: auto; }
+.ms-menu li { display: flex; align-items: flex-start; gap: 9px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.ms-menu li:hover { background: var(--surface-hover); }
+.ms-menu li.off { cursor: not-allowed; color: var(--fg-3); }
+.ms-menu li.off:hover { background: transparent; }
+.ms-box { flex: none; width: 16px; height: 16px; margin-top: 1px; border: 1.5px solid var(--line); border-radius: 4px; display: grid; place-items: center; color: #fff; }
+.ms-box.on { background: var(--primary); border-color: var(--primary); }
+.ms-label { display: flex; flex-direction: column; gap: 1px; }
+.ms-label small { font-size: 11.5px; color: var(--fg-3); }
+
+/* Daftar ringkas di panel samping dan langkah bernomor */
+.plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.plain-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.plain-list li:last-child { border-bottom: 0; }
+.steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--fg-2); }
+.steps li::marker { color: var(--primary); font-weight: 700; }
+
+/* Tabel hasil query Asisten */
+.msg.wide { max-width: 100%; width: 100%; }
+.chat-table { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; white-space: normal; }
+.chat-table-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; padding: 7px 10px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+.chat-table-head span { color: var(--fg-3); font-size: 11.5px; text-align: right; }
+.chat-table-scroll { overflow-x: auto; max-height: 260px; }
+.chat-table table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.chat-table th { position: sticky; top: 0; background: var(--surface-muted); text-align: left; font-weight: 600; color: var(--fg-3); padding: 6px 8px; white-space: nowrap; }
+.chat-table td { padding: 6px 8px; border-top: 1px solid var(--line-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chat-table td:first-child { font-weight: 600; }
+
+/* Konten utama + panel samping. Tetap dua kolom di laptop (sampai 1100px) supaya halaman tidak kosong di kanan */
+.with-aside { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+.aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.aside.sticky { position: sticky; top: 74px; }
+@media (max-width: 1100px) {
+  .with-aside { grid-template-columns: minmax(0, 1fr); }
+  .aside.sticky { position: static; }
+}
+.meta.compact { grid-template-columns: 100px 1fr; font-size: 12.5px; }
+.checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--fg-3); }
+.checklist li { display: flex; gap: 8px; align-items: flex-start; }
+.checklist li svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.checklist li.ok { color: var(--fg); }
+.checklist li.ok svg { color: var(--teal); }
+.tips { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--fg-2); }
+.tips b { color: var(--fg); font-weight: 600; }
+.sign-preview { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.sign-preview > div { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 8px; gap: 2px; min-width: 0; }
+.sign-preview > div + div { border-left: 1px solid var(--line); }
+.sign-preview span { font-size: 11.5px; color: var(--fg-3); }
+.sign-preview i { display: block; width: 100%; height: 44px; }
+.sign-preview b { font-size: 12.5px; border-top: 1px solid var(--fg-3); padding-top: 4px; width: 100%; overflow-wrap: anywhere; }
+.sign-preview small { font-size: 11px; color: var(--fg-3); }
+
+/* Asisten layar penuh: riwayat di kiri, percakapan di kanan. Tinggi = layar dikurangi topbar dan padding konten */
+.assistant-page { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; height: calc(100vh - 170px); min-height: 460px; }
+.assistant-history { padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.assistant-history ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.assistant-history li { display: flex; align-items: center; border-radius: 9px; }
+.assistant-history li:hover { background: var(--surface-hover); }
+.assistant-history li.on { background: var(--primary-50); box-shadow: inset 3px 0 0 var(--pink); }
+.assistant-history li .icon-btn { opacity: 0; flex: none; }
+.assistant-history li:hover .icon-btn, .assistant-history li .icon-btn:focus-visible { opacity: 1; }
+.assistant-history-item { flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; padding: 8px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; color: var(--fg); }
+.assistant-history-item span { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assistant-history-item small { font-size: 11px; color: var(--fg-3); }
+.assistant-main { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.assistant-main .chat-body { padding: 20px 24px; }
+.assistant-main .msg { max-width: min(760px, 88%); }
+.assistant-main .msg.wide { max-width: 100%; }
+.assistant-main .chat-table-scroll { max-height: 420px; }
+.chat-form textarea.input { min-height: 38px; max-height: 140px; padding: 9px 10px; resize: none; field-sizing: content; }
+.msg-bullet { display: block; padding-left: 14px; position: relative; }
+.msg-bullet::before { content: "•"; position: absolute; left: 2px; color: var(--primary); }
+.chat-record { display: grid; grid-template-columns: 140px minmax(0, 1fr); margin: 0; font-size: 12px; }
+.chat-record dt, .chat-record dd { padding: 5px 10px; border-top: 1px solid var(--line-soft); margin: 0; }
+.chat-record dt { color: var(--fg-3); }
+.chat-record dd { overflow-wrap: anywhere; }
+@media (max-width: 860px) {
+  .assistant-page { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .assistant-history { max-height: 220px; }
+  .assistant-main { height: calc(100vh - 170px); }
+}
+
+/* Tanda tangan elektronik */
+.seg button svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.sig-pad { position: relative; display: grid; place-items: center; height: 190px; border: 1.5px dashed var(--line); border-radius: 12px; background: #fff; overflow: hidden; }
+.sig-pad canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.sig-pad .sig-hint { color: #84959b; font-size: 12.5px; pointer-events: none; padding: 0 24px; text-align: center; }
+.sig-pad > .btn { position: absolute; right: 8px; top: 8px; color: #4a5b61; }
+.sig-pad::after { content: ""; position: absolute; left: 24px; right: 24px; bottom: 44px; border-bottom: 1px solid #dfe6e9; pointer-events: none; }
+.sig-pad.upload { cursor: pointer; }
+.sig-pad.upload::after { display: none; }
+.sig-pad.upload img { max-width: 90%; max-height: 160px; object-fit: contain; }
+.sig-img { display: block; max-height: 44px; max-width: 160px; object-fit: contain; }
+.sig-empty { font-size: 12px; color: var(--fg-3); }
+/* Gambar tanda tangan berwarna gelap: selalu di atas latar terang, juga di tema gelap */
+.sig-frame { display: grid; place-items: center; height: 96px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.sig-frame .sig-img { max-height: 72px; max-width: 80%; }
+.sign-preview i { display: grid; place-items: center; background: #fff; border-radius: 6px; }
+.sign-preview .sig-img { max-height: 40px; max-width: 90%; }
+.table td .sig-img { background: #fff; border-radius: 6px; padding: 2px 6px; }

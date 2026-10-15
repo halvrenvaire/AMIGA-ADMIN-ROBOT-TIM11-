@@ -259,15 +259,23 @@ describe("System Testing AMIGA Robot Admin", () => {
   });
 
   // --- System Admin ---
+  // Peran dan perusahaan dipilih lewat MultiSelect: buka daftarnya (bila belum terbuka), lalu klik opsinya
+  const pick = (id: string, label: string) => {
+    cy.get(`#${id}`).closest(".ms").then(($ms) => { if (!$ms.find(".ms-menu").length) cy.get(`#${id}`).click(); });
+    cy.get(`#${id}`).closest(".ms").contains(".ms-menu li", label).click();
+  };
+  const unpick = (id: string, label: string) =>
+    cy.get(`#${id}`).closest(".ms").find(`button[aria-label="Hapus ${label}"]`).click();
+
   it("TS-022 Admin menambahkan pengguna dengan peran ganda", () => {
     cy.visitAs("admin@amiga.test", "/admin/pengguna");
     cy.contains("button", "Tambah pengguna").click();
     cy.get("#u-name").type("QA Tester");
     cy.get("#u-email").type(NEW_USER);
     cy.get("#u-pass").type(NEW_USER_PASSWORD, { log: false });
-    cy.contains(".modal label.toggle", "Intake Support").find("input").check();
-    cy.contains(".modal label.toggle", "Finance Reviewer").find("input").check();
-    cy.contains(".modal label.toggle", "PT Klien Alpha").find("input").check();
+    pick("u-roles", "Intake Support");
+    pick("u-roles", "Finance Reviewer");
+    pick("u-clients", "PT Klien Alpha");
     cy.contains(".modal .alert", "semua perusahaan");
     cy.contains(".modal button", "Simpan").click();
     cy.contains("tr", NEW_USER).should("contain.text", "Intake Support").and("contain.text", "Finance Reviewer")
@@ -277,28 +285,29 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-040 Admin tidak menugaskan perusahaan untuk Finance Reviewer dan Service Lead", () => {
     cy.visitAs("admin@amiga.test", "/admin/pengguna");
     cy.contains("button", "Tambah pengguna").click();
-    cy.contains(".modal label.toggle", "Finance Reviewer").find("input").check();
+    pick("u-roles", "Finance Reviewer");
     cy.contains(".modal label", "Perusahaan yang ditugaskan").should("not.exist");
     cy.contains(".modal .alert", "semua perusahaan");
-    cy.contains(".modal label.toggle", "Finance Reviewer").find("input").uncheck();
-    cy.contains(".modal label.toggle", "Service Lead").find("input").check();
+    unpick("u-roles", "Finance Reviewer");
+    pick("u-roles", "Service Lead");
     cy.contains(".modal label", "Perusahaan yang ditugaskan").should("not.exist");
     cy.contains(".modal .alert", "Service Lead mengawasi semua invoice");
-    cy.contains(".modal label.toggle", "Intake Support").find("input").check();
+    pick("u-roles", "Intake Support");
     cy.contains(".modal label", "Perusahaan yang ditugaskan");
     cy.contains(".modal button", "Batal").click();
   });
 
-  it("TS-023 Kombinasi peran terlarang ditolak", () => {
+  it("TS-023 Kombinasi peran terlarang tidak bisa dipilih", () => {
     cy.visitAs("admin@amiga.test", "/admin/pengguna");
     cy.contains("button", "Tambah pengguna").click();
-    cy.get("#u-name").type("QA Terlarang");
-    cy.get("#u-email").type(`terlarang.${stamp}@amiga.test`);
-    cy.get("#u-pass").type(NEW_USER_PASSWORD, { log: false });
-    cy.contains(".modal label.toggle", "PIC Klien").find("input").check();
-    cy.contains(".modal label.toggle", "Intake Support").find("input").check();
-    cy.contains(".modal button", "Simpan").click();
-    cy.contains(".modal .alert", "PIC Klien tidak boleh digabung");
+    pick("u-roles", "PIC Klien");
+    cy.contains(".ms-menu li", "Intake Support").should("have.attr", "aria-disabled", "true")
+      .and("contain.text", "Tidak bisa digabung dengan PIC Klien").click();
+    cy.get("#u-roles").closest(".ms").find(".ms-chip").should("have.length", 1);
+    unpick("u-roles", "PIC Klien");
+    pick("u-roles", "System Admin");
+    cy.contains(".ms-menu li", "Finance Reviewer").should("have.attr", "aria-disabled", "true");
+    cy.contains(".modal button", "Batal").click();
   });
 
   it("TS-024 Akun dinonaktifkan tidak bisa login", () => {
@@ -322,7 +331,7 @@ describe("System Testing AMIGA Robot Admin", () => {
 
   it("TS-026 Nama klien duplikat ditolak", () => {
     cy.visitAs("admin@amiga.test", "/admin/klien");
-    cy.get("main input.input").type("pt klien alpha");
+    cy.get("input[aria-label=\"Nama klien baru\"]").type("pt klien alpha");
     cy.contains("button", "Tambah").click();
     cy.contains(".alert", "sudah terdaftar");
   });
@@ -360,11 +369,11 @@ describe("System Testing AMIGA Robot Admin", () => {
 
   it("TS-031 PIC mendaftarkan penanda tangan; default terpilih otomatis saat unggah", () => {
     cy.visitAs("pic.alpha@amiga.test", "/referensi/penanda-tangan");
-    cy.contains("section", "Disetujui oleh").contains("button", "Tambah").click();
+    cy.contains("section h2", "Disetujui oleh").closest("section").contains("button", "Tambah").click();
     cy.get("#s-name").type("Dian Pratama");
     cy.get("#s-pos").type("Bendahara");
     cy.contains(".modal button", "Simpan").click();
-    cy.contains("section", "Disetujui oleh").should("contain.text", "Dian Pratama");
+    cy.contains("section h2", "Disetujui oleh").closest("section").should("contain.text", "Dian Pratama");
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     // Default = satu kotak "Disetujui oleh"; "Diajukan oleh" = perusahaan
     cy.get(".approver-row").should("have.length", 1);

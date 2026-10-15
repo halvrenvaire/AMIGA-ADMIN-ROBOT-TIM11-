@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { Check, Eye, EyeOff, KeyRound, Monitor, Moon, Palette, Sun, UserRound, X } from "lucide-react";
+import { Check, Eye, EyeOff, KeyRound, Monitor, Moon, Palette, PenLine, Sun, UserRound, X } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { SignatureImage, SignatureModal } from "../components/Signature";
 import { Alert, initials } from "../components/ui";
 import { ROLE_LABEL } from "../format";
 import { useTheme, type ThemeMode } from "../theme";
@@ -25,6 +26,7 @@ export function Account() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <AccountInfo user={user} />
+          {user.roles.includes("PIC_KLIEN") && <SignatureCard user={user} />}
           <ThemeCard />
         </div>
       </div>
@@ -187,6 +189,38 @@ function AccountInfo({ user }: { user: Me }) {
         <dd>{user.clients.map((c) => c.name).join(", ") || <span className="muted">-</span>}</dd>
       </dl>
       <small className="muted">Butuh peran atau akses klien lain? Hubungi System Admin.</small>
+    </section>
+  );
+}
+
+/** Spesimen tanda tangan elektronik PIC Klien untuk kotak "Diajukan oleh" di voucher. */
+function SignatureCard({ user }: { user: Me }) {
+  const { updateSession } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove() {
+    setError(null);
+    try { updateSession(await api.del<Me>("/auth/me/signature")); } catch (e) { setError((e as Error).message); }
+  }
+
+  return (
+    <section className="card panel">
+      <CardHead icon={PenLine} title="Tanda tangan elektronik"
+                note={'Dibubuhkan otomatis di kotak "Diajukan oleh" pada voucher pengajuan Anda.'} />
+      {error && <Alert>{error}</Alert>}
+      <div className="sig-frame">
+        <SignatureImage path="/auth/me/signature" version={user.signature_updated_at ?? null} alt="Tanda tangan Anda" />
+      </div>
+      <div className="actions">
+        <button className="btn sm" onClick={() => setOpen(true)}><PenLine /> {user.signature_updated_at ? "Ganti" : "Buat tanda tangan"}</button>
+        {user.signature_updated_at && <button className="btn sm" onClick={remove}>Hapus</button>}
+      </div>
+      <small className="muted">Tanpa tanda tangan elektronik, kotak di voucher tetap kosong untuk tanda tangan basah.</small>
+      {open && (
+        <SignatureModal title="Tanda tangan Anda" signer={user.full_name} onClose={() => setOpen(false)}
+                        onSave={async (image) => { updateSession(await api.put<Me>("/auth/me/signature", { image })); setOpen(false); }} />
+      )}
     </section>
   );
 }

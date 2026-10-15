@@ -21,6 +21,7 @@ const ACTION: Record<string, [string, "" | "ok" | "warn" | "bad"]> = {
   SOD_REJECTED: ["Persetujuan ditolak (Segregation of Duties)", "bad"],
   REVIEWER_REASSIGNED: ["Reviewer dialihkan", "warn"],
   DUPLICATE_DISMISSED: ["Ditandai bukan duplikat", "warn"],
+  E_SIGNATURE_APPLIED: ["Tanda tangan elektronik dibubuhkan", "ok"],
 };
 
 const statusText = (s: string | null) => (s ? STATUS_LABEL[s as DocStatus] ?? s : "");

@@ -158,3 +158,130 @@ def test_reviewer_options_exclude_uploader_and_current_reviewer(extractor):
     assert current not in names
     assert names == set(NAMES) - {"Yoga (Intake + Reviewer)", current}
     assert api("reviewer1@amiga.test").get(f"/documents/{doc['id']}/reviewer-options").status_code == 403
+
+
+# --- Asisten text-to-query ---
+
+class PlannerBedrock(FakeBedrock):
+    """Model palsu: panggilan perencana mengembalikan rencana query JSON yang sudah ditentukan."""
+
+    def __init__(self, plan: str):
+        super().__init__()
+        self.plan = plan
+
+    def generate(self, system_prompt, messages, **kw):
+        if system_prompt.startswith("Kamu menerjemahkan"):
+            self.planner_messages = messages
+            return self.plan
+        return super().generate(system_prompt, messages, **kw)
+
+
+def ask_with_plan(email, question, plan):
+    app.state.bedrock = PlannerBedrock(plan)
+    app.state.indexing = FakeIndexing(_store())
+    return ask(email, question)
+
+
+def test_query_reviewer_progress(docs):
+    body = ask_with_plan("lead@amiga.test", "progres reviewer gimana?",
+                         '{"query": "progres_pengguna", "peran": "FINANCE_REVIEWER"}')
+    assert body["used_queue_data"] is True and body["answer_id"] is None
+    assert body["query_label"].startswith("Progres per Finance Reviewer")
+    [table] = body["data_tables"]
+    assert table["columns"][:2] == ["Nama", "Menunggu review"]
+    assert sum(int(r[1].split()[0]) for r in table["rows"]) == 2  # dua dokumen READY
+    assert "HASIL QUERY DATA" in app.state.bedrock.last_system
+
+
+def test_query_submitter_progress_counts_by_status(docs):
+    body = ask_with_plan("lead@amiga.test", "progres PIC?", 'Rencana: {"query": "progres_pengguna", "peran": "PIC_KLIEN"}')
+    rows = {r[0]: r for r in body["data_tables"][0]["rows"]}
+    cols = body["data_tables"][0]["columns"]
+    alpha = rows["Rina (PIC Alpha)"]
+    assert alpha[cols.index("Total")] == "2" and alpha[cols.index("Ada kendala")] == "1"
+    assert rows["Budi (PIC Beta)"][cols.index("Siap ditinjau")] == "1"
+
+
+def test_query_document_list_filters_and_respects_scope(docs, make_user):
+    a_ready, a_problem, b_ready = docs
+    body = ask_with_plan("lead@amiga.test", "invoice yang lewat tenggat",
+                         '{"query": "daftar_dokumen", "tenggat": "lewat"}')
+    assert [r[0] for r in body["data_tables"][0]["rows"]] == [a_problem["request_id"]]
+
+    body = ask_with_plan("lead@amiga.test", "dokumen Beta", '{"query": "daftar_dokumen", "klien": "Beta"}')
+    assert [r[0] for r in body["data_tables"][0]["rows"]] == [b_ready["request_id"]]
+
+
+def test_query_summary_by_status(docs):
+    body = ask_with_plan("reviewer1@amiga.test", "sekarang progresnya gimana?", '{"query": "ringkasan"}')
+    rows = {r[0]: r[1] for r in body["data_tables"][0]["rows"]}
+    assert rows["Siap ditinjau"] == "2" and rows["Ada kendala"] == "1"
+
+
+def test_sop_plan_or_unreadable_plan_falls_back(docs):
+    body = ask_with_plan("reviewer1@amiga.test", "Apa itu QUEUED?", '{"query": "sop"}')
+    assert body["data_tables"] == [] and body["used_queue_data"] is False
+    body = ask_with_plan("reviewer1@amiga.test", "Dokumen apa yang tenggatnya dekat?", "maaf, tidak paham")
+    assert body["data_tables"] == [] and body["used_queue_data"] is True  # ringkasan antrean lama
+    body = ask_with_plan("reviewer1@amiga.test", "progres?", '{"query": "DROP TABLE users"}')
+    assert body["data_tables"] == []
+
+
+def test_admin_never_gets_query_data(docs):
+    body = ask_with_plan("admin@amiga.test", "progres PIC?", '{"query": "progres_pengguna"}')
+    assert body["data_tables"] == [] and body["used_queue_data"] is False
+
+
+def test_query_document_detail(docs):
+    _, a_problem, _ = docs
+    body = ask_with_plan("lead@amiga.test", f"detail {a_problem['request_id']}",
+                         f'{{"query": "detail_dokumen", "request_ids": ["{a_problem['request_id'].lower()}"]}}')
+    [table] = body["data_tables"]
+    assert table["title"] == a_problem["request_id"]
+    fields = dict(table["rows"])
+    assert fields["Status"] == "Ada kendala" and "MISSING_EVIDENCE" in fields["Kendala aktif"]
+    assert fields["Pengaju"] == "Rina (PIC Alpha)"
+
+
+def test_follow_up_sees_previous_plan_and_data(docs):
+    _, a_problem, _ = docs
+    sid = "t-lanjutan-lead"
+    lead = api("lead@amiga.test")
+    app.state.indexing = FakeIndexing(_store())
+    app.state.bedrock = PlannerBedrock('{"query": "daftar_dokumen", "tenggat": "lewat"}')
+    lead.post("/ask-agent", json={"question": "dokumen lewat tenggat?", "session_id": sid})
+    app.state.bedrock = PlannerBedrock('{"query": "detail_dokumen", "tenggat": "lewat"}')
+    body = lead.post("/ask-agent", json={"question": "tampilkan detail dokumen tersebut", "session_id": sid}).json()
+
+    previous = app.state.bedrock.planner_messages[-2]["content"]
+    assert '"tenggat": "lewat"' in previous and a_problem["request_id"] in previous
+    assert body["data_tables"][0]["title"] == a_problem["request_id"]
+
+
+def test_sessions_are_listed_per_user_with_tables(docs):
+    sid = "t-riwayat-lead"
+    ask_with_plan("lead@amiga.test", "progres PIC?", '{"query": "progres_pengguna", "peran": "PIC_KLIEN"}')
+    lead = api("lead@amiga.test")
+    lead.post("/ask-agent", json={"question": "ringkasan status", "session_id": sid})
+
+    listed = {s["session_id"]: s for s in lead.get("/ask-agent/sessions").json()}
+    assert listed[sid]["title"] == "ringkasan status" and listed[sid]["messages"] == 2
+    messages = lead.get(f"/ask-agent/sessions/t-lead@amiga.test").json()
+    assert messages[1]["query_label"].startswith("Progres per PIC Klien") and messages[1]["data_tables"]
+
+    other = api("reviewer1@amiga.test")
+    assert sid not in {s["session_id"] for s in other.get("/ask-agent/sessions").json()}
+    assert other.get(f"/ask-agent/sessions/{sid}").status_code == 404
+    assert other.delete(f"/ask-agent/sessions/{sid}").status_code == 404
+    assert lead.delete(f"/ask-agent/sessions/{sid}").status_code == 204
+    assert lead.get(f"/ask-agent/sessions/{sid}").status_code == 404
+
+
+def test_parse_plan_tolerates_model_mistakes():
+    from app.services.data_query_service import parse_plan
+    plan = parse_plan('```json\n{"query": "ringkasan", "status": ["disetujui", "Siap ditinjau", "ngawur"]}\n```')
+    assert [s.value for s in plan.status] == ["AMIGA_REVIEWED", "READY_FOR_REVIEW"]
+    plan = parse_plan('{"query": "daftar_dokumen", "tenggat": "kemarin", "periode_hari": 9999, "klien": "Alpha"}')
+    assert plan.query == "daftar_dokumen" and plan.klien == "Alpha" and plan.tenggat is None and plan.periode_hari is None
+    assert parse_plan('{"query": "hapus_semua"}') is None
+    assert parse_plan("[1, 2]") is None

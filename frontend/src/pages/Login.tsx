@@ -43,13 +43,12 @@ export function Login() {
         <Logo height={64} />
         <div className="login-copy">
           <span className="eyebrow">Robot Admin · Back Office as A Service</span>
-          <h1>We Run Your Ops, So You Can Run the Business</h1>
-          <p>Invoice vendor menjadi voucher pembayaran resmi dalam hitungan detik, dengan kontrol yang bisa
-            dipertanggungjawabkan.</p>
+          <h1>Read. Verify. Approve.</h1>
+          <p>Dari invoice vendor ke voucher pembayaran resmi, cepat, akurat, dan bisa diaudit.</p>
           <ul className="login-points">
             <li><span><ScanText /></span>AI membaca invoice PDF dalam hitungan detik</li>
             <li><span><ShieldCheck /></span>Sistem memverifikasi angka, kelengkapan, dan duplikasi</li>
-            <li><span><BadgeCheck /></span>Finance Reviewer menyetujui, semua aksi tercatat</li>
+            <li><span><BadgeCheck /></span>Finance Reviewer menyetujui, setiap aksi tercatat</li>
           </ul>
         </div>
         <small className="muted">PoC MAIN Hackathon 2026 · Kelompok 11</small>

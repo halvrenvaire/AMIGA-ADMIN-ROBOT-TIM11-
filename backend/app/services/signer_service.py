@@ -19,11 +19,14 @@ COMPANY_POSITION = "Perusahaan klien"
 
 
 def pengaju(submitter: User, client: Client) -> dict:
-    return {"kind": SignatoryKind.PENGAJU.value, "name": submitter.full_name, "position": f"PIC Klien, {client.name}"}
+    return {"kind": SignatoryKind.PENGAJU.value, "name": submitter.full_name, "position": f"PIC Klien, {client.name}",
+            "user_id": str(submitter.id)}
 
 
 def _approver(s: Signatory) -> dict:
-    return {"kind": SignatoryKind.PENYETUJU.value, "name": s.full_name, "position": s.position}
+    # id disimpan supaya spesimen tanda tangan elektronik bisa ditempel saat voucher terbit
+    return {"kind": SignatoryKind.PENYETUJU.value, "name": s.full_name, "position": s.position,
+            "signatory_id": str(s.id)}
 
 
 def resolve(db: Session, client_id: uuid.UUID, ids: list[uuid.UUID] | None,

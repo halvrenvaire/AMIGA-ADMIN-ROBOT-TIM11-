@@ -6,6 +6,7 @@ import { Layout } from "./components/Layout";
 import { Loading } from "./components/ui";
 import { Account } from "./pages/Account";
 import { AdminClients, AdminUsers } from "./pages/Admin";
+import { AssistantPage } from "./pages/AssistantPage";
 import { DocumentPage } from "./pages/DocumentPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { Histories, MyReviews, SearchResults, Submissions } from "./pages/Lists";
@@ -59,6 +60,7 @@ export function App() {
             <Route path="dokumen/:id/voucher" element={<VoucherPage />} />
             <Route path="dokumen/:id/riwayat" element={<HistoryPage />} />
             <Route path="akun" element={<Account />} />
+            <Route path="asisten" element={<Protected roles={["FINANCE_REVIEWER", "SERVICE_LEAD", "SYSTEM_ADMIN"]}><AssistantPage /></Protected>} />
             <Route path="admin/pengguna" element={<Protected roles={["SYSTEM_ADMIN"]}><AdminUsers /></Protected>} />
             <Route path="admin/klien" element={<Protected roles={["SYSTEM_ADMIN"]}><AdminClients /></Protected>} />
             <Route path="*" element={<Home />} />

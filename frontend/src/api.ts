@@ -71,5 +71,6 @@ export const api = {
     json<T>(await request(path, { method: "PUT", body: JSON.stringify(body) })),
   patch: async <T>(path: string, body: unknown) =>
     json<T>(await request(path, { method: "PATCH", body: JSON.stringify(body) })),
+  del: async <T>(path: string) => json<T>(await request(path, { method: "DELETE" })),
   blob: async (path: string) => (await request(path)).blob(),
 };
