@@ -268,8 +268,21 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains(".modal label.toggle", "Intake Support").find("input").check();
     cy.contains(".modal label.toggle", "Finance Reviewer").find("input").check();
     cy.contains(".modal label.toggle", "PT Klien Alpha").find("input").check();
+    cy.contains(".modal .alert", "semua perusahaan");
     cy.contains(".modal button", "Simpan").click();
-    cy.contains("tr", NEW_USER).should("contain.text", "Intake Support").and("contain.text", "Finance Reviewer");
+    cy.contains("tr", NEW_USER).should("contain.text", "Intake Support").and("contain.text", "Finance Reviewer")
+      .and("contain.text", "Review: semua perusahaan");
+  });
+
+  it("TS-040 Admin tidak menugaskan perusahaan untuk Finance Reviewer", () => {
+    cy.visitAs("admin@amiga.test", "/admin/pengguna");
+    cy.contains("button", "Tambah pengguna").click();
+    cy.contains(".modal label.toggle", "Finance Reviewer").find("input").check();
+    cy.contains(".modal label", "Perusahaan yang ditugaskan").should("not.exist");
+    cy.contains(".modal .alert", "semua perusahaan");
+    cy.contains(".modal label.toggle", "Intake Support").find("input").check();
+    cy.contains(".modal label", "Perusahaan yang ditugaskan");
+    cy.contains(".modal button", "Batal").click();
   });
 
   it("TS-023 Kombinasi peran terlarang ditolak", () => {
@@ -396,7 +409,8 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains("button", "Kirim ke antrean").should("not.exist");
     cy.contains("button", "Preview").click();
     cy.contains("h1", "Preview pengajuan");
-    cy.contains(".meta dt", "Diajukan oleh").next("dd").should("have.text", "PT Klien Alpha");
+    cy.contains(".meta dt", "Perusahaan").next("dd").should("have.text", "PT Klien Alpha");
+    cy.contains(".meta dt", "Diajukan oleh").next("dd").should("contain.text", "Rina (PIC Alpha)");
     cy.contains(".meta dt", "Disetujui oleh").next("dd").find("li").should("have.length", 2);
     cy.contains(".meta dt", "Jumlah invoice").next("dd").should("have.text", "2 file");
     cy.contains(".file-list.selectable button", "sys_multi_d.pdf").click();
@@ -413,6 +427,35 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains("a", "Lihat status dokumen").click();
     cy.contains(".pdf-head", "2 invoice");
     cy.contains(".meta dt", "File invoice").next("dd").should("contain.text", "sys_normal_a.pdf").and("contain.text", "sys_multi_d.pdf");
+  });
+
+  it("TS-039 Peran ganda yang memperbaiki data tidak bisa meninjau dokumen itu (SoD)", () => {
+    upload("pic.alpha@amiga.test", "sys_dup_c.pdf", "e"); // duplikat c1 → EXCEPTION
+    waitStatus("Ada kendala");
+    cy.then(() => {
+      // Yoga (Intake + Reviewer) bertindak sebagai pengaju: mengirim perbaikan
+      cy.visitAs("multi@amiga.test", `/dokumen/${docs.e.id}`);
+      cy.get("#fix-note").type("Nomor invoice sudah dikonfirmasi ke vendor.");
+      cy.contains("button", "Kirim perbaikan").click();
+      waitStatus("Ada kendala");
+      cy.contains(".issue", "POSSIBLE_DUPLICATE");
+      cy.reload();
+      cy.contains("button", "Tandai bukan duplikat").click();
+      cy.get("#reason").type("Tagihan berbeda, sudah dicek.");
+      cy.contains(".modal button", "Tandai").click();
+      cy.contains(".alert", "Pihak pengaju");
+      cy.contains(".modal button", "Batal").click();
+      // Reviewer lain menandai bukan duplikat; Yoga tidak pernah menjadi reviewernya
+      cy.visitAs("reviewer1@amiga.test", `/dokumen/${docs.e.id}`);
+      cy.contains("button", "Tandai bukan duplikat").click();
+      cy.get("#reason").type("Tagihan berbeda, sudah dikonfirmasi.");
+      cy.contains(".modal button", "Tandai").click();
+      cy.contains(".page-head .badge", "Siap ditinjau");
+      meta("Finance Reviewer").should("not.contain.text", "Yoga");
+      cy.token("multi@amiga.test").then((t) =>
+        cy.request({ method: "POST", url: `/api/documents/${docs.e.id}/approve`, failOnStatusCode: false,
+                     headers: { Authorization: `Bearer ${t}` } }).its("status").should("eq", 403));
+    });
   });
 
   // --- Pengaturan akun (akun baru per run agar akun seed tidak berubah) ---

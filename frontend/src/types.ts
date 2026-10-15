@@ -16,7 +16,10 @@ export interface Me {
   email: string;
   full_name: string;
   roles: Role[];
+  /** Perusahaan yang datanya bisa dilihat (Finance Reviewer: semua perusahaan). */
   clients: ClientRef[];
+  /** Perusahaan yang boleh diajukan (penugasan System Admin; PIC Klien / Intake Support). */
+  upload_clients?: ClientRef[];
 }
 
 export interface AdminUser extends Me { is_active: boolean }

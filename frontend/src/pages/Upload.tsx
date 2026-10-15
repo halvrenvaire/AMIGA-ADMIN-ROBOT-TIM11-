@@ -14,8 +14,11 @@ const MAX_FILES = 10;
 /** Layar 02 — Unggah Dokumen (PIC Klien, Intake Support). FR-1.1–1.5.
  *  1–10 invoice PDF digabung dalam satu voucher; PIC meninjau dulu di halaman Preview sebelum mengirim. */
 export function Upload() {
-  const { user } = useAuth();
-  const clients = user?.clients ?? [];
+  const { user, has } = useAuth();
+  // Hanya perusahaan yang ditugaskan System Admin untuk diajukan (bukan semua yang bisa dilihat reviewer)
+  const clients = user?.upload_clients ?? [];
+  // Intake Support mengajukan atas nama PIC yang mendelegasikan; nama PIC dicetak oleh sistem
+  const submitter = has("PIC_KLIEN") ? user?.full_name ?? "-" : "PIC Klien yang mendelegasikan";
   // Satu perusahaan per pengajuan; bila PIC memegang beberapa perusahaan, harus dipilih dulu
   const [clientId, setClientId] = useState(clients.length === 1 ? clients[0].id : "");
   const [requestType, setRequestType] = useState("Pembayaran vendor");
@@ -89,7 +92,7 @@ export function Upload() {
 
   if (step === "preview") {
     return (
-      <Preview companyName={company?.name ?? "-"} requestType={requestType} channel={channel} submittedDate={submittedDate}
+      <Preview companyName={company?.name ?? "-"} submitter={submitter} requestType={requestType} channel={channel} submittedDate={submittedDate}
                dueDate={dueDate} approvers={approvers} files={files} error={error} busy={busy}
                onBack={() => { setError(null); setStep("form"); }} onSend={send} />
     );
@@ -118,7 +121,7 @@ export function Upload() {
         {!clients.length && <Alert kind="warn">Akun Anda belum ditugaskan ke perusahaan mana pun. Hubungi System Admin.</Alert>}
         <div className="grid-2">
           <div className="field">
-            <label htmlFor="client">Diajukan oleh (perusahaan)</label>
+            <label htmlFor="client">Perusahaan</label>
             <select id="client" className="input" required value={clientId} onChange={(e) => setClientId(e.target.value)}>
               {clients.length !== 1 && <option value="" disabled>Pilih perusahaan…</option>}
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -151,7 +154,7 @@ export function Upload() {
         {company && (
           <>
             <div className="section-title">Kotak tanda tangan voucher</div>
-            <SignerPicker key={clientId} clientId={clientId} clientName={company.name}
+            <SignerPicker key={clientId} clientId={clientId} clientName={company.name} submitter={submitter}
                           onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
           </>
         )}
@@ -191,8 +194,8 @@ export function Upload() {
   );
 }
 
-function Preview({ companyName, requestType, channel, submittedDate, dueDate, approvers, files, error, busy, onBack, onSend }: {
-  companyName: string; requestType: string; channel: string; submittedDate: string; dueDate: string;
+function Preview({ companyName, submitter, requestType, channel, submittedDate, dueDate, approvers, files, error, busy, onBack, onSend }: {
+  companyName: string; submitter: string; requestType: string; channel: string; submittedDate: string; dueDate: string;
   approvers: Signatory[]; files: File[]; error: string | null; busy: boolean; onBack: () => void; onSend: () => void;
 }) {
   const [active, setActive] = useState(0);
@@ -222,7 +225,8 @@ function Preview({ companyName, requestType, channel, submittedDate, dueDate, ap
         <section className="card panel">
           <div className="section-title">Data pengajuan</div>
           <dl className="meta">
-            <dt>Diajukan oleh</dt><dd><b>{companyName}</b></dd>
+            <dt>Perusahaan</dt><dd><b>{companyName}</b></dd>
+            <dt>Diajukan oleh</dt><dd>{submitter} <span className="muted">· PIC Klien</span></dd>
             <dt>Disetujui oleh</dt>
             <dd>{approvers.length ? (
               <ol className="plain-list">{approvers.map((a) => <li key={a.id}>{a.full_name} <span className="muted">· {a.position}</span></li>)}</ol>

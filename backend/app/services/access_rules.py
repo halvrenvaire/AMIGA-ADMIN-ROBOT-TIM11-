@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Role, User, UserClientAssignment
+from app.models import Client, Role, User, UserClientAssignment
 
 INTERNAL_ROLES = {Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER, Role.SERVICE_LEAD, Role.SYSTEM_ADMIN}
 
@@ -34,7 +34,16 @@ def validate_role_combination(roles: set[Role]) -> None:
 
 
 def accessible_client_ids(db: Session, user: User) -> set[uuid.UUID]:
-    """Klien yang boleh dibuka pengguna: hanya penugasan aktif (delegasi yang lewat masa berlaku diabaikan)."""
+    """Klien yang boleh dibuka pengguna. Finance Reviewer menangani pengajuan dari semua perusahaan
+    (pembagian kasus diatur sistem, bukan penugasan klien); peran lain hanya penugasan aktif."""
+    if Role.FINANCE_REVIEWER in user.roles:
+        return set(db.scalars(select(Client.id)))
+    return assigned_client_ids(db, user)
+
+
+def assigned_client_ids(db: Session, user: User) -> set[uuid.UUID]:
+    """Penugasan klien aktif oleh System Admin (delegasi yang lewat masa berlaku diabaikan). Dipakai
+    untuk sisi pengaju: PIC Klien / Intake Support hanya boleh mengajukan untuk perusahaan ini."""
     rows = db.scalars(
         select(UserClientAssignment.client_id).where(
             UserClientAssignment.user_id == user.id,

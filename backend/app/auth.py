@@ -16,7 +16,7 @@ from app.config import settings
 from app.db import get_db
 from app.models import Role, User
 from app.services import audit_service
-from app.services.access_rules import can_access_client
+from app.services.access_rules import assigned_client_ids, can_access_client
 
 ALGORITHM = "HS256"
 
@@ -62,6 +62,17 @@ def require_roles(*allowed: Role):
         return user
 
     return dependency
+
+
+def ensure_submit_access(db: Session, user: User, client_id: uuid.UUID) -> None:
+    """Sisi pengaju (unggah, perbaikan, penanda tangan): hanya perusahaan yang ditugaskan System Admin.
+    Pengguna peran ganda yang juga Finance Reviewer tetap tidak bisa mengajukan untuk perusahaan lain."""
+    if client_id in assigned_client_ids(db, user):
+        return
+    audit_service.record(db, user, "ACCESS_DENIED", client_id=client_id,
+                         note="Mencoba mengajukan untuk perusahaan yang tidak ditugaskan")
+    db.commit()
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Anda tidak ditugaskan untuk mengajukan atas nama perusahaan ini.")
 
 
 def ensure_client_access(db: Session, user: User, client_id: uuid.UUID) -> None:

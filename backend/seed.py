@@ -24,8 +24,9 @@ USERS = [
     ("pic.alpha@amiga.test", "Rina (PIC Alpha)", [Role.PIC_KLIEN], ["PT Klien Alpha"]),
     ("pic.beta@amiga.test", "Budi (PIC Beta)", [Role.PIC_KLIEN], ["PT Klien Beta"]),
     ("intake@amiga.test", "Sari (Intake Support)", [Role.INTAKE_SUPPORT], ["PT Klien Alpha"]),
-    ("reviewer1@amiga.test", "Dewi (Finance Reviewer)", [Role.FINANCE_REVIEWER], CLIENTS),
-    ("reviewer2@amiga.test", "Agus (Finance Reviewer)", [Role.FINANCE_REVIEWER], CLIENTS),
+    # Finance Reviewer menangani semua perusahaan tanpa penugasan; kasus dibagi rata oleh sistem
+    ("reviewer1@amiga.test", "Dewi (Finance Reviewer)", [Role.FINANCE_REVIEWER], []),
+    ("reviewer2@amiga.test", "Agus (Finance Reviewer)", [Role.FINANCE_REVIEWER], []),
     # Peran ganda: bisa mengunggah lalu mencoba menyetujui sendiri (UAT 5, Segregation of Duties)
     ("multi@amiga.test", "Yoga (Intake + Reviewer)", [Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER],
      ["PT Klien Alpha"]),

@@ -1,34 +1,31 @@
-"""Pemilihan Finance Reviewer: yang antrean READY_FOR_REVIEW-nya paling sedikit.
+"""Pembagian dokumen ke Finance Reviewer.
 
-Dipakai saat dokumen lolos verifikasi, dan nanti saat pengalihan otomatis karena SoD (FR-4.4).
+Semua Finance Reviewer aktif menangani pengajuan dari perusahaan mana pun. Dokumen diberikan ke
+reviewer dengan jumlah kasus paling sedikit, sehingga kasus terbagi rata (mis. 20 dokumen untuk 3
+reviewer → 7, 7, 6); bila beberapa reviewer seri, sistem memilih secara acak. Pihak pengaju
+dokumen tidak pernah dipilih (Segregation of Duties, FR-4.4).
 """
 import uuid
-from datetime import date
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import DocStatus, Document, Role, User, UserClientAssignment, UserRole
+from app.models import Document, Role, User, UserRole
 
 
 def pick_reviewer(db: Session, client_id: uuid.UUID, exclude: set[uuid.UUID]) -> User | None:
-    pending = (
+    cases = (
         select(Document.assigned_reviewer_id, func.count().label("n"))
-        .where(Document.status == DocStatus.READY_FOR_REVIEW)
+        .where(Document.assigned_reviewer_id.is_not(None))
         .group_by(Document.assigned_reviewer_id)
         .subquery()
     )
     query = (
         select(User)
         .join(UserRole, (UserRole.user_id == User.id) & (UserRole.role == Role.FINANCE_REVIEWER))
-        .join(UserClientAssignment, UserClientAssignment.user_id == User.id)
-        .outerjoin(pending, pending.c.assigned_reviewer_id == User.id)
-        .where(
-            User.is_active.is_(True),
-            UserClientAssignment.client_id == client_id,
-            or_(UserClientAssignment.valid_until.is_(None), UserClientAssignment.valid_until >= date.today()),
-        )
-        .order_by(func.coalesce(pending.c.n, 0), User.email)
+        .outerjoin(cases, cases.c.assigned_reviewer_id == User.id)
+        .where(User.is_active.is_(True))
+        .order_by(func.coalesce(cases.c.n, 0), func.random())
     )
     if exclude:
         query = query.where(User.id.not_in(exclude))

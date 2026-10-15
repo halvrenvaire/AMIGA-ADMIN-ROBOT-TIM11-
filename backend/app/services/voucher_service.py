@@ -139,7 +139,7 @@ def _sign_boxes(doc: Document) -> list[tuple[str, str, list[str], bool]]:
     client_lines = lambda s: [_t(s["name"]), _t(s["position"]), f"Tanggal: {BLANK[:30]}"]  # noqa: E731
     # Diajukan oleh = perusahaan klien; nama penanda tangan ditulis tangan
     company_lines = lambda s: [_t(s["name"]), f"Nama: {BLANK[:26]}", f"Tanggal: {BLANK[:24]}"]  # noqa: E731
-    boxes = [("Diajukan oleh", "Tanda tangan & cap perusahaan",
+    boxes = [("Diajukan oleh", "Tanda tangan & cap perusahaan" if p["position"] == COMPANY_POSITION else "Tanda tangan",
               (company_lines if p["position"] == COMPANY_POSITION else client_lines)(p), False) for p in pengaju] or [
         ("Diajukan oleh", "Tanda tangan", [f"Nama: {BLANK[:26]}", "Jabatan: PIC Klien", f"Tanggal: {BLANK[:24]}"], False)]
     boxes += [("Disetujui oleh", "Tanda tangan", client_lines(p), False) for p in penyetuju] or [

@@ -41,10 +41,11 @@ def test_summary_counts_due_and_reviewer_load(docs):
     assert sum(r["pending"] for r in body["reviewers"]) == 2
 
 
-def test_summary_only_counts_assigned_clients(docs):
-    # multi@ hanya ditugaskan ke Alpha
-    body = api("multi@amiga.test").get("/dashboard/summary").json()
-    assert body["counts"]["READY_FOR_REVIEW"] == 1
+def test_reviewer_sees_every_company(docs):
+    # multi@ hanya ditugaskan ke Alpha (untuk mengajukan), tetapi sebagai reviewer menangani semua perusahaan
+    a_ready, _, b_ready = docs
+    ids = {d["id"] for d in api("multi@amiga.test").get("/documents", params={"status": "READY_FOR_REVIEW"}).json()}
+    assert {a_ready["id"], b_ready["id"]} <= ids
 
 
 def test_overloaded_reviewer_is_flagged(docs, monkeypatch):
@@ -123,13 +124,13 @@ def ask(email, question):
     return api(email).post("/ask-agent", json={"question": question, "session_id": f"t-{email}"}).json()
 
 
-def test_assistant_answers_queue_questions_with_own_clients_only(docs, assistant):
+def test_assistant_answers_queue_questions_within_access(docs, assistant):
     a_ready, _, b_ready = docs
     body = ask("multi@amiga.test", "Dokumen apa yang tenggatnya dekat?")
     assert body["used_queue_data"] is True
     assert body["answer_id"] is None  # data antrean tidak disimpan ke memori
-    assert a_ready["request_id"] in assistant.last_system
-    assert b_ready["request_id"] not in assistant.last_system  # multi@ tidak ditugaskan ke Beta
+    # Reviewer menangani semua perusahaan
+    assert a_ready["request_id"] in assistant.last_system and b_ready["request_id"] in assistant.last_system
 
 
 def test_lead_sees_reviewer_load_in_assistant(docs, assistant):

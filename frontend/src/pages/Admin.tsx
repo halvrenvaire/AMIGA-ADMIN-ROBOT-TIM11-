@@ -7,6 +7,9 @@ import { ROLE_LABEL } from "../format";
 import type { AdminUser, ClientRef, Role } from "../types";
 
 const ROLES = Object.keys(ROLE_LABEL) as Role[];
+// Peran yang dibatasi per perusahaan. Finance Reviewer menangani semua perusahaan, kasusnya dibagi sistem.
+const CLIENT_SCOPED: Role[] = ["PIC_KLIEN", "INTAKE_SUPPORT", "SERVICE_LEAD"];
+const needsClients = (roles: Role[]) => roles.some((r) => CLIENT_SCOPED.includes(r));
 
 /** System Admin: kelola akun, peran, dan penugasan klien (FR-7.1). */
 export function AdminUsers() {
@@ -38,7 +41,7 @@ export function AdminUsers() {
         {users.loading && !users.data ? <Loading /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Klien</th><th>Status</th><th className="right">Aksi</th></tr></thead>
+              <thead><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Perusahaan</th><th>Status</th><th className="right">Aksi</th></tr></thead>
               <tbody>
                 {(users.data ?? []).map((u) => {
                   const self = u.id === me?.id;
@@ -47,7 +50,12 @@ export function AdminUsers() {
                       <td><b>{u.full_name}</b>{self && <> <span className="chip gray">Anda</span></>}</td>
                       <td className="mono">{u.email}</td>
                       <td><span className="actions">{u.roles.map((r) => <span key={r} className="chip">{ROLE_LABEL[r]}</span>)}</span></td>
-                      <td>{u.clients.map((c) => c.name).join(", ") || <span className="muted">-</span>}</td>
+                      <td>
+                        {needsClients(u.roles) ? (u.clients.map((c) => c.name).join(", ") || <span className="muted">-</span>) : null}
+                        {u.roles.includes("FINANCE_REVIEWER") && (
+                          <div className="muted" style={{ fontSize: 12 }}>Review: semua perusahaan</div>
+                        )}
+                      </td>
                       <td>{u.is_active ? <span className="chip ok">Aktif</span> : <span className="chip gray">Nonaktif</span>}</td>
                       <td className="right">
                         <span className="actions" style={{ justifyContent: "flex-end" }}>
@@ -127,6 +135,7 @@ function UserModal({ user, clients, onClose, onDone }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  const scoped = needsClients(roles);
 
   async function submit() {
     setBusy(true);
@@ -134,9 +143,9 @@ function UserModal({ user, clients, onClose, onDone }: {
     try {
       if (user) {
         await api.put(`/admin/users/${user.id}/roles`, { roles });
-        await api.put(`/admin/users/${user.id}/clients`, { client_ids: clientIds });
+        await api.put(`/admin/users/${user.id}/clients`, { client_ids: scoped ? clientIds : [] });
       } else {
-        await api.post("/admin/users", { email, full_name: name, password, roles, client_ids: clientIds });
+        await api.post("/admin/users", { email, full_name: name, password, roles, client_ids: scoped ? clientIds : [] });
       }
       onDone();
     } catch (e) {
@@ -166,12 +175,20 @@ function UserModal({ user, clients, onClose, onDone }: {
           <label key={r} className="toggle"><input type="checkbox" checked={roles.includes(r)} onChange={() => setRoles(toggle(roles, r))} /> {ROLE_LABEL[r]}</label>
         ))}
       </fieldset>
-      <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-        <label>Klien yang ditugaskan</label>
-        {clients.map((c) => (
-          <label key={c.id} className="toggle"><input type="checkbox" checked={clientIds.includes(c.id)} onChange={() => setClientIds(toggle(clientIds, c.id))} /> {c.name}</label>
-        ))}
-      </fieldset>
+      {scoped && (
+        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+          <label>Perusahaan yang ditugaskan{roles.includes("FINANCE_REVIEWER") && " (untuk peran selain Finance Reviewer)"}</label>
+          {clients.map((c) => (
+            <label key={c.id} className="toggle"><input type="checkbox" checked={clientIds.includes(c.id)} onChange={() => setClientIds(toggle(clientIds, c.id))} /> {c.name}</label>
+          ))}
+        </fieldset>
+      )}
+      {roles.includes("FINANCE_REVIEWER") && (
+        <Alert kind="info">
+          Finance Reviewer menangani pengajuan dari semua perusahaan. Sistem membagi kasus secara merata dan acak antar
+          reviewer, dan tidak pernah memberikan dokumen kepada pihak pengajunya.
+        </Alert>
+      )}
       <div className="actions" style={{ justifyContent: "flex-end" }}>
         <button className="btn" onClick={onClose}>Batal</button>
         <button className="btn primary" disabled={busy || !roles.length} onClick={submit}>Simpan</button>

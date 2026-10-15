@@ -54,7 +54,9 @@ def test_vendor_list_is_isolated_per_client(tx):
 
 def test_reviewer_can_read_but_not_create_vendor(tx):
     add_vendor()
-    assert [v["name"] for v in api("reviewer1@amiga.test").get("/vendors").json()] == ["PT Vendor Jaya"]
+    # Finance Reviewer menangani semua perusahaan, jadi bisa membaca vendor klien mana pun
+    assert "PT Vendor Jaya" in [v["name"] for v in api("reviewer1@amiga.test").get("/vendors").json()]
+    assert api("pic.beta@amiga.test").get("/vendors").json() == []
     assert add_vendor(email="reviewer1@amiga.test").status_code == 403
 
 
@@ -98,17 +100,21 @@ def test_only_pic_manages_signatories(tx):
     assert r.status_code == 403
 
 
-def test_upload_signs_as_company_with_one_default_approver(extractor):
+PIC_ALPHA = "Rina (PIC Alpha)"
+
+
+def test_upload_signs_as_pic_with_one_default_approver(extractor):
     add_signatory("PENYETUJU", "Tidak Dipakai", "Komisaris", default=False)
     add_signatory("PENYETUJU", "Budi Santoso", "Direktur")
     doc = detail(upload().json()["id"])
-    assert [(s["kind"], s["name"]) for s in doc["signers"]] == [("PENGAJU", ALPHA), ("PENYETUJU", "Budi Santoso")]
+    assert [(s["kind"], s["name"], s["position"]) for s in doc["signers"]] == [
+        ("PENGAJU", PIC_ALPHA, f"PIC Klien, {ALPHA}"), ("PENYETUJU", "Budi Santoso", "Direktur")]
 
     approve(doc)
     pdf = api("pic.alpha@amiga.test").get(f"/documents/{doc['id']}/voucher").content
     text = re.sub(r"\s+", " ", " ".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages))
     assert "Diverifikasi oleh AMIGA" not in text
-    for expected in ("Diajukan oleh", ALPHA, "cap perusahaan", "Disetujui oleh", "Budi Santoso", "Direktur"):
+    for expected in ("Diajukan oleh", PIC_ALPHA, f"PIC Klien, {ALPHA}", "Disetujui oleh", "Budi Santoso", "Direktur"):
         assert expected in text
     assert "Tidak Dipakai" not in text
 
@@ -117,7 +123,7 @@ def test_pic_adds_approval_boxes_in_chosen_order(extractor):
     ids = [add_signatory("PENYETUJU", name, pos, default=False)["id"]
            for name, pos in (("Sari Dewi", "Bendahara"), ("Andi", "Direktur"))]
     doc = detail(upload(signatory_ids=",".join(ids)).json()["id"])
-    assert [s["name"] for s in doc["signers"]] == [ALPHA, "Sari Dewi", "Andi"]
+    assert [s["name"] for s in doc["signers"]] == [PIC_ALPHA, "Sari Dewi", "Andi"]
 
 
 def test_pic_can_change_signers_until_voucher_issued(extractor):
@@ -125,7 +131,7 @@ def test_pic_can_change_signers_until_voucher_issued(extractor):
     doc = detail(upload().json()["id"])
     pic = api("pic.alpha@amiga.test")
     r = pic.put(f"/documents/{doc['id']}/signers", json={"signatory_ids": [andi["id"]]})
-    assert [s["name"] for s in r.json()["signers"]] == [ALPHA, "Andi"]
+    assert [s["name"] for s in r.json()["signers"]] == [PIC_ALPHA, "Andi"]
     approve(doc)
     assert pic.put(f"/documents/{doc['id']}/signers", json={"signatory_ids": []}).status_code == 409
 
@@ -144,7 +150,7 @@ def test_signer_limits_and_ownership(extractor):
 def test_upload_with_explicit_empty_approvers(extractor):
     add_signatory("PENYETUJU", "Budi Santoso", "Direktur")
     doc = detail(upload(signatory_ids="").json()["id"])
-    assert [s["name"] for s in doc["signers"]] == [ALPHA]
+    assert [s["name"] for s in doc["signers"]] == [PIC_ALPHA]
 
 
 # --- Daftar voucher ---

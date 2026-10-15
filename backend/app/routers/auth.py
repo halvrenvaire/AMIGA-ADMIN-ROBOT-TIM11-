@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.auth import create_access_token, get_current_user
 from app.db import get_db
-from app.models import Client, User
+from app.models import Client, Role, User
 from app.schemas.schemas import (
     ClientRef, LoginResponse, MeResponse, PasswordChange, ProfileUpdate, TokenResponse,
 )
 from app.security import hash_password, password_problem, verify_password
 from app.services import audit_service
-from app.services.access_rules import accessible_client_ids
+from app.services.access_rules import accessible_client_ids, assigned_client_ids
 
 router = APIRouter(prefix="/auth", tags=["Login"])
 
@@ -21,10 +21,12 @@ router = APIRouter(prefix="/auth", tags=["Login"])
 def user_profile(db: Session, user: User) -> MeResponse:
     client_ids = accessible_client_ids(db, user)
     clients = db.scalars(select(Client).where(Client.id.in_(client_ids)).order_by(Client.name)).all()
+    upload_ids = assigned_client_ids(db, user) if user.roles & {Role.PIC_KLIEN, Role.INTAKE_SUPPORT} else set()
     return MeResponse(
         id=user.id, email=user.email, full_name=user.full_name,
         roles=sorted(user.roles, key=lambda r: r.value),
         clients=[ClientRef(id=c.id, name=c.name) for c in clients],
+        upload_clients=[ClientRef(id=c.id, name=c.name) for c in clients if c.id in upload_ids],
     )
 
 

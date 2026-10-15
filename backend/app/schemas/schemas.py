@@ -126,7 +126,8 @@ class MeResponse(BaseModel):
     email: str
     full_name: str
     roles: list[Role]
-    clients: list[ClientRef]
+    clients: list[ClientRef]  # perusahaan yang datanya bisa dilihat (Finance Reviewer: semua)
+    upload_clients: list[ClientRef] = []  # perusahaan yang boleh diajukan (penugasan System Admin)
 
 
 class ProfileUpdate(BaseModel):

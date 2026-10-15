@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import select, update
 
 from app import db as db_module
-from app.models import DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
+from app.models import AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
 from app.services import audit_service, storage
 from app.services.extraction_service import ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor
 from app.services.reviewer_assignment import pick_reviewer
@@ -160,6 +160,18 @@ def uploader_ids(doc: Document) -> set[uuid.UUID]:
     return {doc.uploaded_by} | ({doc.on_behalf_of} if doc.on_behalf_of else set())
 
 
+# Tindakan sisi pengaju. Siapa pun yang melakukannya pada sebuah dokumen dianggap "pengaju" dokumen
+# itu, termasuk pengguna peran ganda (mis. Intake Support + Finance Reviewer) yang memperbaiki data.
+SUBMITTER_ACTIONS = ("DOCUMENT_UPLOADED", "FIXED_BY_PIC", "PIC_NOTE", "SIGNERS_CHANGED")
+
+
+def submitter_ids(db, doc: Document) -> set[uuid.UUID]:
+    """Semua pihak pengaju dokumen: tidak boleh meninjau, menandai bukan duplikat, atau menyetujuinya (SoD)."""
+    actors = db.scalars(select(AuditLog.actor_id).where(
+        AuditLog.document_id == doc.id, AuditLog.action.in_(SUBMITTER_ACTIONS), AuditLog.actor_id.is_not(None)))
+    return uploader_ids(doc) | set(actors)
+
+
 def run_verification(db, doc: Document) -> list:
     """Verifikasi sistem atas data ekstraksi saat ini; kendala lama diganti yang baru."""
     extraction = doc.extraction
@@ -202,7 +214,7 @@ def _payees(extraction: Extraction) -> list[tuple[str | None, str | None]]:
 
 def send_to_review(db, doc: Document, note: str) -> None:
     """READY_FOR_REVIEW dan tugaskan reviewer dengan antrean paling sedikit, bukan pengunggah."""
-    reviewer = pick_reviewer(db, doc.client_id, uploader_ids(doc))
+    reviewer = pick_reviewer(db, doc.client_id, submitter_ids(db, doc))
     doc.assigned_reviewer_id = reviewer.id if reviewer else None
     set_status(db, doc, DocStatus.READY_FOR_REVIEW,
                f"{note}; reviewer: {reviewer.email if reviewer else 'belum ada'}")

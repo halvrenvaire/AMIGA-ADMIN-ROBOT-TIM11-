@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Building2, Plus, X } from "lucide-react";
+import { Plus, UserRound, X } from "lucide-react";
 import { api } from "../api";
 import type { Signatory } from "../types";
 
 export const MAX_PENYETUJU = 5;
 
-/** Kotak tanda tangan voucher. "Diajukan oleh" = perusahaan klien (tetap); "Disetujui oleh" = satu kotak
+/** Kotak tanda tangan voucher. "Diajukan oleh" = PIC Klien pengaju (tetap); "Disetujui oleh" = satu kotak
  *  per pemberi persetujuan, urutannya sama dengan di voucher. Tanpa `initial`, satu kotak berisi default. */
-export function SignerPicker({ clientId, clientName, initial, onChange }: {
-  clientId: string; clientName: string; initial?: string[];
+export function SignerPicker({ clientId, clientName, submitter, initial, onChange }: {
+  clientId: string; clientName: string; submitter: string; initial?: string[];
   onChange: (ids: string[], chosen: Signatory[]) => void;
 }) {
   const [list, setList] = useState<Signatory[] | null>(null);
@@ -40,8 +40,8 @@ export function SignerPicker({ clientId, clientName, initial, onChange }: {
       <fieldset>
         <legend>Diajukan oleh</legend>
         <div className="company-box">
-          <Building2 />
-          <div><b>{clientName || "Pilih perusahaan"}</b><small className="muted">Tanda tangan &amp; cap perusahaan</small></div>
+          <UserRound />
+          <div><b>{submitter}</b><small className="muted">PIC Klien, {clientName}</small></div>
         </div>
       </fieldset>
       <fieldset>

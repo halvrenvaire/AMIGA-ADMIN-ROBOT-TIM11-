@@ -20,7 +20,7 @@ from app.schemas.schemas import AuditItem, DocumentDetail, ReasonRequest, Review
 from app.services import audit_service, storage
 from app.services.access_rules import can_access_client
 from app.services.document_processing import (
-    PIC_FIELDS, parse_pic_value, run_verification, send_to_review, set_status, uploader_ids,
+    PIC_FIELDS, parse_pic_value, run_verification, send_to_review, set_status, submitter_ids, uploader_ids,
 )
 from app.services.reviewer_assignment import pick_reviewer
 from app.services.voucher_service import create_voucher
@@ -115,19 +115,21 @@ def approve(document_id: uuid.UUID, user: User = Depends(reviewer_only), db: Ses
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Masih ada kendala ({codes}). Koreksi datanya atau kembalikan ke PIC.")
 
-    if user.id in uploader_ids(doc):
+    submitters = submitter_ids(db, doc)
+    if user.id in submitters:
         old_reviewer = doc.assigned_reviewer_id
-        new_reviewer = pick_reviewer(db, doc.client_id, uploader_ids(doc) | {user.id})
+        new_reviewer = pick_reviewer(db, doc.client_id, submitters | {user.id})
         doc.assigned_reviewer_id = new_reviewer.id if new_reviewer else None
         audit_service.record(db, user, "SOD_REJECTED", document_id=doc.id, client_id=doc.client_id,
                              status_before=doc.status.value, status_after=doc.status.value,
-                             note="Penyetuju adalah pengunggah dokumen (Segregation of Duties)")
+                             note="Penyetuju adalah pihak pengaju dokumen (Segregation of Duties)")
         audit_service.record(db, None, "REVIEWER_REASSIGNED", document_id=doc.id, client_id=doc.client_id,
                              field="assigned_reviewer", old_value=_name(db, old_reviewer),
                              new_value=_name(db, doc.assigned_reviewer_id), note="Otomatis karena SoD")
         db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Persetujuan ditolak: Anda adalah pengunggah dokumen ini (Segregation of Duties). "
+                            "Persetujuan ditolak: Anda adalah pihak pengaju dokumen ini (mengunggah atau memperbaiki "
+                            "datanya), sesuai Segregation of Duties. "
                             f"Dokumen otomatis dialihkan ke {_name(db, doc.assigned_reviewer_id)}.")
 
     started = time.monotonic()
@@ -173,9 +175,10 @@ def dismiss_duplicate(document_id: uuid.UUID, body: ReasonRequest, user: User = 
     if not open_issues or any(i.code != IssueCode.POSSIBLE_DUPLICATE for i in open_issues):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Hanya untuk dokumen yang kendalanya tinggal POSSIBLE_DUPLICATE.")
-    if user.id in uploader_ids(doc):
+    if user.id in submitter_ids(db, doc):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Pengunggah tidak boleh menandai dokumennya sendiri bukan duplikat.")
+                            "Pihak pengaju (pengunggah atau yang memperbaiki data) tidak boleh menandai "
+                            "dokumen ini bukan duplikat.")
     for issue in open_issues:
         issue.resolved = True
     audit_service.record(db, user, "DUPLICATE_DISMISSED", document_id=doc.id, client_id=doc.client_id,

@@ -36,17 +36,16 @@ INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentu
   "vendor_name": string|null,
   "invoice_no": string|null,
   "invoice_date": "YYYY-MM-DD"|null,
-  "line_items": [{"kind": "item"|"fee"|"tax"|"discount"|"summary", "description": string|null, "qty": number|null, "unit_price": number|null, "subtotal": number|null}],
-  "total": number|null,
+  "line_items": [{"kind": "item"|"fee"|"tax"|"discount"|"summary", "description": string|null, "qty": number|null, "unit_price": string|null, "subtotal": string|null}],
+  "total": string|null,
   "bank_name": string|null,
   "account_no": string|null,
   "account_name": string|null
 }
 Aturan: "is_invoice" adalah hasil pemeriksaan langkah 1. "document_type" adalah jenis dokumen
 dalam bahasa Indonesia (mis. "Invoice", "Purchase order", "Surat lamaran"). "not_invoice_reason"
-diisi satu kalimat singkat bila is_invoice false, selain itu null. Angka ditulis tanpa pemisah ribuan dan tanpa "Rp" (contoh 1250000.50). Pada invoice berformat
-Indonesia, titik adalah pemisah ribuan dan koma adalah desimal: "2.695.000" ditulis 2695000 dan
-"1.250.000,50" ditulis 1250000.50. 
+diisi satu kalimat singkat bila is_invoice false, selain itu null. Tulis setiap angka uang PERSIS seperti di invoice sebagai teks, termasuk titik dan koma (contoh
+"Rp 10.000", "2.695.000"); sistem yang mengubahnya menjadi angka. "qty" boleh berupa angka. 
 "vendor_name" adalah nama penjual/penerbit invoice yang sebenarnya (mis. "tiket.com (PT Global Tiket
 Network)"), BUKAN judul bagian seperti "Penjual", "Vendor", "Dari", atau "Seller".
 "total" adalah jumlah akhir yang harus dibayar (Total Bayar / Grand Total / Jumlah Tagihan / Amount Due).

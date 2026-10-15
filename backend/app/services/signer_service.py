@@ -1,6 +1,6 @@
 """Pemilihan penanda tangan voucher untuk satu dokumen.
 
-Kotak "Diajukan oleh" selalu perusahaan klien yang dipilih PIC saat unggah. Kotak "Disetujui oleh"
+Kotak "Diajukan oleh" berisi PIC Klien yang mengajukan (nama + perusahaan). Kotak "Disetujui oleh"
 dipilih dari daftar penanda tangan klien; bila PIC tidak memilih, satu kotak berisi penanda tangan
 default klien. Yang disimpan di dokumen adalah salinan nama dan jabatan, supaya voucher yang sudah
 terbit tidak berubah bila daftar diedit.
@@ -11,28 +11,32 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Client, Signatory, SignatoryKind
+from app.models import Client, Signatory, SignatoryKind, User
 
 MAX_PENYETUJU = 5
+# Snapshot lama (sebelum 16 Okt 2026) mencetak nama perusahaan di kotak "Diajukan oleh"
 COMPANY_POSITION = "Perusahaan klien"
 
 
-def company(client: Client) -> dict:
-    return {"kind": SignatoryKind.PENGAJU.value, "name": client.name, "position": COMPANY_POSITION}
+def pengaju(submitter: User, client: Client) -> dict:
+    return {"kind": SignatoryKind.PENGAJU.value, "name": submitter.full_name, "position": f"PIC Klien, {client.name}"}
 
 
 def _approver(s: Signatory) -> dict:
     return {"kind": SignatoryKind.PENYETUJU.value, "name": s.full_name, "position": s.position}
 
 
-def resolve(db: Session, client_id: uuid.UUID, ids: list[uuid.UUID] | None) -> list[dict]:
-    """[perusahaan, penyetuju...] sesuai urutan pilihan PIC (urutan = urutan kotak di voucher)."""
+def resolve(db: Session, client_id: uuid.UUID, ids: list[uuid.UUID] | None,
+            submitter: User | None) -> list[dict]:
+    """[PIC pengaju, penyetuju...] sesuai urutan pilihan PIC (urutan = urutan kotak di voucher).
+    `submitter` None = hanya kotak "Disetujui oleh" (dipakai saat mengganti penanda tangan)."""
     client = db.get(Client, client_id)
+    head = [pengaju(submitter, client)] if submitter else []
     if ids is None:
         default = db.scalars(select(Signatory).where(
             Signatory.client_id == client_id, Signatory.kind == SignatoryKind.PENYETUJU,
             Signatory.is_active.is_(True), Signatory.is_default.is_(True)).order_by(Signatory.full_name).limit(1)).first()
-        return [company(client)] + ([_approver(default)] if default else [])
+        return head + ([_approver(default)] if default else [])
 
     unique = list(dict.fromkeys(ids))
     found = {s.id: s for s in db.scalars(select(Signatory).where(Signatory.id.in_(unique)))}
@@ -43,7 +47,7 @@ def resolve(db: Session, client_id: uuid.UUID, ids: list[uuid.UUID] | None) -> l
     if len(unique) > MAX_PENYETUJU:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             f"Paling banyak {MAX_PENYETUJU} kotak \"Disetujui oleh\".")
-    return [company(client)] + [_approver(found[i]) for i in unique]
+    return head + [_approver(found[i]) for i in unique]
 
 
 def parse_ids(raw: str | None) -> list[uuid.UUID] | None:

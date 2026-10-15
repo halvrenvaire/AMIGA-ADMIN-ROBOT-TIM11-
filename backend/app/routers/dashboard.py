@@ -7,14 +7,16 @@ from sqlalchemy.orm import Session
 from app.auth import require_roles
 from app.config import settings
 from app.db import get_db
-from app.models import DocStatus, Role, User
+from sqlalchemy import select
+
+from app.models import Client, DocStatus, Role, User
 from app.routers.documents import _detail, _get_document
 from app.schemas.schemas import (
     DashboardMetrics, DashboardSummary, DocumentDetail, ReassignRequest, ReviewerLoadOut, TrendPoint,
 )
 from app.services import audit_service
 from app.services.access_rules import accessible_client_ids
-from app.services.document_processing import uploader_ids
+from app.services.document_processing import submitter_ids
 from app.services import metrics_service
 from app.services.queue_service import summarize
 
@@ -56,8 +58,10 @@ def reviewer_options(document_id: uuid.UUID, user: User = Depends(require_roles(
     """Reviewer yang sah untuk dokumen ini: Finance Reviewer aktif klien dokumen, bukan pengunggah
     (SoD) dan bukan reviewer saat ini, beserta bebannya."""
     doc = _get_document(db, user, document_id)
-    excluded = uploader_ids(doc) | ({doc.assigned_reviewer_id} if doc.assigned_reviewer_id else set())
-    return [ReviewerLoadOut.model_validate(r) for r in summarize(db, {doc.client_id}).reviewers
+    excluded = submitter_ids(db, doc) | ({doc.assigned_reviewer_id} if doc.assigned_reviewer_id else set())
+    # Reviewer menangani semua perusahaan: beban dihitung dari seluruh antrean
+    all_clients = set(db.scalars(select(Client.id)))
+    return [ReviewerLoadOut.model_validate(r) for r in summarize(db, all_clients).reviewers
             if r.id not in excluded]
 
 
@@ -71,13 +75,11 @@ def reassign(document_id: uuid.UUID, body: ReassignRequest,
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Hanya dokumen READY_FOR_REVIEW yang bisa dialihkan (sekarang {doc.status.value}).")
     target = db.get(User, body.reviewer_id)
-    if (target is None or not target.is_active or Role.FINANCE_REVIEWER not in target.roles
-            or doc.client_id not in accessible_client_ids(db, target)):
+    if target is None or not target.is_active or Role.FINANCE_REVIEWER not in target.roles:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Pilih Finance Reviewer yang aktif.")
+    if target.id in submitter_ids(db, doc):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            "Pilih Finance Reviewer aktif yang ditugaskan untuk klien dokumen ini.")
-    if target.id in uploader_ids(doc):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            "Reviewer ini adalah pengunggah dokumen (Segregation of Duties). Pilih reviewer lain.")
+                            "Reviewer ini adalah pihak pengaju dokumen (Segregation of Duties). Pilih reviewer lain.")
     if target.id == doc.assigned_reviewer_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Dokumen sudah ditugaskan ke reviewer ini.")
 

@@ -15,7 +15,7 @@ from pypdf.errors import PdfReadError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.auth import ensure_client_access, get_current_user, require_roles
+from app.auth import ensure_client_access, ensure_submit_access, get_current_user, require_roles
 from app.config import settings
 from app.db import get_db
 from app.models import (
@@ -145,7 +145,7 @@ async def upload_document(
     """Unggah 1–10 invoice PDF yang digabung dalam satu voucher (FR-1.1–1.5). Sistem menerbitkan
     satu Request ID dengan status QUEUED, lalu AI membaca setiap invoice dan sistem memverifikasinya
     di background."""
-    ensure_client_access(db, user, client_id)
+    ensure_submit_access(db, user, client_id)
     if not 1 <= len(files) <= settings.max_upload_files:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             f"Unggah minimal 1 dan maksimal {settings.max_upload_files} file invoice.")
@@ -174,7 +174,9 @@ async def upload_document(
         on_behalf_of = db.scalar(select(UserClientAssignment.delegated_by).where(
             UserClientAssignment.user_id == user.id, UserClientAssignment.client_id == client_id))
 
-    signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids))
+    # "Diajukan oleh" di voucher = PIC Klien: pengunggah, atau PIC yang diwakili Intake Support
+    submitter = db.get(User, on_behalf_of) if on_behalf_of else user
+    signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids), submitter)
 
     request_id = _new_request_id(db)
     total_pages = sum(p for _, _, p in parts)
@@ -288,6 +290,7 @@ def fix_document(
     """Kirim perbaikan saat EXCEPTION (FR-3.4). Dokumen kembali ke ekstraksi dengan Request ID
     yang sama (FR-2.4), dan isian Anda tidak ditimpa hasil AI."""
     doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
     if doc.status != DocStatus.EXCEPTION:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Perbaikan hanya bisa dikirim saat status EXCEPTION (sekarang {doc.status.value}).")
@@ -351,9 +354,12 @@ def set_signers(document_id: uuid.UUID, body: SignersUpdate, user: User = Depend
                 db: Session = Depends(get_db)):
     """Ganti penanda tangan voucher selama voucher belum terbit (PIC Klien / Intake Support)."""
     doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
     if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT):
         raise HTTPException(status.HTTP_409_CONFLICT, "Voucher sudah terbit; penanda tangan tidak bisa diubah.")
-    new = signer_service.resolve(db, doc.client_id, body.signatory_ids)
+    # Kotak "Diajukan oleh" (PIC) tetap; hanya kotak "Disetujui oleh" yang diganti
+    pengaju = [s for s in doc.signers or [] if s["kind"] == "PENGAJU"]
+    new = pengaju + signer_service.resolve(db, doc.client_id, body.signatory_ids, None)
     describe = lambda items: "; ".join(f"{s['name']} ({s['position']})" for s in items) or "-"  # noqa: E731
     audit_service.record(db, user, "SIGNERS_CHANGED", document_id=doc.id, client_id=doc.client_id,
                          field="signers", old_value=describe(doc.signers or []), new_value=describe(new))

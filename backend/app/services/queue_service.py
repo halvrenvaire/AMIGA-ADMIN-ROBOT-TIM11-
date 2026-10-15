@@ -7,12 +7,12 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import (
-    Client, DocStatus, Document, Extraction, Role, User, UserClientAssignment, UserRole, ValidationIssue,
+    Client, DocStatus, Document, Extraction, Role, User, UserRole, ValidationIssue,
 )
 
 DONE = (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT)
@@ -51,16 +51,12 @@ def summarize(db: Session, client_ids: set[uuid.UUID], today: date | None = None
         .where(in_scope, Document.status == DocStatus.READY_FOR_REVIEW)
         .group_by(Document.assigned_reviewer_id).subquery()
     )
-    reviewers_of_scope = select(UserClientAssignment.user_id).where(
-        UserClientAssignment.client_id.in_(client_ids),
-        or_(UserClientAssignment.valid_until.is_(None), UserClientAssignment.valid_until >= today),
-    )
     load = func.coalesce(pending.c.n, 0)
     rows = db.execute(
         select(User.id, User.full_name, User.email, load)
         .join(UserRole, (UserRole.user_id == User.id) & (UserRole.role == Role.FINANCE_REVIEWER))
         .outerjoin(pending, pending.c.rid == User.id)
-        .where(User.is_active.is_(True), User.id.in_(reviewers_of_scope))
+        .where(User.is_active.is_(True))
         .order_by(load.desc(), User.full_name)
     ).all()
     reviewers = [ReviewerLoad(rid, name, email, n, n > settings.reviewer_overload_threshold)

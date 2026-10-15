@@ -124,9 +124,9 @@ Ada 6 peran internal, ditambah **Sistem** dan **AI Engine** sebagai pelaku otoma
 
 **Peran ganda.** Satu pengguna boleh memiliki lebih dari satu peran internal, misalnya Intake Support sekaligus Finance Reviewer. Kombinasi yang **dilarang**: PIC Klien dengan peran internal mana pun, dan System Admin dengan Finance Reviewer. System Admin tidak boleh memberi peran kepada dirinya sendiri.
 
-**Segregation of Duties.** Pengguna tidak boleh menyetujui dokumen yang ia unggah sendiri, termasuk dokumen yang diunggah atas namanya. Sistem menolak persetujuan dan **otomatis mengalihkan** dokumen ke reviewer lain dengan antrean tertunda paling sedikit.
+**Segregation of Duties.** Pihak pengaju sebuah dokumen tidak boleh meninjau, menandai bukan duplikat, atau menyetujuinya. Pihak pengaju adalah pengunggah, PIC yang diwakili, dan siapa pun yang memperbaiki data, memberi catatan PIC, atau mengubah penanda tangan dokumen itu, termasuk pengguna peran ganda Intake Support + Finance Reviewer. Sistem tidak pernah menugaskan dokumen kepada pihak pengajunya; bila tetap dicoba, persetujuan ditolak dan dokumen **otomatis dialihkan** ke reviewer lain.
 
-**Isolasi klien.** Pengguna hanya bisa membuka dokumen klien yang ditugaskan kepadanya. Akses ke dokumen klien lain ditolak dan dicatat.
+**Isolasi klien.** PIC Klien, Intake Support, dan Service Lead hanya bisa membuka dokumen perusahaan yang ditugaskan System Admin, dan hanya bisa mengajukan untuk perusahaan itu. Finance Reviewer menangani pengajuan dari **semua perusahaan** tanpa penugasan. Akses di luar hak ditolak dan dicatat.
 
 ---
 
@@ -150,7 +150,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Frontend (5 layar) | P0 | ✅ | React + Vite + TypeScript: login, Dashboard Antrean, Unggah & Pengajuan, Peninjauan split-screen, Voucher, Riwayat, layar System Admin, tombol chat Asisten |
 | Dashboard metrik | Owner | ✅ | KPI per status, tren harian (line chart), kecepatan proses, kualitas & kendala, nilai pembayaran; dibanding periode sebelumnya (`GET /dashboard/metrics`) |
 | Data referensi vendor | Owner | ✅ | PIC Klien/Intake mendaftarkan vendor (NPWP, alamat, kontak, rekening) per klien; nama dinormalisasi agar tidak dobel; dipakai sebagai dropdown di filter & formulir; dokumen tertaut otomatis |
-| Penanda tangan voucher | Owner | ✅ | "Diajukan oleh" = perusahaan klien yang dipilih saat unggah; PIC Klien mendaftarkan pemberi persetujuan "Disetujui oleh" (1 kotak default, bisa ditambah hingga 5 per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
+| Penanda tangan voucher | Owner | ✅ | "Diajukan oleh" = PIC Klien yang mengajukan (nama + perusahaan); PIC Klien mendaftarkan pemberi persetujuan "Disetujui oleh" (1 kotak default, bisa ditambah hingga 5 per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
 | Manajemen voucher | Owner | ✅ | Tabel voucher dengan filter perusahaan, vendor, status, tanggal; dikelompokkan dengan subtotal; unduh CSV |
 
 ### Rencana tahap berikutnya
@@ -417,12 +417,12 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Topik | Keputusan | Alasan |
 | --- | --- | --- |
 | Data saat ekstraksi ulang | Field yang diisi/diperbaiki PIC **didahulukan** atas hasil AI | Mencegah putaran tanpa akhir: PDF tanpa nomor rekening akan selalu kosong bila AI menimpa isian PIC (UAT #8) |
-| Pengalihan otomatis SoD | Ke reviewer lain (bukan pengunggah) dengan **antrean tertunda paling sedikit** | Sekaligus membantu pemerataan beban |
+| Pengalihan otomatis SoD | Ke reviewer lain (bukan pihak pengaju) dengan **jumlah kasus paling sedikit**, seri diacak | Sekaligus membantu pemerataan beban |
 | Peran ganda | Diizinkan dengan kombinasi terlarang (lihat [Peran dan hak akses](#peran-dan-hak-akses)) | Tanpa ini, UAT #5 tidak mungkin terjadi karena Finance Reviewer tidak boleh mengunggah |
 | Isi token login | Token hanya berisi ID pengguna; peran dan status aktif dibaca ulang dari database di setiap request | Perubahan peran atau penonaktifan akun oleh System Admin langsung berlaku tanpa menunggu token kedaluwarsa |
 | Akses lintas klien | Ditolak dengan **403 "Akses ditolak"** dan dicatat sebagai `ACCESS_DENIED` di jejak audit | Sesuai UAT 6, dan percobaan akses bisa ditelusuri |
 | System Admin dan akunnya sendiri | Tidak bisa mengubah peran, penugasan klien, atau status akunnya sendiri | Perluasan aturan "admin tidak boleh memberi peran ke diri sendiri" |
-| Penugasan reviewer | Saat lolos verifikasi, dokumen ditugaskan ke Finance Reviewer klien itu dengan antrean READY_FOR_REVIEW paling sedikit, **bukan** pengunggah atau PIC yang diwakili | Mencegah SoD sejak awal; cek SoD saat menyetujui tetap dijalankan (Tahap 5) |
+| Penugasan reviewer | Saat lolos verifikasi, dokumen ditugaskan ke Finance Reviewer aktif mana pun (tanpa penugasan perusahaan) dengan **jumlah kasus paling sedikit**; bila seri, dipilih **acak**. Contoh: 20 dokumen untuk 3 reviewer → 7, 7, 6. Pihak pengaju tidak pernah dipilih | Koreksi owner 16 Okt 2026; cek SoD saat menyetujui tetap dijalankan |
 | Cakupan cek duplikat | Hanya di antara invoice **klien yang sama** | Risiko bayar ganda ada per klien; pesan duplikat menyebut Request ID lain sehingga tidak boleh lintas klien |
 | AI gagal membaca | Status **EXCEPTION** dengan kode `EXTRACTION_FAILED`; Finance Reviewer bisa memproses ulang | Hanya ada 6 status di PRD; dokumen tetap tersimpan (FR-2.5) |
 | Pilihan saluran | Email, WhatsApp, Lainnya | PRD menyebut "mis. Email/WhatsApp" |
@@ -432,9 +432,9 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Serah terima voucher | Status jadi SENT_TO_CLIENT hanya bila diunduh **PIC Klien** atau **Intake Support yang mengunggah dokumen itu**. Pratinjau dan unduhan reviewer tidak mengubah status | Pengguna peran ganda yang mengunduh sebagai reviewer tidak boleh dianggap menyerahkan ke klien |
 | Nomor voucher | `VCH/YYYY/MM/NNNN`, urut per bulan (WIB). Teks batas otorisasi bisa diganti lewat `VOUCHER_AUTHORIZATION_TEXT` di `.env` | **Sementara**, menunggu format resmi dari tim Keuangan (pertanyaan terbuka 4) |
 | Beban berlebih | Reviewer dengan **> 5** dokumen READY_FOR_REVIEW ditandai berlebih; tenggat "dekat" = ≤ 2 hari. Bisa diubah lewat `REVIEWER_OVERLOAD_THRESHOLD` dan `DUE_SOON_DAYS` | **Sementara**, menunggu batas resmi (pertanyaan terbuka 3) |
-| Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif klien itu yang bukan pengunggah | Pengalihan tidak boleh membuka celah SoD |
+| Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif yang bukan pihak pengaju | Pengalihan tidak boleh membuka celah SoD |
 | Asisten dan data antrean | `/ask-agent` memakai data antrean hanya bila pertanyaannya tentang antrean (mis. "dokumen apa yang tenggatnya dekat?"). Data dibangun di server dari klien yang ditugaskan; jawaban seperti ini **tidak disimpan** ke memori | Data cepat berubah, jadi tidak boleh menjadi referensi jawaban lain; hak akses sama dengan layar biasa |
-| Penanda tangan voucher | Nama + kotak tanda tangan basah (tanpa gambar atau e-sign). Disalin ke dokumen saat dipilih, sehingga voucher lama tidak berubah bila daftar diedit. "Diajukan oleh" = perusahaan klien (tanda tangan & cap); "Disetujui oleh" 1 kotak default, maks. 5 | Keputusan owner 14 & 15 Okt 2026 |
+| Penanda tangan voucher | Nama + kotak tanda tangan basah (tanpa gambar atau e-sign). Disalin ke dokumen saat dipilih, sehingga voucher lama tidak berubah bila daftar diedit. "Diajukan oleh" = PIC Klien pengaju (nama, "PIC Klien, <perusahaan>"); "Disetujui oleh" 1 kotak default, maks. 5 | Keputusan owner 14–16 Okt 2026 |
 | Beberapa invoice per voucher | 1–10 PDF per pengajuan, masing-masing maks. 5 halaman dan 10 MB. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Satu voucher hanya untuk satu vendor dan satu rekening (`VENDOR_MISMATCH`); duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
 | Vendor per klien | Data vendor milik masing-masing klien (tidak dibagi lintas klien) | Data rekening vendor termasuk data sensitif dan mengikuti aturan isolasi klien |
 | Halaman awal | Dashboard metrik untuk semua peran selain System Admin | Permintaan owner: metrik utama terlihat pertama |

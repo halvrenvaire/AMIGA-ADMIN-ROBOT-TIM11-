@@ -205,7 +205,7 @@ export function Signatories() {
       </div>
       {(error || list.error) && <Alert>{error ?? list.error}</Alert>}
       <Alert kind="info">
-        Kotak <b>Diajukan oleh</b> di voucher otomatis berisi nama perusahaan (<b>{clientName}</b>) yang dipilih saat unggah,
+        Kotak <b>Diajukan oleh</b> di voucher otomatis berisi nama PIC Klien yang mengajukan (PIC Klien, <b>{clientName}</b>),
         jadi tidak perlu didaftarkan di sini.
       </Alert>
       {list.loading && !list.data ? <Loading /> : (

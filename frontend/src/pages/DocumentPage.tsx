@@ -501,7 +501,8 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
       {editing && initial ? (
         <>
           {error && <Alert>{error}</Alert>}
-          <SignerPicker clientId={doc.client.id} clientName={doc.client.name} initial={initial} onChange={setIds} />
+          <SignerPicker clientId={doc.client.id} clientName={doc.client.name} initial={initial} onChange={setIds}
+                        submitter={doc.signers.find((s) => s.kind === "PENGAJU")?.name ?? doc.on_behalf_of ?? doc.uploaded_by} />
           <div className="actions" style={{ justifyContent: "flex-end" }}>
             <button className="btn" onClick={() => setEditing(false)}>Batal</button>
             <button className="btn primary" onClick={save}>Simpan</button>
