@@ -81,6 +81,25 @@ def combine(parts: list[ExtractedInvoice]) -> ExtractedInvoice:
     )
 
 
+def document_checks(names: list[str], parts: list[ExtractedInvoice]) -> list[dict]:
+    """Hasil pemeriksaan jenis dokumen per file, disimpan di raw_json untuk verifikasi."""
+    return [{"file": name, "is_invoice": p.is_invoice, "document_type": p.document_type,
+             "reason": p.not_invoice_reason} for name, p in zip(names, parts)]
+
+
+def _not_invoice_issues(extraction: Extraction) -> list[Issue]:
+    checks = extraction.raw_json.get("document_checks") if isinstance(extraction.raw_json, dict) else None
+    issues = []
+    for c in checks or []:
+        if c.get("is_invoice") is False:
+            kind = f" (terbaca sebagai: {c['document_type']})" if c.get("document_type") else ""
+            reason = f" {c['reason'].rstrip('.')}." if c.get("reason") else ""
+            issues.append(Issue(IssueCode.NOT_AN_INVOICE, None,
+                                f"File {c.get('file') or 'ini'} bukan invoice{kind}.{reason} Unggah ulang pengajuan "
+                                "hanya dengan file invoice/tagihan dari vendor."))
+    return issues
+
+
 def _save_extraction(db, doc: Document, data: ExtractedInvoice, duration_ms: int) -> Extraction:
     extraction = doc.extraction or Extraction(document_id=doc.id)
     for name in PIC_FIELDS:
@@ -155,6 +174,14 @@ def run_verification(db, doc: Document) -> list:
         account_name=extraction.account_name,
         subtotals=[line.subtotal for line in extraction.line_items],
     )
+    not_invoice = _not_invoice_issues(extraction)
+    if not_invoice:
+        # Pemeriksaan data invoice tidak relevan bila ada file yang bukan invoice
+        _resolve_open_issues(db, doc)
+        for issue in not_invoice:
+            db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field, message=issue.message))
+        db.flush()
+        return not_invoice
     issues = verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction))
     if _same_batch_duplicate(doc):
         issues.append(Issue(IssueCode.POSSIBLE_DUPLICATE, "invoice_no",
@@ -208,9 +235,11 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
                     except ExtractionError as e:
                         raise ExtractionError(f"{f.original_filename}: {e}" if len(files) > 1 else str(e)) from e
                     f.invoice_no_norm = normalize(parts[-1].invoice_no)
-                data = combine(parts)
+                names = [f.original_filename for f in files]
             else:
-                data = extractor.extract(storage.load(doc.file_key))
+                parts, names = [extractor.extract(storage.load(doc.file_key))], [doc.original_filename]
+            data = combine(parts)
+            data.raw = {**data.raw, "document_checks": document_checks(names, parts)}
         except (ExtractionError, storage.StorageError) as e:
             log.warning("Ekstraksi %s gagal: %s", doc.request_id, e)
             _resolve_open_issues(db, doc)

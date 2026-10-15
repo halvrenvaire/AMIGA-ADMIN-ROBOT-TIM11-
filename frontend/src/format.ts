@@ -28,6 +28,7 @@ export const ISSUE_LABEL: Record<IssueCode, string> = {
   EXTRACTION_FAILED: "AI gagal membaca",
   RETURNED_BY_REVIEWER: "Dikembalikan reviewer",
   VENDOR_MISMATCH: "Vendor/rekening berbeda",
+  NOT_AN_INVOICE: "Bukan invoice",
 };
 
 export const FIELD_LABEL: Record<string, string> = {

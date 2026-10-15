@@ -39,6 +39,8 @@ class IssueCode(str, enum.Enum):
     RETURNED_BY_REVIEWER = "RETURNED_BY_REVIEWER"
     # Beberapa invoice dalam satu voucher harus untuk satu vendor dan satu rekening tujuan
     VENDOR_MISMATCH = "VENDOR_MISMATCH"
+    # AI (Invoice Verification Officer) menilai PDF bukan invoice
+    NOT_AN_INVOICE = "NOT_AN_INVOICE"
 
 
 def _uuid() -> uuid.UUID:

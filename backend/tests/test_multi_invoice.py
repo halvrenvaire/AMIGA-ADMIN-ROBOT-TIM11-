@@ -80,3 +80,24 @@ def test_one_unreadable_invoice_fails_the_batch_with_its_name(extractor):
     extractor.result = [invoice(), ExtractionError("timeout")]
     doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
     assert codes(doc) == [("EXTRACTION_FAILED", None)]
+
+
+def not_invoice():
+    return invoice(is_invoice=False, document_type="Surat lamaran", not_invoice_reason="Berisi lamaran kerja",
+                   vendor_name=None, invoice_no=None, total=None, line_items=[])
+
+
+def test_pdf_that_is_not_an_invoice_is_an_exception(extractor):
+    extractor.result = not_invoice()
+    doc = detail(upload_many([make_pdf()]).json()["id"])
+    assert doc["status"] == "EXCEPTION"
+    # Hanya kendala "bukan invoice", tanpa daftar data yang hilang
+    assert codes(doc) == [("NOT_AN_INVOICE", None)]
+    assert "inv1.pdf bukan invoice (terbaca sebagai: Surat lamaran). Berisi lamaran kerja." in doc["issues"][0]["message"]
+
+
+def test_non_invoice_file_in_batch_is_named(extractor):
+    extractor.result = [invoice(), not_invoice()]
+    doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
+    assert codes(doc) == [("NOT_AN_INVOICE", None)]
+    assert "inv2.pdf" in doc["issues"][0]["message"] and "inv1.pdf" not in doc["issues"][0]["message"]

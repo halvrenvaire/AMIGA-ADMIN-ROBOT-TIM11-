@@ -7,7 +7,7 @@ export type DocStatus =
 
 export type IssueCode =
   | "MISSING_EVIDENCE" | "CALCULATION_DISCREPANCY" | "POSSIBLE_DUPLICATE" | "EXTRACTION_FAILED"
-  | "RETURNED_BY_REVIEWER" | "VENDOR_MISMATCH";
+  | "RETURNED_BY_REVIEWER" | "VENDOR_MISMATCH" | "NOT_AN_INVOICE";
 
 export interface ClientRef { id: string; name: string }
 

@@ -98,6 +98,7 @@ Catatan alur:
 | Angka / perhitungan | `CALCULATION_DISCREPANCY` | Jumlah subtotal line items ≠ total invoice | EXCEPTION |
 | Duplikasi | `POSSIBLE_DUPLICATE` | Ada invoice lain dengan nomor invoice dan vendor yang sama | EXCEPTION |
 | Dikembalikan reviewer | `RETURNED_BY_REVIEWER` | Finance Reviewer memilih "Kembalikan ke PIC" | EXCEPTION |
+| Bukan invoice | `NOT_AN_INVOICE` | AI (berperan sebagai Invoice Verification Officer) menilai PDF bukan invoice/tagihan, mis. surat, PO, atau bukti transfer. Kendala data lain tidak ditampilkan | EXCEPTION |
 | Vendor/rekening berbeda | `VENDOR_MISMATCH` | Beberapa invoice dalam satu pengajuan punya vendor atau rekening tujuan berbeda | EXCEPTION |
 
 Nomor invoice dan nama vendor **dinormalisasi** sebelum dibandingkan (huruf kecil, tanpa spasi dan tanda baca), sehingga `INV-001` dan `inv 001` tetap terdeteksi sebagai duplikat.

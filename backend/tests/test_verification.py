@@ -74,3 +74,12 @@ def test_parse_response_reads_json_inside_text():
 def test_parse_response_without_json_fails():
     with pytest.raises(ExtractionError):
         parse_response("Maaf, saya tidak bisa membaca dokumen ini.")
+
+
+def test_parse_response_reads_document_check():
+    inv = parse_response('{"is_invoice": false, "document_type": "Surat lamaran", '
+                         '"not_invoice_reason": "Berisi lamaran kerja.", "line_items": []}')
+    assert inv.is_invoice is False
+    assert inv.document_type == "Surat lamaran" and inv.not_invoice_reason == "Berisi lamaran kerja."
+    # Jawaban tanpa is_invoice tidak dianggap bukan invoice
+    assert parse_response('{"vendor_name": "PT A"}').is_invoice is True

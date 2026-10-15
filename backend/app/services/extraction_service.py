@@ -11,12 +11,28 @@ from decimal import Decimal, InvalidOperation
 from app.config import settings
 from app.services.bedrock_client import BedrockClient, BedrockError
 
-SYSTEM_PROMPT = """Kamu membaca invoice vendor dan menyalin datanya ke JSON. Kamu TIDAK memeriksa,
-menghitung ulang, atau memperbaiki angka: salin persis seperti tertulis di invoice.
-Jika sebuah data tidak ada di invoice, isi null. Jangan menebak."""
+SYSTEM_PROMPT = """Kamu adalah Invoice Verification Officer berpengalaman di bagian keuangan (back office).
+Tugasmu dua, berurutan:
+
+1. Pastikan dokumen PDF ini benar-benar sebuah INVOICE, yaitu dokumen tagihan dari penjual/vendor
+   kepada pembeli yang meminta pembayaran. Ciri umumnya: nama penjual, nomor dan tanggal invoice,
+   rincian barang/jasa, jumlah yang harus dibayar, dan biasanya rekening tujuan pembayaran.
+   Invoice, faktur, tagihan, dan nota tagihan termasuk invoice, dalam bahasa apa pun.
+   BUKAN invoice: penawaran harga (quotation), purchase order, surat jalan / delivery note,
+   bukti transfer / bukti bayar, kontrak, surat, CV, laporan, artikel, materi presentasi, formulir,
+   foto atau dokumen lain yang tidak menagih pembayaran.
+   Nilai dari isi dan bentuk dokumen, bukan dari nama file. Bila dokumen jelas sebuah tagihan meski
+   ada data yang kurang, tetap anggap invoice (kekurangan data diperiksa sistem, bukan olehmu).
+
+2. Bila invoice, salin datanya ke JSON. Kamu TIDAK memeriksa, menghitung ulang, atau memperbaiki
+   angka: salin persis seperti tertulis di invoice. Jika sebuah data tidak ada, isi null. Jangan menebak.
+   Bila bukan invoice, isi semua field data dengan null dan line_items dengan []."""
 
 INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentuk:
 {
+  "is_invoice": true|false,
+  "document_type": string,
+  "not_invoice_reason": string|null,
   "vendor_name": string|null,
   "invoice_no": string|null,
   "invoice_date": "YYYY-MM-DD"|null,
@@ -26,7 +42,9 @@ INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentu
   "account_no": string|null,
   "account_name": string|null
 }
-Aturan: angka ditulis tanpa pemisah ribuan dan tanpa "Rp" (contoh 1250000.50). "total" adalah total
+Aturan: "is_invoice" adalah hasil pemeriksaan langkah 1. "document_type" adalah jenis dokumen
+dalam bahasa Indonesia (mis. "Invoice", "Purchase order", "Surat lamaran"). "not_invoice_reason"
+diisi satu kalimat singkat bila is_invoice false, selain itu null. Angka ditulis tanpa pemisah ribuan dan tanpa "Rp" (contoh 1250000.50). "total" adalah total
 akhir yang tertulis di invoice. "account_no" adalah nomor rekening tujuan pembayaran, sebagai teks.
 "line_items" berisi setiap baris barang/jasa, berurutan seperti di invoice."""
 
@@ -53,6 +71,10 @@ class ExtractedInvoice:
     bank_name: str | None = None
     account_no: str | None = None
     account_name: str | None = None
+    # Pemeriksaan jenis dokumen oleh AI: PDF yang bukan invoice tidak diproses lebih lanjut
+    is_invoice: bool = True
+    document_type: str | None = None
+    not_invoice_reason: str | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -130,6 +152,11 @@ def parse_response(text: str) -> ExtractedInvoice:
         bank_name=to_text(data.get("bank_name")),
         account_no=to_text(data.get("account_no")),
         account_name=to_text(data.get("account_name")),
+        # Hanya false yang eksplisit dianggap bukan invoice, supaya jawaban AI yang tidak lengkap
+        # tidak menolak invoice yang sah
+        is_invoice=data.get("is_invoice") is not False,
+        document_type=to_text(data.get("document_type")),
+        not_invoice_reason=to_text(data.get("not_invoice_reason")),
         raw=data,
     )
 
