@@ -11,7 +11,7 @@ from fpdf.enums import TableCellFillMode
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import BACKEND_DIR, settings
 from app.models import Document, User, Voucher
 from app.services import storage
 from app.services.signer_service import COMPANY_POSITION
@@ -20,6 +20,27 @@ from app.services.verification import rupiah
 TEAL = (54, 127, 137)  # #367F89, teal brand amiga yang cukup kontras untuk teks putih
 PINK = (255, 128, 180)  # #FF80B4
 WIB = ZoneInfo("Asia/Jakarta")
+
+
+LOGO = BACKEND_DIR / "app" / "assets" / "logo-amiga.png"  # logo resmi amiga (250x78 px)
+
+
+def brand_header(pdf: FPDF, page_width: float, title: str) -> None:
+    """Kop dokumen: logo amiga di kiri, jenis dokumen di kanan, garis teal + pink di bawah."""
+    pdf.image(str(LOGO), x=12, y=7, h=13)  # lebar mengikuti rasio logo
+    pdf.set_text_color(*TEAL)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(page_width - 12 - 120, 8.5)
+    pdf.cell(120, 5, title, align="R")
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.set_text_color(90, 105, 110)
+    pdf.set_xy(page_width - 12 - 120, 14)
+    pdf.cell(120, 4.5, "Back Office as A Service", align="R")
+    pdf.set_fill_color(*TEAL)
+    pdf.rect(0, 24, page_width, 1.2, style="F")
+    pdf.set_fill_color(*PINK)
+    pdf.rect(0, 25.2, page_width, 0.8, style="F")
+    pdf.set_text_color(15, 23, 42)
 
 
 def next_voucher_no(db: Session, now: datetime) -> str:
@@ -46,18 +67,7 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.set_auto_page_break(True, margin=18)
     pdf.add_page()
 
-    pdf.set_fill_color(*TEAL)
-    pdf.rect(0, 0, 210, 26, style="F")
-    pdf.set_fill_color(*PINK)
-    pdf.rect(0, 26, 210, 1.2, style="F")
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_xy(12, 7)
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 7, "amiga  Robot Admin", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_x(12)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, "Voucher Pembayaran Vendor  |  Back Office as A Service")
-    pdf.set_text_color(15, 23, 42)
+    brand_header(pdf, 210, "Voucher Pembayaran Vendor")
     pdf.set_y(32)
 
     pdf.set_font("Helvetica", "B", 13)

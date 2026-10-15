@@ -12,7 +12,7 @@ from fpdf.enums import TableCellFillMode
 
 from app.models import DocStatus
 from app.schemas.schemas import VoucherRow
-from app.services.voucher_service import PINK, TEAL, WIB, _money, _t
+from app.services.voucher_service import TEAL, WIB, _money, _t, brand_header
 
 BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
 STATUS_TEXT = {DocStatus.AMIGA_REVIEWED: "Disetujui", DocStatus.SENT_TO_CLIENT: "Terkirim ke klien"}
@@ -94,19 +94,8 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    pdf.set_fill_color(*TEAL)
-    pdf.rect(0, 0, 297, 24, style="F")
-    pdf.set_fill_color(*PINK)
-    pdf.rect(0, 24, 297, 1.2, style="F")
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_xy(12, 6)
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 7, "amiga  Robot Admin", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_x(12)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, "Rekap Voucher Pembayaran Vendor  |  Back Office as A Service")
-    pdf.set_text_color(15, 23, 42)
-    pdf.set_y(30)
+    brand_header(pdf, 297, "Rekap Voucher Pembayaran Vendor")
+    pdf.set_y(31)
 
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 7, f"REKAP VOUCHER  {period_label.upper()}", new_x="LMARGIN", new_y="NEXT")
