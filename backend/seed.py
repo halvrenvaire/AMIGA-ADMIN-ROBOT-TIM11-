@@ -30,7 +30,8 @@ USERS = [
     # Peran ganda: bisa mengunggah lalu mencoba menyetujui sendiri (UAT 5, Segregation of Duties)
     ("multi@amiga.test", "Yoga (Intake + Reviewer)", [Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER],
      ["PT Klien Alpha"]),
-    ("lead@amiga.test", "Hendra (Service Lead)", [Role.SERVICE_LEAD], CLIENTS),
+    # Service Lead mengawasi semua perusahaan tanpa penugasan
+    ("lead@amiga.test", "Hendra (Service Lead)", [Role.SERVICE_LEAD], []),
     ("admin@amiga.test", "Admin Sistem", [Role.SYSTEM_ADMIN], []),
 ]
 

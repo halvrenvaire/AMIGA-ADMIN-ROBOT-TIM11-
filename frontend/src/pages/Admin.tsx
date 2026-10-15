@@ -7,8 +7,9 @@ import { ROLE_LABEL } from "../format";
 import type { AdminUser, ClientRef, Role } from "../types";
 
 const ROLES = Object.keys(ROLE_LABEL) as Role[];
-// Peran yang dibatasi per perusahaan. Finance Reviewer menangani semua perusahaan, kasusnya dibagi sistem.
-const CLIENT_SCOPED: Role[] = ["PIC_KLIEN", "INTAKE_SUPPORT", "SERVICE_LEAD"];
+// Peran yang dibatasi per perusahaan. Finance Reviewer (kasus dibagi sistem) dan Service Lead (mengawasi
+// semua invoice) menangani semua perusahaan.
+const CLIENT_SCOPED: Role[] = ["PIC_KLIEN", "INTAKE_SUPPORT"];
 const needsClients = (roles: Role[]) => roles.some((r) => CLIENT_SCOPED.includes(r));
 
 /** System Admin: kelola akun, peran, dan penugasan klien (FR-7.1). */
@@ -54,6 +55,9 @@ export function AdminUsers() {
                         {needsClients(u.roles) ? (u.clients.map((c) => c.name).join(", ") || <span className="muted">-</span>) : null}
                         {u.roles.includes("FINANCE_REVIEWER") && (
                           <div className="muted" style={{ fontSize: 12 }}>Review: semua perusahaan</div>
+                        )}
+                        {u.roles.includes("SERVICE_LEAD") && (
+                          <div className="muted" style={{ fontSize: 12 }}>Pengawasan: semua perusahaan</div>
                         )}
                       </td>
                       <td>{u.is_active ? <span className="chip ok">Aktif</span> : <span className="chip gray">Nonaktif</span>}</td>
@@ -177,11 +181,14 @@ function UserModal({ user, clients, onClose, onDone }: {
       </fieldset>
       {scoped && (
         <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-          <label>Perusahaan yang ditugaskan{roles.includes("FINANCE_REVIEWER") && " (untuk peran selain Finance Reviewer)"}</label>
+          <label>Perusahaan yang ditugaskan{roles.some((r) => r === "FINANCE_REVIEWER" || r === "SERVICE_LEAD") && " (untuk PIC Klien / Intake Support)"}</label>
           {clients.map((c) => (
             <label key={c.id} className="toggle"><input type="checkbox" checked={clientIds.includes(c.id)} onChange={() => setClientIds(toggle(clientIds, c.id))} /> {c.name}</label>
           ))}
         </fieldset>
+      )}
+      {roles.includes("SERVICE_LEAD") && (
+        <Alert kind="info">Service Lead mengawasi semua invoice dari semua perusahaan, tanpa penugasan perusahaan.</Alert>
       )}
       {roles.includes("FINANCE_REVIEWER") && (
         <Alert kind="info">

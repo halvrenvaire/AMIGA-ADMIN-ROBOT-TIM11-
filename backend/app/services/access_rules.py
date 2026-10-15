@@ -11,6 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Client, Role, User, UserClientAssignment
 
+# Peran yang menangani semua perusahaan tanpa penugasan klien oleh System Admin
+ALL_CLIENT_ROLES = {Role.FINANCE_REVIEWER, Role.SERVICE_LEAD}
+
 INTERNAL_ROLES = {Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER, Role.SERVICE_LEAD, Role.SYSTEM_ADMIN}
 
 # Peran yang boleh memakai Asisten AI di dashboard (System Admin: SOP saja)
@@ -34,11 +37,15 @@ def validate_role_combination(roles: set[Role]) -> None:
 
 
 def accessible_client_ids(db: Session, user: User) -> set[uuid.UUID]:
-    """Klien yang boleh dibuka pengguna. Finance Reviewer menangani pengajuan dari semua perusahaan
-    (pembagian kasus diatur sistem, bukan penugasan klien); peran lain hanya penugasan aktif."""
-    if Role.FINANCE_REVIEWER in user.roles:
-        return set(db.scalars(select(Client.id)))
+    """Klien yang boleh dibuka pengguna. Finance Reviewer (pembagian kasus diatur sistem) dan Service Lead
+    (mengawasi semua invoice) menangani semua perusahaan tanpa penugasan; peran lain hanya penugasan aktif."""
+    if user.roles & ALL_CLIENT_ROLES:
+        return all_client_ids(db)
     return assigned_client_ids(db, user)
+
+
+def all_client_ids(db: Session) -> set[uuid.UUID]:
+    return set(db.scalars(select(Client.id)))
 
 
 def assigned_client_ids(db: Session, user: User) -> set[uuid.UUID]:

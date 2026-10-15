@@ -1,7 +1,8 @@
 """Pembagian kasus ke Finance Reviewer dan Segregation of Duties untuk pengguna peran ganda."""
 from collections import Counter
 
-from tests.test_documents import api, client_id, detail, extractor, invoice, tx, upload  # noqa: F401
+from app.main import app
+from tests.test_documents import DrainingClient, api, client_id, detail, extractor, invoice, tx, upload  # noqa: F401
 from tests.test_review import NAMES as EMAIL_OF
 
 NAMES = {email: name for name, email in EMAIL_OF.items()}
@@ -67,3 +68,23 @@ def test_intake_upload_is_signed_by_delegating_pic(extractor):
     doc = upload(email="intake@amiga.test").json()
     signers = detail(doc["id"])["signers"]
     assert signers[0]["kind"] == "PENGAJU" and signers[0]["name"] == "Rina (PIC Alpha)"
+
+
+def test_service_lead_without_assignment_oversees_every_company(extractor):
+    a = upload().json()
+    extractor.result = invoice(invoice_no="INV-BETA-1")
+    b = upload(email="pic.beta@amiga.test", client="PT Klien Beta").json()
+    r = api("admin@amiga.test").post("/admin/users", json={
+        "email": "lead.baru@amiga.test", "full_name": "Lead Baru", "password": "LeadBaru123",
+        "roles": ["SERVICE_LEAD"], "client_ids": []})
+    assert r.status_code == 201
+    token = DrainingClient(app).post("/auth/login", data={"username": "lead.baru@amiga.test",
+                                                         "password": "LeadBaru123"}).json()["access_token"]
+    lead = DrainingClient(app, headers={"Authorization": f"Bearer {token}"})
+    ids = {d["id"] for d in lead.get("/documents").json()}
+    assert {a["id"], b["id"]} <= ids
+    summary = lead.get("/dashboard/summary").json()
+    assert summary["counts"]["READY_FOR_REVIEW"] == 2
+    options = lead.get(f"/documents/{b['id']}/reviewer-options").json()
+    assert options and lead.post(f"/documents/{b['id']}/reassign",
+                                 json={"reviewer_id": options[0]["id"]}).status_code == 200

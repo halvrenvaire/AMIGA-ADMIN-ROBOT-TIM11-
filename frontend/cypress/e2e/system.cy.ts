@@ -274,12 +274,16 @@ describe("System Testing AMIGA Robot Admin", () => {
       .and("contain.text", "Review: semua perusahaan");
   });
 
-  it("TS-040 Admin tidak menugaskan perusahaan untuk Finance Reviewer", () => {
+  it("TS-040 Admin tidak menugaskan perusahaan untuk Finance Reviewer dan Service Lead", () => {
     cy.visitAs("admin@amiga.test", "/admin/pengguna");
     cy.contains("button", "Tambah pengguna").click();
     cy.contains(".modal label.toggle", "Finance Reviewer").find("input").check();
     cy.contains(".modal label", "Perusahaan yang ditugaskan").should("not.exist");
     cy.contains(".modal .alert", "semua perusahaan");
+    cy.contains(".modal label.toggle", "Finance Reviewer").find("input").uncheck();
+    cy.contains(".modal label.toggle", "Service Lead").find("input").check();
+    cy.contains(".modal label", "Perusahaan yang ditugaskan").should("not.exist");
+    cy.contains(".modal .alert", "Service Lead mengawasi semua invoice");
     cy.contains(".modal label.toggle", "Intake Support").find("input").check();
     cy.contains(".modal label", "Perusahaan yang ditugaskan");
     cy.contains(".modal button", "Batal").click();

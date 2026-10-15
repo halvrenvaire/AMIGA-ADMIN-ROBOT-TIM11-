@@ -126,7 +126,7 @@ Ada 6 peran internal, ditambah **Sistem** dan **AI Engine** sebagai pelaku otoma
 
 **Segregation of Duties.** Pihak pengaju sebuah dokumen tidak boleh meninjau, menandai bukan duplikat, atau menyetujuinya. Pihak pengaju adalah pengunggah, PIC yang diwakili, dan siapa pun yang memperbaiki data, memberi catatan PIC, atau mengubah penanda tangan dokumen itu, termasuk pengguna peran ganda Intake Support + Finance Reviewer. Sistem tidak pernah menugaskan dokumen kepada pihak pengajunya; bila tetap dicoba, persetujuan ditolak dan dokumen **otomatis dialihkan** ke reviewer lain.
 
-**Isolasi klien.** PIC Klien, Intake Support, dan Service Lead hanya bisa membuka dokumen perusahaan yang ditugaskan System Admin, dan hanya bisa mengajukan untuk perusahaan itu. Finance Reviewer menangani pengajuan dari **semua perusahaan** tanpa penugasan. Akses di luar hak ditolak dan dicatat.
+**Isolasi klien.** PIC Klien dan Intake Support hanya bisa membuka dokumen perusahaan yang ditugaskan System Admin, dan hanya bisa mengajukan untuk perusahaan itu. Finance Reviewer (meninjau) dan Service Lead (mengawasi) menangani **semua perusahaan** tanpa penugasan. Akses di luar hak ditolak dan dicatat.
 
 ---
 

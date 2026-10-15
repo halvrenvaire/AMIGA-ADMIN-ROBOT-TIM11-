@@ -7,14 +7,13 @@ from sqlalchemy.orm import Session
 from app.auth import require_roles
 from app.config import settings
 from app.db import get_db
-from sqlalchemy import select
-
-from app.models import Client, DocStatus, Role, User
+from app.models import DocStatus, Role, User
 from app.routers.documents import _detail, _get_document
 from app.schemas.schemas import (
     DashboardMetrics, DashboardSummary, DocumentDetail, ReassignRequest, ReviewerLoadOut, TrendPoint,
 )
 from app.services import audit_service
+from app.services import access_rules
 from app.services.access_rules import accessible_client_ids
 from app.services.document_processing import submitter_ids
 from app.services import metrics_service
@@ -60,8 +59,7 @@ def reviewer_options(document_id: uuid.UUID, user: User = Depends(require_roles(
     doc = _get_document(db, user, document_id)
     excluded = submitter_ids(db, doc) | ({doc.assigned_reviewer_id} if doc.assigned_reviewer_id else set())
     # Reviewer menangani semua perusahaan: beban dihitung dari seluruh antrean
-    all_clients = set(db.scalars(select(Client.id)))
-    return [ReviewerLoadOut.model_validate(r) for r in summarize(db, all_clients).reviewers
+    return [ReviewerLoadOut.model_validate(r) for r in summarize(db, access_rules.all_client_ids(db)).reviewers
             if r.id not in excluded]
 
 

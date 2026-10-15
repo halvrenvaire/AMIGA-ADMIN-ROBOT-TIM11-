@@ -20,7 +20,7 @@ from app.config import settings
 from app.main import app
 from app.models import AuditLog, Client
 from app.routers import documents as documents_router
-from app.services import document_processing
+from app.services import access_rules, document_processing
 from app.services.extraction_service import ExtractedInvoice, ExtractedLine, ExtractionError
 from tests.auth_helpers import auth_header
 
@@ -99,6 +99,9 @@ def tx(monkeypatch, tmp_path):
     # Data referensi (vendor, penanda tangan) dari seed/dev juga disembunyikan
     connection.execute(text("UPDATE vendors SET client_id = :c"), {"c": hidden})
     connection.execute(text("UPDATE signatories SET client_id = :c"), {"c": hidden})
+    # Peran "semua perusahaan" (Finance Reviewer, Service Lead) tidak melihat klien tersembunyi itu
+    real_all = access_rules.all_client_ids
+    monkeypatch.setattr(access_rules, "all_client_ids", lambda db: real_all(db) - {hidden})
     monkeypatch.setattr(db_module, "SessionLocal", sessionmaker(
         bind=connection, join_transaction_mode="create_savepoint", autoflush=False, expire_on_commit=False))
     _pending.clear()
