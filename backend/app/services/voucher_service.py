@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Document, User, Voucher
 from app.services import storage
+from app.services.signer_service import COMPANY_POSITION
 from app.services.verification import rupiah
 
 TEAL = (54, 127, 137)  # #367F89, teal brand amiga yang cukup kontras untuk teks putih
@@ -63,15 +64,17 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.cell(0, 7, f"VOUCHER {voucher_no}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
+    n_files = len(getattr(doc, "files", None) or [])
     rows = [
         ("Klien", doc.client.name), ("Request ID", doc.request_id),
-        ("Vendor", ex.vendor_name), ("No. Invoice", ex.invoice_no),
+        ("Vendor", ex.vendor_name), ("No. Invoice" if n_files <= 1 else f"No. Invoice ({n_files})", ex.invoice_no),
         ("Tgl. Invoice", ex.invoice_date.strftime("%d-%m-%Y") if ex.invoice_date else None),
         ("Tgl. Voucher", approved_at.strftime("%d-%m-%Y")),
     ]
     for label, value in rows:
         pdf.cell(32, 6, label)
-        pdf.cell(0, 6, f": {_t(value)}", new_x="LMARGIN", new_y="NEXT")
+        # multi_cell: beberapa nomor invoice dalam satu voucher bisa lebih dari satu baris
+        pdf.multi_cell(0, 6, f": {_t(value)}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     # Tabel fpdf2: uraian panjang dibungkus ke baris berikutnya dan tinggi baris menyesuaikan,
@@ -134,7 +137,10 @@ def _sign_boxes(doc: Document) -> list[tuple[str, str, list[str], bool]]:
     pengaju = [s for s in signers if s["kind"] == "PENGAJU"]
     penyetuju = [s for s in signers if s["kind"] == "PENYETUJU"]
     client_lines = lambda s: [_t(s["name"]), _t(s["position"]), f"Tanggal: {BLANK[:30]}"]  # noqa: E731
-    boxes = [("Diajukan oleh", "Tanda tangan", client_lines(p), False) for p in pengaju] or [
+    # Diajukan oleh = perusahaan klien; nama penanda tangan ditulis tangan
+    company_lines = lambda s: [_t(s["name"]), f"Nama: {BLANK[:26]}", f"Tanggal: {BLANK[:24]}"]  # noqa: E731
+    boxes = [("Diajukan oleh", "Tanda tangan & cap perusahaan",
+              (company_lines if p["position"] == COMPANY_POSITION else client_lines)(p), False) for p in pengaju] or [
         ("Diajukan oleh", "Tanda tangan", [f"Nama: {BLANK[:26]}", "Jabatan: PIC Klien", f"Tanggal: {BLANK[:24]}"], False)]
     boxes += [("Disetujui oleh", "Tanda tangan", client_lines(p), False) for p in penyetuju] or [
         ("Disetujui oleh (opsional)", "Tanda tangan bila diperlukan klien",

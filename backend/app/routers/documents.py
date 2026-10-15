@@ -10,7 +10,7 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status,
 )
 from fastapi.responses import Response
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -19,10 +19,10 @@ from app.auth import ensure_client_access, get_current_user, require_roles
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    DocStatus, Document, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
+    DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
-    ClientRef, DocumentDetail, DocumentSummary, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
+    ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
 )
 from app.services import audit_service, signer_service, storage
 from app.services.access_rules import accessible_client_ids
@@ -79,6 +79,7 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         voucher=VoucherOut.model_validate(doc.voucher) if doc.voucher else None,
         vendor=ClientRef(id=doc.vendor.id, name=doc.vendor.name) if doc.vendor else None,
         signers=doc.signers or [],
+        files=[DocumentFileOut.model_validate(f) for f in doc.files],
     )
 
 
@@ -115,33 +116,57 @@ def _count_pdf_pages(data: bytes) -> int:
 
 # --- Endpoint ---
 
+def _merge_pdfs(parts: list[bytes]) -> bytes:
+    """Satu PDF gabungan untuk layar peninjauan, berurutan sesuai unggahan."""
+    writer = PdfWriter()
+    for data in parts:
+        writer.append(io.BytesIO(data))
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 @router.post("", response_model=DocumentSummary, status_code=201)
 async def upload_document(
     request: Request,
     background: BackgroundTasks,
-    client_id: Annotated[uuid.UUID, Form(description="Klien yang ditugaskan kepada Anda")],
+    client_id: Annotated[uuid.UUID, Form(description="Perusahaan klien yang mengajukan (\"Diajukan oleh\")")],
     request_type: Annotated[str, Form(min_length=1, max_length=100, description="Jenis permintaan")],
     channel: Annotated[Channel, Form(description="Asal pengajuan invoice")],
     submitted_date: Annotated[date, Form(description="Tanggal pengajuan")],
-    file: Annotated[UploadFile, File(description="Invoice PDF, maksimal 5 halaman")],
+    files: Annotated[list[UploadFile], File(description="1–10 invoice PDF untuk satu voucher, masing-masing maks. 5 halaman")],
     due_date: Annotated[date | None, Form(description="Tenggat (opsional)")] = None,
     signatory_ids: Annotated[str | None, Form(
-        description="ID penanda tangan dipisah koma. Tidak dikirim = default klien; kosong = tanpa penanda tangan")] = None,
+        description="ID pemberi persetujuan (\"Disetujui oleh\") dipisah koma, berurutan. "
+                    "Tidak dikirim = 1 kotak default klien; kosong = tanpa pemberi persetujuan")] = None,
     user: User = Depends(uploader_roles),
     db: Session = Depends(get_db),
 ):
-    """Unggah satu invoice PDF (FR-1.1–1.5). Sistem menerbitkan Request ID dengan status QUEUED,
-    lalu AI membaca invoice dan sistem memverifikasinya di background."""
+    """Unggah 1–10 invoice PDF yang digabung dalam satu voucher (FR-1.1–1.5). Sistem menerbitkan
+    satu Request ID dengan status QUEUED, lalu AI membaca setiap invoice dan sistem memverifikasinya
+    di background."""
     ensure_client_access(db, user, client_id)
-
-    data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
-                            f"Ukuran file melebihi {settings.max_upload_mb} MB.")
-    pages = _count_pdf_pages(data)
-    if pages > settings.max_pdf_pages:
+    if not 1 <= len(files) <= settings.max_upload_files:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            f"Invoice berisi {pages} halaman. Maksimal {settings.max_pdf_pages} halaman per unggahan.")
+                            f"Unggah minimal 1 dan maksimal {settings.max_upload_files} file invoice.")
+
+    limit = settings.max_upload_mb * 1024 * 1024
+    parts: list[tuple[str, bytes, int]] = []
+    for upload in files:
+        name = (upload.filename or "invoice.pdf")[:300]
+        data = await upload.read(limit + 1)
+        label = f"{name}: " if len(files) > 1 else ""
+        if len(data) > limit:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
+                                f"{label}Ukuran file melebihi {settings.max_upload_mb} MB.")
+        try:
+            pages = _count_pdf_pages(data)
+        except HTTPException as e:
+            raise HTTPException(e.status_code, f"{label}{e.detail}")
+        if pages > settings.max_pdf_pages:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                f"{label}Invoice berisi {pages} halaman. Maksimal {settings.max_pdf_pages} halaman per file.")
+        parts.append((name, data, pages))
 
     # Intake Support mengunggah atas nama PIC yang mendelegasikan (FR-1.4)
     on_behalf_of = None
@@ -152,24 +177,37 @@ async def upload_document(
     signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids))
 
     request_id = _new_request_id(db)
-    file_key = f"invoices/{request_id}.pdf"
+    total_pages = sum(p for _, _, p in parts)
     try:
-        storage.save(file_key, data)
+        if len(parts) == 1:
+            file_keys = [f"invoices/{request_id}.pdf"]
+            storage.save(file_keys[0], parts[0][1])
+            main_key = file_keys[0]
+        else:
+            file_keys = [f"invoices/{request_id}/{i:02d}.pdf" for i in range(1, len(parts) + 1)]
+            for key, (_, data, _) in zip(file_keys, parts):
+                storage.save(key, data)
+            main_key = f"invoices/{request_id}.pdf"
+            storage.save(main_key, _merge_pdfs([data for _, data, _ in parts]))
     except storage.StorageError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "File gagal disimpan. Coba lagi beberapa saat lagi.")
 
+    names = [name for name, _, _ in parts]
+    summary_name = names[0] if len(names) == 1 else f"{len(names)} invoice: {', '.join(names)}"
     doc = Document(
         request_id=request_id, client_id=client_id, uploaded_by=user.id, on_behalf_of=on_behalf_of,
         request_type=request_type.strip(), channel=channel, submitted_date=submitted_date, due_date=due_date,
-        status=DocStatus.QUEUED, file_key=file_key,
-        original_filename=(file.filename or "invoice.pdf")[:300], page_count=pages, pic_overrides={},
+        status=DocStatus.QUEUED, file_key=main_key,
+        original_filename=summary_name[:300], page_count=total_pages, pic_overrides={},
         signers=signers,
+        files=[DocumentFile(position=i, file_key=key, original_filename=name, page_count=pages)
+               for i, (key, (name, _, pages)) in enumerate(zip(file_keys, parts), start=1)],
     )
     db.add(doc)
     db.flush()
     audit_service.record(db, user, "DOCUMENT_UPLOADED", document_id=doc.id, client_id=client_id,
                          on_behalf_of=on_behalf_of, status_after=DocStatus.QUEUED.value,
-                         note=f"{doc.original_filename} ({pages} hal.) via {channel}")
+                         note=f"{len(parts)} file, {total_pages} hal. via {channel}: {', '.join(names)}"[:1000])
     db.commit()
     db.refresh(doc)
 

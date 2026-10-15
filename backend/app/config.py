@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     extraction_max_tokens: int = 4096
 
     max_pdf_pages: int = 5
-    max_upload_mb: int = 10
+    max_upload_mb: int = 10  # per file
+    max_upload_files: int = 10  # file invoice per voucher
 
     # Dashboard antrean: reviewer dengan dokumen READY_FOR_REVIEW lebih dari ini ditandai
     # "beban berlebih" (batas resmi masih pertanyaan terbuka PRD); tenggat "dekat" = <= N hari

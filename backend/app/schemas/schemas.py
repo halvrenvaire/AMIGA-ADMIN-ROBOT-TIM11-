@@ -249,6 +249,14 @@ class VoucherOut(BaseModel):
     generated_at: datetime
 
 
+class DocumentFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    position: int
+    original_filename: str
+    page_count: int
+
+
 class DocumentDetail(DocumentSummary):
     # Kendala yang masih terbuka: kode + alasan berbahasa sederhana (FR-3.3)
     issues: list[IssueItem]
@@ -258,6 +266,7 @@ class DocumentDetail(DocumentSummary):
     voucher: VoucherOut | None
     vendor: ClientRef | None = None  # vendor di data referensi (id, name) bila cocok
     signers: list[Signer] = []
+    files: list[DocumentFileOut] = []  # file invoice yang digabung dalam voucher ini
 
 
 class FixRequest(BaseModel):
@@ -363,7 +372,7 @@ class VendorCheck(BaseModel):
 
 
 class SignatoryIn(BaseModel):
-    kind: SignatoryKind
+    kind: SignatoryKind = SignatoryKind.PENYETUJU
     full_name: str = Field(min_length=2, max_length=200)
     position: str = Field(min_length=2, max_length=120)
     is_default: bool = False

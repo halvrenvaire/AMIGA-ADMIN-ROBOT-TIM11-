@@ -18,6 +18,7 @@ const docs: Record<string, Doc> = {};
 function upload(email: string, file: string, key: string) {
   cy.visitAs(email, "/unggah");
   cy.get("main input[type=file]").selectFile(`../samples/invoices/${file}`, { force: true });
+  cy.contains("button", "Preview").click();
   cy.contains("button", "Kirim ke antrean").click();
   cy.contains("Terkirim ke antrean").find("b").invoke("text").then((requestId) => {
     cy.contains("a", "Lihat status dokumen").click();

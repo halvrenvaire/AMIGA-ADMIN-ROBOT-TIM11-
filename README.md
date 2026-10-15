@@ -98,6 +98,7 @@ Catatan alur:
 | Angka / perhitungan | `CALCULATION_DISCREPANCY` | Jumlah subtotal line items ≠ total invoice | EXCEPTION |
 | Duplikasi | `POSSIBLE_DUPLICATE` | Ada invoice lain dengan nomor invoice dan vendor yang sama | EXCEPTION |
 | Dikembalikan reviewer | `RETURNED_BY_REVIEWER` | Finance Reviewer memilih "Kembalikan ke PIC" | EXCEPTION |
+| Vendor/rekening berbeda | `VENDOR_MISMATCH` | Beberapa invoice dalam satu pengajuan punya vendor atau rekening tujuan berbeda | EXCEPTION |
 
 Nomor invoice dan nama vendor **dinormalisasi** sebelum dibandingkan (huruf kecil, tanpa spasi dan tanda baca), sehingga `INV-001` dan `inv 001` tetap terdeteksi sebagai duplikat.
 
@@ -148,7 +149,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Frontend (5 layar) | P0 | ✅ | React + Vite + TypeScript: login, Dashboard Antrean, Unggah & Pengajuan, Peninjauan split-screen, Voucher, Riwayat, layar System Admin, tombol chat Asisten |
 | Dashboard metrik | Owner | ✅ | KPI per status, tren harian (line chart), kecepatan proses, kualitas & kendala, nilai pembayaran; dibanding periode sebelumnya (`GET /dashboard/metrics`) |
 | Data referensi vendor | Owner | ✅ | PIC Klien/Intake mendaftarkan vendor (NPWP, alamat, kontak, rekening) per klien; nama dinormalisasi agar tidak dobel; dipakai sebagai dropdown di filter & formulir; dokumen tertaut otomatis |
-| Penanda tangan voucher | Owner | ✅ | PIC Klien mendaftarkan "Diajukan oleh" dan "Disetujui oleh" (default per klien, bisa diganti per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
+| Penanda tangan voucher | Owner | ✅ | "Diajukan oleh" = perusahaan klien yang dipilih saat unggah; PIC Klien mendaftarkan pemberi persetujuan "Disetujui oleh" (1 kotak default, bisa ditambah hingga 5 per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
 | Manajemen voucher | Owner | ✅ | Tabel voucher dengan filter perusahaan, vendor, status, tanggal; dikelompokkan dengan subtotal; unduh CSV |
 
 ### Rencana tahap berikutnya
@@ -367,7 +368,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
 | POST | `/admin/users/{id}/password` | System Admin: reset password pengguna lain (sesi pengguna itu keluar) |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
-| POST | `/documents` | PIC Klien / Intake Support: unggah invoice PDF (form: `client_id`, `request_type`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `file`). Mengembalikan Request ID dan status QUEUED |
+| POST | `/documents` | PIC Klien / Intake Support: unggah invoice PDF (form: `client_id`, `request_type`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 PDF untuk satu voucher, `signatory_ids` opsional = pemberi persetujuan berurutan). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice lalu hasilnya digabung |
 | GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `sort=terbaru` atau `tenggat` |
 | GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
 | GET | `/documents/{id}/file` | PDF asli |
@@ -385,7 +386,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET/POST | `/vendors` | Data referensi vendor (POST oleh PIC Klien/Intake; 409 bila nama sudah terdaftar) |
 | GET | `/vendors/check` | Cek nama vendor sudah terdaftar (`client_id`, `name`) |
 | PUT / PATCH | `/vendors/{id}`, `/vendors/{id}/active` | Ubah / nonaktifkan vendor |
-| GET/POST | `/signatories` | Penanda tangan voucher per klien (POST/PUT/PATCH hanya PIC Klien) |
+| GET/POST | `/signatories` | Pemberi persetujuan ("Disetujui oleh") per klien (POST/PUT/PATCH hanya PIC Klien) |
 | PUT | `/documents/{id}/signers` | Ganti penanda tangan dokumen sebelum voucher terbit. Body: `{"signatory_ids": [...]}` |
 | GET | `/documents/{id}/history` | Riwayat & jejak audit dokumen (System Admin boleh tanpa penugasan klien) |
 | POST | `/ask` | Tanya Asisten SOP. Body: `{"question": "...", "session_id": "..."}` |
@@ -432,7 +433,8 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Beban berlebih | Reviewer dengan **> 5** dokumen READY_FOR_REVIEW ditandai berlebih; tenggat "dekat" = ≤ 2 hari. Bisa diubah lewat `REVIEWER_OVERLOAD_THRESHOLD` dan `DUE_SOON_DAYS` | **Sementara**, menunggu batas resmi (pertanyaan terbuka 3) |
 | Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif klien itu yang bukan pengunggah | Pengalihan tidak boleh membuka celah SoD |
 | Asisten dan data antrean | `/ask-agent` memakai data antrean hanya bila pertanyaannya tentang antrean (mis. "dokumen apa yang tenggatnya dekat?"). Data dibangun di server dari klien yang ditugaskan; jawaban seperti ini **tidak disimpan** ke memori | Data cepat berubah, jadi tidak boleh menjadi referensi jawaban lain; hak akses sama dengan layar biasa |
-| Penanda tangan voucher | Nama + kotak tanda tangan basah (tanpa gambar atau e-sign). Disalin ke dokumen saat dipilih, sehingga voucher lama tidak berubah bila daftar diedit. Maks. 1 "Diajukan oleh" dan 3 "Disetujui oleh" | Keputusan owner 14 Okt 2026 |
+| Penanda tangan voucher | Nama + kotak tanda tangan basah (tanpa gambar atau e-sign). Disalin ke dokumen saat dipilih, sehingga voucher lama tidak berubah bila daftar diedit. "Diajukan oleh" = perusahaan klien (tanda tangan & cap); "Disetujui oleh" 1 kotak default, maks. 5 | Keputusan owner 14 & 15 Okt 2026 |
+| Beberapa invoice per voucher | 1–10 PDF per pengajuan, masing-masing maks. 5 halaman dan 10 MB. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Satu voucher hanya untuk satu vendor dan satu rekening (`VENDOR_MISMATCH`); duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
 | Vendor per klien | Data vendor milik masing-masing klien (tidak dibagi lintas klien) | Data rekening vendor termasuk data sensitif dan mengikuti aturan isolasi klien |
 | Halaman awal | Dashboard metrik untuk semua peran selain System Admin | Permintaan owner: metrik utama terlihat pertama |
 | `POSSIBLE_DUPLICATE` | Membuat status **EXCEPTION** | Sesuai PRD v2 dan target "0 duplikat lolos" |

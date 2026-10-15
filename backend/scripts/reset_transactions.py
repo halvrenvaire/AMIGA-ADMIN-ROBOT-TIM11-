@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import BACKEND_DIR, settings  # noqa: E402
 from app.db import engine  # noqa: E402
 
-TABLES = ["line_items", "extractions", "validation_issues", "vouchers", "audit_logs", "documents"]
+TABLES = ["line_items", "extractions", "validation_issues", "vouchers", "audit_logs", "document_files", "documents"]
 
 
 def main() -> None:

@@ -34,13 +34,12 @@ USERS = [
 ]
 
 
-# Data referensi contoh (fiktif): (klien, jenis, nama, jabatan) dan (klien, vendor, bank, rekening)
+# Data referensi contoh (fiktif): pemberi persetujuan (klien, nama, jabatan, default) dan
+# (klien, vendor, bank, rekening). "Diajukan oleh" di voucher otomatis berisi nama perusahaan klien.
 SIGNATORIES = [
-    ("PT Klien Alpha", SignatoryKind.PENGAJU, "Rina Kartika", "Staf Keuangan"),
-    ("PT Klien Alpha", SignatoryKind.PENYETUJU, "Budi Santoso", "Direktur"),
-    ("PT Klien Alpha", SignatoryKind.PENYETUJU, "Sari Dewi", "Bendahara"),
-    ("PT Klien Beta", SignatoryKind.PENGAJU, "Budi Hartono", "Admin Keuangan"),
-    ("PT Klien Beta", SignatoryKind.PENYETUJU, "Lestari Wulan", "Direktur Utama"),
+    ("PT Klien Alpha", "Budi Santoso", "Direktur", True),
+    ("PT Klien Alpha", "Sari Dewi", "Bendahara", False),
+    ("PT Klien Beta", "Lestari Wulan", "Direktur Utama", True),
 ]
 VENDORS = [
     ("PT Klien Alpha", "PT Sumber Kertas Nusantara", "Bank Central Asia (BCA)", "1234567890"),
@@ -50,10 +49,11 @@ VENDORS = [
 
 
 def seed_reference(db, clients: dict[str, Client], pic_by_client: dict[str, User]) -> None:
-    for client_name, kind, name, position in SIGNATORIES:
+    for client_name, name, position, default in SIGNATORIES:
         client = clients[client_name]
         if db.scalar(select(Signatory).where(Signatory.client_id == client.id, Signatory.full_name == name)) is None:
-            db.add(Signatory(client_id=client.id, kind=kind, full_name=name, position=position, is_default=True,
+            db.add(Signatory(client_id=client.id, kind=SignatoryKind.PENYETUJU, full_name=name, position=position,
+                             is_default=default,
                              created_by=pic_by_client[client_name].id))
     for client_name, name, bank, account in VENDORS:
         client = clients[client_name]

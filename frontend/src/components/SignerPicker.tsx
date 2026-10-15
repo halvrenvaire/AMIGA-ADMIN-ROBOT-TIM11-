@@ -1,71 +1,77 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Building2, Plus, X } from "lucide-react";
 import { api } from "../api";
 import type { Signatory } from "../types";
 
-const MAX_PENYETUJU = 3;
+export const MAX_PENYETUJU = 5;
 
-/** Pilih penanda tangan voucher: satu "Diajukan oleh" dan paling banyak tiga "Disetujui oleh".
- *  Bila `initial` tidak diberikan, penanda tangan default klien yang terpilih. */
-export function SignerPicker({ clientId, initial, onChange }: {
-  clientId: string; initial?: string[]; onChange: (ids: string[]) => void;
+/** Kotak tanda tangan voucher. "Diajukan oleh" = perusahaan klien (tetap); "Disetujui oleh" = satu kotak
+ *  per pemberi persetujuan, urutannya sama dengan di voucher. Tanpa `initial`, satu kotak berisi default. */
+export function SignerPicker({ clientId, clientName, initial, onChange }: {
+  clientId: string; clientName: string; initial?: string[];
+  onChange: (ids: string[], chosen: Signatory[]) => void;
 }) {
   const [list, setList] = useState<Signatory[] | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[]>([]);
 
   useEffect(() => {
     if (!clientId) return;
     api.get<Signatory[]>("/signatories", { client_id: clientId }).then((items) => {
       setList(items);
-      const start = initial ?? items.filter((s) => s.is_default).map((s) => s.id);
-      setSelected(start);
-      onChange(start);
+      const fallback = items.find((s) => s.is_default) ?? items[0];
+      const start = initial ?? (fallback ? [fallback.id] : []);
+      setRows(start);
+      onChange(start, start.map((id) => items.find((s) => s.id === id)!));
     }).catch(() => setList([]));
   }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const update = (next: string[]) => { setSelected(next); onChange(next); };
+  const update = (next: string[]) => {
+    setRows(next);
+    onChange(next, next.map((id) => list!.find((s) => s.id === id)!));
+  };
   if (!list) return <p className="muted" style={{ margin: 0 }}>Memuat penanda tangan…</p>;
 
-  const pengaju = list.filter((s) => s.kind === "PENGAJU");
-  const penyetuju = list.filter((s) => s.kind === "PENYETUJU");
-  const chosenApprovers = selected.filter((id) => penyetuju.some((p) => p.id === id));
+  const unused = list.filter((s) => !rows.includes(s.id));
+  const canAdd = rows.length < MAX_PENYETUJU && unused.length > 0;
 
   return (
     <div className="signer-picker">
       <fieldset>
         <legend>Diajukan oleh</legend>
-        {!pengaju.length && <small className="muted">Belum terdaftar. Kotak dicetak kosong.</small>}
-        {pengaju.map((s) => (
-          <label key={s.id} className="toggle">
-            <input type="radio" name="pengaju" checked={selected.includes(s.id)}
-                   onChange={() => update([...selected.filter((id) => !pengaju.some((p) => p.id === id)), s.id])} />
-            {s.full_name} <span className="muted">· {s.position}</span>
-          </label>
-        ))}
-        {pengaju.length > 0 && (
-          <label className="toggle">
-            <input type="radio" name="pengaju" checked={!pengaju.some((p) => selected.includes(p.id))}
-                   onChange={() => update(selected.filter((id) => !pengaju.some((p) => p.id === id)))} />
-            <span className="muted">Kosongkan (isi manual)</span>
-          </label>
-        )}
+        <div className="company-box">
+          <Building2 />
+          <div><b>{clientName || "Pilih perusahaan"}</b><small className="muted">Tanda tangan &amp; cap perusahaan</small></div>
+        </div>
       </fieldset>
       <fieldset>
-        <legend>Disetujui oleh <small className="muted">(maks. {MAX_PENYETUJU})</small></legend>
-        {!penyetuju.length && <small className="muted">Belum terdaftar. Kotak opsional dicetak kosong.</small>}
-        {penyetuju.map((s) => {
-          const on = selected.includes(s.id);
-          return (
-            <label key={s.id} className="toggle">
-              <input type="checkbox" checked={on} disabled={!on && chosenApprovers.length >= MAX_PENYETUJU}
-                     onChange={() => update(on ? selected.filter((id) => id !== s.id) : [...selected, s.id])} />
-              {s.full_name} <span className="muted">· {s.position}</span>
-            </label>
-          );
-        })}
+        <legend>Disetujui oleh <small className="muted">({rows.length}/{MAX_PENYETUJU} kotak)</small></legend>
+        {!list.length && (
+          <small className="muted">Belum ada pemberi persetujuan terdaftar. Satu kotak opsional dicetak kosong.</small>
+        )}
+        {rows.map((id, i) => (
+          <div key={i} className="approver-row">
+            <span className="approver-no">{i + 1}</span>
+            <select className="input" aria-label={`Kotak disetujui oleh ${i + 1}`} value={id}
+                    onChange={(e) => update(rows.map((r, j) => (j === i ? e.target.value : r)))}>
+              {list.filter((s) => s.id === id || !rows.includes(s.id)).map((s) => (
+                <option key={s.id} value={s.id}>{s.full_name} · {s.position}</option>
+              ))}
+            </select>
+            <button type="button" className="btn ghost sm" aria-label={`Hapus kotak ${i + 1}`}
+                    onClick={() => update(rows.filter((_, j) => j !== i))}><X /></button>
+          </div>
+        ))}
+        {list.length > 0 && (
+          <button type="button" className="btn sm" disabled={!canAdd} onClick={() => update([...rows, unused[0].id])}
+                  style={{ alignSelf: "flex-start" }}>
+            <Plus /> Tambah kotak tanda tangan
+          </button>
+        )}
+        {list.length > 0 && !rows.length && <small className="muted">Tanpa kotak terisi: satu kotak opsional dicetak kosong.</small>}
       </fieldset>
       <small className="muted" style={{ gridColumn: "1 / -1" }}>
-        Daftar penanda tangan dikelola di <Link to="/referensi/penanda-tangan">Data Referensi → Penanda tangan</Link>.
+        Daftar pemberi persetujuan dikelola di <Link to="/referensi/penanda-tangan">Data Referensi → Penanda tangan</Link>.
       </small>
     </div>
   );

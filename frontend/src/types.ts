@@ -7,7 +7,7 @@ export type DocStatus =
 
 export type IssueCode =
   | "MISSING_EVIDENCE" | "CALCULATION_DISCREPANCY" | "POSSIBLE_DUPLICATE" | "EXTRACTION_FAILED"
-  | "RETURNED_BY_REVIEWER";
+  | "RETURNED_BY_REVIEWER" | "VENDOR_MISMATCH";
 
 export interface ClientRef { id: string; name: string }
 
@@ -71,6 +71,7 @@ export interface DocumentDetail extends DocumentSummary {
   voucher: { voucher_no: string; generated_at: string } | null;
   vendor: ClientRef | null;
   signers: Signer[];
+  files: { position: number; original_filename: string; page_count: number }[];
 }
 
 export interface AuditItem {

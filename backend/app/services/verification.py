@@ -52,7 +52,9 @@ def rupiah(value: Decimal) -> str:
     return "Rp " + (text[:-3] if text.endswith(",00") else text)
 
 
-def verify(data: InvoiceData, duplicate_request_id: str | None = None) -> list[Issue]:
+def verify(data: InvoiceData, duplicate_request_id: str | None = None,
+           payees: list[tuple[str | None, str | None]] | None = None) -> list[Issue]:
+    """`payees`: (vendor, rekening) ternormalisasi per invoice bila satu voucher berisi beberapa invoice."""
     issues: list[Issue] = []
 
     for name, label in REQUIRED_FIELDS.items():
@@ -73,6 +75,14 @@ def verify(data: InvoiceData, duplicate_request_id: str | None = None) -> list[I
             issues.append(Issue(IssueCode.CALCULATION_DISCREPANCY, "total",
                                 f"Jumlah rincian barang ({rupiah(line_sum)}) tidak sama dengan total "
                                 f"invoice ({rupiah(data.total)}). Konfirmasi ke vendor mana yang benar."))
+
+    vendors = {v for v, _ in payees or [] if v}
+    accounts = {a for _, a in payees or [] if a}
+    if len(vendors) > 1 or len(accounts) > 1:
+        what = "vendor" if len(vendors) > 1 else "nomor rekening tujuan"
+        issues.append(Issue(IssueCode.VENDOR_MISMATCH, "vendor_name" if len(vendors) > 1 else "account_no",
+                            f"Invoice dalam pengajuan ini memiliki {what} yang berbeda. Satu voucher hanya untuk "
+                            "satu vendor dan satu rekening. Pisahkan invoice per vendor, lalu ajukan ulang."))
 
     if duplicate_request_id:
         issues.append(Issue(IssueCode.POSSIBLE_DUPLICATE, "invoice_no",

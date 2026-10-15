@@ -27,6 +27,7 @@ export const ISSUE_LABEL: Record<IssueCode, string> = {
   POSSIBLE_DUPLICATE: "Kemungkinan duplikat",
   EXTRACTION_FAILED: "AI gagal membaca",
   RETURNED_BY_REVIEWER: "Dikembalikan reviewer",
+  VENDOR_MISMATCH: "Vendor/rekening berbeda",
 };
 
 export const FIELD_LABEL: Record<string, string> = {

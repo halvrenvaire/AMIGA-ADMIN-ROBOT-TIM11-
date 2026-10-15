@@ -37,6 +37,8 @@ class IssueCode(str, enum.Enum):
     POSSIBLE_DUPLICATE = "POSSIBLE_DUPLICATE"
     EXTRACTION_FAILED = "EXTRACTION_FAILED"
     RETURNED_BY_REVIEWER = "RETURNED_BY_REVIEWER"
+    # Beberapa invoice dalam satu voucher harus untuk satu vendor dan satu rekening tujuan
+    VENDOR_MISMATCH = "VENDOR_MISMATCH"
 
 
 def _uuid() -> uuid.UUID:
@@ -188,6 +190,25 @@ class Document(Base):
     extraction: Mapped["Extraction | None"] = relationship(back_populates="document", uselist=False)
     issues: Mapped[list["ValidationIssue"]] = relationship(back_populates="document")
     voucher: Mapped["Voucher | None"] = relationship(back_populates="document", uselist=False)
+    files: Mapped[list["DocumentFile"]] = relationship(back_populates="document", order_by="DocumentFile.position")
+
+
+class DocumentFile(Base):
+    """Satu file invoice PDF dalam pengajuan. Satu voucher bisa menggabungkan 1–10 invoice;
+    `documents.file_key` menunjuk PDF gabungan untuk layar peninjauan."""
+    __tablename__ = "document_files"
+    __table_args__ = (UniqueConstraint("document_id", "position"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id"), index=True)
+    position: Mapped[int] = mapped_column(SmallInteger)
+    file_key: Mapped[str] = mapped_column(String(500))
+    original_filename: Mapped[str] = mapped_column(String(300))
+    page_count: Mapped[int] = mapped_column(Integer)
+    # Nomor invoice file ini (dinormalisasi) untuk cek duplikasi per invoice
+    invoice_no_norm: Mapped[str | None] = mapped_column(String(500), index=True)
+
+    document: Mapped[Document] = relationship(back_populates="files")
 
 
 class Extraction(Base):
@@ -197,7 +218,8 @@ class Extraction(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id"), unique=True)
     vendor_name: Mapped[str | None] = mapped_column(String(300))
-    invoice_no: Mapped[str | None] = mapped_column(String(100))
+    # Beberapa invoice digabung dengan koma, mis. "INV-001, INV-002"
+    invoice_no: Mapped[str | None] = mapped_column(String(500))
     invoice_date: Mapped[date | None] = mapped_column(Date)
     total: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     bank_name: Mapped[str | None] = mapped_column(String(100))
@@ -205,7 +227,7 @@ class Extraction(Base):
     account_name: Mapped[str | None] = mapped_column(String(200))
     # Hasil normalisasi untuk deteksi duplikat (huruf kecil, tanpa spasi/tanda baca)
     vendor_norm: Mapped[str | None] = mapped_column(String(300), index=True)
-    invoice_no_norm: Mapped[str | None] = mapped_column(String(100), index=True)
+    invoice_no_norm: Mapped[str | None] = mapped_column(String(500), index=True)
     raw_json: Mapped[dict | None] = mapped_column(JSONB)
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[int | None] = mapped_column(Integer)

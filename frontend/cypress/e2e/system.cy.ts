@@ -19,6 +19,7 @@ const NEW_USER_PASSWORD = "QaAmiga2026!";
 function upload(email: string, fixture: string, key: string) {
   cy.visitAs(email, "/unggah");
   cy.get("main input[type=file]").selectFile(`cypress/fixtures/${fixture}`, { force: true });
+  cy.contains("button", "Preview").click();
   cy.contains("button", "Kirim ke antrean").click();
   cy.contains("Terkirim ke antrean").find("b").invoke("text").then((requestId) => {
     cy.contains("a", "Lihat status dokumen").click();
@@ -87,12 +88,14 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-007 Unggah file selain PDF ditolak", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     cy.get("main input[type=file]").selectFile("cypress/fixtures/bukan_pdf.txt", { force: true });
-    cy.contains(".alert", "File harus berformat PDF");
+    cy.contains(".alert", "harus berformat PDF");
+    cy.get(".file-list li").should("not.exist");
   });
 
   it("TS-008 Unggah PDF lebih dari 5 halaman ditolak", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     cy.get("main input[type=file]").selectFile("cypress/fixtures/enam_halaman.pdf", { force: true });
+    cy.contains("button", "Preview").click();
     cy.contains("button", "Kirim ke antrean").click();
     cy.contains(".alert", "6 halaman").and("contain.text", "Maksimal 5 halaman");
   });
@@ -101,9 +104,9 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     cy.get("#type").clear();
     cy.get("main input[type=file]").selectFile("cypress/fixtures/sys_normal_b.pdf", { force: true });
-    cy.contains("button", "Kirim ke antrean").click();
+    cy.contains("button", "Preview").click();
     cy.get("#type:invalid").should("exist");
-    cy.contains("Terkirim ke antrean").should("not.exist");
+    cy.contains("h1", "Preview pengajuan").should("not.exist");
   });
 
   // --- Dashboard antrean ---
@@ -346,7 +349,10 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains(".modal button", "Simpan").click();
     cy.contains("section", "Disetujui oleh").should("contain.text", "Dian Pratama");
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
-    cy.contains(".signer-picker label", "Dian Pratama").find("input").should("be.checked");
+    // Default = satu kotak "Disetujui oleh"; "Diajukan oleh" = perusahaan
+    cy.get(".approver-row").should("have.length", 1);
+    cy.get(".approver-row select").find("option:selected").should("contain.text", "Dian Pratama");
+    cy.get(".company-box").should("contain.text", "PT Klien Alpha");
   });
 
   it("TS-032 Penanda tangan dokumen bisa diubah sebelum voucher terbit", () => {
@@ -354,7 +360,8 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.c1.id}`);
       cy.contains("section", "Penanda tangan voucher").within(() => {
         cy.contains("button", "Ubah").click();
-        cy.contains("label", "Dian Pratama").find("input").check();
+        cy.contains("button", "Tambah kotak tanda tangan").click();
+        cy.get(".approver-row select").last().select("Dian Pratama · Bendahara");
         cy.contains("button", "Simpan").click();
       });
       cy.contains(".alert", "Penanda tangan voucher diperbarui");
@@ -375,6 +382,34 @@ describe("System Testing AMIGA Robot Admin", () => {
       $badges.each((_, b) => { expect(b.textContent).to.eq("Disetujui"); });
     });
     cy.contains("tr.total-row", "Total");
+  });
+
+  it("TS-038 Satu voucher dari beberapa invoice, ditinjau di Preview sebelum dikirim", () => {
+    cy.visitAs("pic.alpha@amiga.test", "/unggah");
+    // PIC hanya bisa memilih perusahaan yang ditugaskan kepadanya
+    cy.get("#client option").should("have.length", 1).and("have.text", "PT Klien Alpha");
+    cy.contains("button", "Tambah kotak tanda tangan").click();
+    cy.get(".approver-row").should("have.length", 2);
+    cy.get("main input[type=file]").selectFile(
+      ["cypress/fixtures/sys_normal_a.pdf", "cypress/fixtures/sys_multi_d.pdf"], { force: true });
+    cy.get(".file-list li").should("have.length", 2);
+    cy.contains("button", "Kirim ke antrean").should("not.exist");
+    cy.contains("button", "Preview").click();
+    cy.contains("h1", "Preview pengajuan");
+    cy.contains(".meta dt", "Diajukan oleh").next("dd").should("have.text", "PT Klien Alpha");
+    cy.contains(".meta dt", "Disetujui oleh").next("dd").find("li").should("have.length", 2);
+    cy.contains(".meta dt", "Jumlah invoice").next("dd").should("have.text", "2 file");
+    cy.contains(".file-list.selectable button", "sys_multi_d.pdf").click();
+    cy.get(".pdf-preview iframe").should("have.attr", "title", "Preview sys_multi_d.pdf");
+    // Kembali ubah: isian dan file tetap ada
+    cy.contains("button", "Kembali ubah").click();
+    cy.get(".file-list li").should("have.length", 2);
+    cy.contains("button", "Preview").click();
+    cy.contains("button", "Kirim ke antrean").click();
+    cy.contains("Terkirim ke antrean");
+    cy.contains("a", "Lihat status dokumen").click();
+    cy.contains(".pdf-head", "2 invoice");
+    cy.contains(".meta dt", "File invoice").next("dd").should("contain.text", "sys_normal_a.pdf").and("contain.text", "sys_multi_d.pdf");
   });
 
   // --- Pengaturan akun (akun baru per run agar akun seed tidak berubah) ---

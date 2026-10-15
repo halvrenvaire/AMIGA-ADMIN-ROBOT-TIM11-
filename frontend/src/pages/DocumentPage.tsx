@@ -94,7 +94,7 @@ export function DocumentPage() {
         <section className="card pdf-pane" aria-label="PDF asli">
           <div className="pdf-head">
             <b>PDF asli</b>
-            <span className="muted">{d.original_filename} · {d.page_count} hal.</span>
+            <span className="muted">{d.files.length > 1 ? `${d.files.length} invoice` : d.original_filename} · {d.page_count} hal.</span>
           </div>
           <PdfFrame path={`/documents/${id}/file`} title={`Invoice ${d.request_id}`} />
         </section>
@@ -103,6 +103,12 @@ export function DocumentPage() {
           <section className="card panel">
             <dl className="meta">
               <dt>Pengunggah</dt><dd>{d.uploaded_by}{d.on_behalf_of && <> · atas nama {d.on_behalf_of}</>}</dd>
+              {d.files.length > 1 && (
+                <><dt>File invoice</dt>
+                  <dd><ol className="plain-list">{d.files.map((f) => (
+                    <li key={f.position}>{f.original_filename} <span className="muted">· {f.page_count} hal.</span></li>
+                  ))}</ol></dd></>
+              )}
               <dt>Tanggal pengajuan</dt><dd>{tanggal(d.submitted_date)}</dd>
               <dt>Tenggat</dt><dd>{tanggal(d.due_date)}</dd>
               <dt>Finance Reviewer</dt><dd>{d.assigned_reviewer ?? "-"}</dd>
@@ -471,8 +477,10 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
   async function open() {
     // Pilihan awal = penanda tangan dokumen saat ini (dicocokkan dari nama + jabatan)
     const list = await api.get<Signatory[]>("/signatories", { client_id: doc.client.id });
-    setInitial(list.filter((s) => doc.signers.some((x) => x.kind === s.kind && x.name === s.full_name && x.position === s.position))
-      .map((s) => s.id));
+    // Urutan kotak "Disetujui oleh" saat ini, dicocokkan dari nama + jabatan
+    setInitial(doc.signers.filter((x) => x.kind === "PENYETUJU")
+      .map((x) => list.find((s) => s.full_name === x.name && s.position === x.position)?.id)
+      .filter((id): id is string => Boolean(id)));
     setEditing(true);
   }
 
@@ -493,7 +501,7 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
       {editing && initial ? (
         <>
           {error && <Alert>{error}</Alert>}
-          <SignerPicker clientId={doc.client.id} initial={initial} onChange={setIds} />
+          <SignerPicker clientId={doc.client.id} clientName={doc.client.name} initial={initial} onChange={setIds} />
           <div className="actions" style={{ justifyContent: "flex-end" }}>
             <button className="btn" onClick={() => setEditing(false)}>Batal</button>
             <button className="btn primary" onClick={save}>Simpan</button>

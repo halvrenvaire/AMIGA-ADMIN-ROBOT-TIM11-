@@ -1,51 +1,69 @@
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { FileUp, UploadCloud } from "lucide-react";
+import { ArrowLeft, Eye, FileText, Send, UploadCloud, X } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignerPicker } from "../components/SignerPicker";
 import { Alert } from "../components/ui";
-import { todayIso } from "../format";
-import type { DocumentSummary } from "../types";
+import { tanggal, todayIso } from "../format";
+import type { DocumentSummary, Signatory } from "../types";
 
 const MAX_MB = 10;
+const MAX_FILES = 10;
 
-/** Layar 02 — Unggah Dokumen (PIC Klien, Intake Support). FR-1.1–1.5. */
+/** Layar 02 — Unggah Dokumen (PIC Klien, Intake Support). FR-1.1–1.5.
+ *  1–10 invoice PDF digabung dalam satu voucher; PIC meninjau dulu di halaman Preview sebelum mengirim. */
 export function Upload() {
   const { user } = useAuth();
   const clients = user?.clients ?? [];
-  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  // Satu perusahaan per pengajuan; bila PIC memegang beberapa perusahaan, harus dipilih dulu
+  const [clientId, setClientId] = useState(clients.length === 1 ? clients[0].id : "");
   const [requestType, setRequestType] = useState("Pembayaran vendor");
   const [channel, setChannel] = useState("Email");
   const [submittedDate, setSubmittedDate] = useState(todayIso());
   const [dueDate, setDueDate] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [signers, setSigners] = useState<string[]>([]);
+  const [approvers, setApprovers] = useState<Signatory[]>([]);
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<"form" | "preview">("form");
   const [result, setResult] = useState<DocumentSummary | null>(null);
-  const [signers, setSigners] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const company = clients.find((c) => c.id === clientId);
 
-  function pick(f: File | undefined) {
+  function add(list: FileList | null | undefined) {
     setError(null);
-    if (!f) return;
-    if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
-      setError("File harus berformat PDF. Simpan atau ekspor invoice sebagai PDF, lalu pilih ulang.");
-      return;
+    if (!list?.length) return;
+    const next = [...files];
+    for (const f of Array.from(list)) {
+      if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
+        setError(`${f.name}: file harus berformat PDF. Simpan atau ekspor invoice sebagai PDF, lalu pilih ulang.`);
+        continue;
+      }
+      if (f.size > MAX_MB * 1024 * 1024) { setError(`${f.name}: ukuran file melebihi ${MAX_MB} MB.`); continue; }
+      if (next.some((x) => x.name === f.name && x.size === f.size)) continue;
+      if (next.length >= MAX_FILES) { setError(`Maksimal ${MAX_FILES} file invoice per voucher.`); break; }
+      next.push(f);
     }
-    if (f.size > MAX_MB * 1024 * 1024) {
-      setError(`Ukuran file melebihi ${MAX_MB} MB.`);
-      return;
-    }
-    setFile(f);
+    setFiles(next);
+    if (inputRef.current) inputRef.current.value = "";
   }
 
-  const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files[0]); };
+  const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); add(e.dataTransfer.files); };
 
-  async function submit(e: FormEvent) {
+  function preview(e: FormEvent) {
     e.preventDefault();
-    if (!file) { setError("Pilih file invoice PDF terlebih dahulu."); return; }
+    if (!clientId) { setError("Pilih perusahaan yang mengajukan."); return; }
+    if (!files.length) { setError("Pilih minimal 1 file invoice PDF."); return; }
+    setError(null);
+    setResult(null);
+    setStep("preview");
+    window.scrollTo(0, 0);
+  }
+
+  async function send() {
     const form = new FormData();
     form.set("client_id", clientId);
     form.set("request_type", requestType);
@@ -53,19 +71,28 @@ export function Upload() {
     form.set("submitted_date", submittedDate);
     if (dueDate) form.set("due_date", dueDate);
     form.set("signatory_ids", signers.join(","));
-    form.set("file", file);
+    files.forEach((f) => form.append("files", f));
     setBusy(true);
     setError(null);
     try {
       setResult(await api.post<DocumentSummary>("/documents", form));
-      setFile(null);
-      if (inputRef.current) inputRef.current.value = "";
+      setFiles([]);
+      setStep("form");
     } catch (err) {
-      // FR-1.5: file ditolak → tetap di formulir dengan pesan yang jelas
+      // FR-1.5: file ditolak → pesan jelas, PIC bisa kembali mengubah
       setError((err as Error).message);
     } finally {
       setBusy(false);
+      window.scrollTo(0, 0);
     }
+  }
+
+  if (step === "preview") {
+    return (
+      <Preview companyName={company?.name ?? "-"} requestType={requestType} channel={channel} submittedDate={submittedDate}
+               dueDate={dueDate} approvers={approvers} files={files} error={error} busy={busy}
+               onBack={() => { setError(null); setStep("form"); }} onSend={send} />
+    );
   }
 
   return (
@@ -73,7 +100,7 @@ export function Upload() {
       <div className="page-head">
         <div>
           <h1>Unggah invoice</h1>
-          <p>Satu file PDF, maksimal 5 halaman. Setelah dikirim, AI membaca invoice dan sistem memverifikasinya.</p>
+          <p>1–{MAX_FILES} file PDF untuk satu voucher, tiap file maksimal 5 halaman. Tinjau dulu di Preview sebelum dikirim.</p>
         </div>
       </div>
 
@@ -86,15 +113,17 @@ export function Upload() {
         </Alert>
       )}
 
-      <form className="card panel" onSubmit={submit} style={{ maxWidth: 760 }}>
+      <form className="card panel" onSubmit={preview} style={{ maxWidth: 820 }}>
         {error && <Alert>{error}</Alert>}
-        {!clients.length && <Alert kind="warn">Akun Anda belum ditugaskan ke klien mana pun. Hubungi System Admin.</Alert>}
+        {!clients.length && <Alert kind="warn">Akun Anda belum ditugaskan ke perusahaan mana pun. Hubungi System Admin.</Alert>}
         <div className="grid-2">
           <div className="field">
-            <label htmlFor="client">Nama klien</label>
+            <label htmlFor="client">Diajukan oleh (perusahaan)</label>
             <select id="client" className="input" required value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              {clients.length !== 1 && <option value="" disabled>Pilih perusahaan…</option>}
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            <small>Hanya perusahaan yang ditugaskan System Admin kepada Anda.</small>
           </div>
           <div className="field">
             <label htmlFor="type">Jenis permintaan</label>
@@ -119,24 +148,110 @@ export function Upload() {
           </div>
         </div>
 
-        <div className="section-title">Penanda tangan voucher</div>
-        {clientId && <SignerPicker key={clientId} clientId={clientId} onChange={setSigners} />}
+        {company && (
+          <>
+            <div className="section-title">Kotak tanda tangan voucher</div>
+            <SignerPicker key={clientId} clientId={clientId} clientName={company.name}
+                          onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
+          </>
+        )}
 
-        <div className={`drop ${over ? "over" : ""}`} onClick={() => inputRef.current?.click()}
-             onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}
-             role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}>
-          {file ? <FileUp /> : <UploadCloud />}
-          <div style={{ marginTop: 6 }}>
-            {file ? <><b>{file.name}</b> · {(file.size / 1024).toFixed(0)} KB</> : <>Seret file PDF ke sini atau <b>klik untuk memilih</b></>}
+        <div className="section-title">File invoice <span className="muted">({files.length}/{MAX_FILES})</span></div>
+        {files.length > 0 && (
+          <ul className="file-list">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${f.size}`}>
+                <FileText />
+                <span className="name">{i + 1}. {f.name}</span>
+                <span className="muted">{(f.size / 1024).toFixed(0)} KB</span>
+                <button type="button" className="btn ghost sm" aria-label={`Hapus ${f.name}`}
+                        onClick={() => setFiles(files.filter((_, j) => j !== i))}><X /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {files.length < MAX_FILES && (
+          <div className={`drop ${over ? "over" : ""}`} onClick={() => inputRef.current?.click()}
+               onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}
+               role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}>
+            <UploadCloud />
+            <div style={{ marginTop: 6 }}>
+              Seret file PDF ke sini atau <b>klik untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
+            </div>
+            <small className="muted">Bisa beberapa file sekaligus. PDF, maks. 5 halaman dan {MAX_MB} MB per file</small>
           </div>
-          <small className="muted">PDF, maksimal 5 halaman dan {MAX_MB} MB</small>
-          <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => pick(e.target.files?.[0])} />
-        </div>
+        )}
+        <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => add(e.target.files)} />
 
         <div className="actions" style={{ justifyContent: "flex-end" }}>
-          <button className="btn primary" disabled={busy || !clients.length}>{busy ? "Mengirim…" : "Kirim ke antrean"}</button>
+          <button className="btn primary" disabled={!clients.length || !files.length || !clientId}><Eye /> Preview</button>
         </div>
       </form>
+    </>
+  );
+}
+
+function Preview({ companyName, requestType, channel, submittedDate, dueDate, approvers, files, error, busy, onBack, onSend }: {
+  companyName: string; requestType: string; channel: string; submittedDate: string; dueDate: string;
+  approvers: Signatory[]; files: File[]; error: string | null; busy: boolean; onBack: () => void; onSend: () => void;
+}) {
+  const [active, setActive] = useState(0);
+  const urls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Preview pengajuan</h1>
+          <p>Periksa setiap file invoice dan data pengajuan. Bila sudah benar, kirim ke antrean.</p>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={onBack} disabled={busy}><ArrowLeft /> Kembali ubah</button>
+          <button className="btn primary" onClick={onSend} disabled={busy}><Send /> {busy ? "Mengirim…" : "Kirim ke antrean"}</button>
+        </div>
+      </div>
+      {error && <Alert>{error}</Alert>}
+      <div className="preview-grid">
+        <section className="card panel">
+          <div className="section-title">Data pengajuan</div>
+          <dl className="meta">
+            <dt>Diajukan oleh</dt><dd><b>{companyName}</b></dd>
+            <dt>Disetujui oleh</dt>
+            <dd>{approvers.length ? (
+              <ol className="plain-list">{approvers.map((a) => <li key={a.id}>{a.full_name} <span className="muted">· {a.position}</span></li>)}</ol>
+            ) : <span className="muted">1 kotak kosong (diisi manual)</span>}</dd>
+            <dt>Jenis permintaan</dt><dd>{requestType}</dd>
+            <dt>Saluran</dt><dd>{channel}</dd>
+            <dt>Tanggal pengajuan</dt><dd>{tanggal(submittedDate)}</dd>
+            <dt>Tenggat</dt><dd>{dueDate ? tanggal(dueDate) : "-"}</dd>
+            <dt>Jumlah invoice</dt><dd>{files.length} file</dd>
+          </dl>
+          <div className="section-title">File invoice</div>
+          <ul className="file-list selectable">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${f.size}`} className={i === active ? "on" : ""}>
+                <button type="button" onClick={() => setActive(i)}>
+                  <FileText /><span className="name">{i + 1}. {f.name}</span>
+                  <span className="muted">{(f.size / 1024).toFixed(0)} KB</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="card panel pdf-preview">
+          <div className="panel-head">
+            <div><h2>{active + 1}. {files[active]?.name}</h2><p>Invoice {active + 1} dari {files.length}</p></div>
+            {files.length > 1 && (
+              <div className="actions">
+                <button className="btn sm" disabled={active === 0} onClick={() => setActive(active - 1)}>Sebelumnya</button>
+                <button className="btn sm" disabled={active === files.length - 1} onClick={() => setActive(active + 1)}>Berikutnya</button>
+              </div>
+            )}
+          </div>
+          {urls[active] && <iframe key={urls[active]} title={`Preview ${files[active].name}`} src={urls[active]} />}
+        </section>
+      </div>
     </>
   );
 }

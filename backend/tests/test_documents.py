@@ -60,9 +60,11 @@ class FakeExtractor:
     def extract(self, pdf_bytes):
         assert pdf_bytes.startswith(b"%PDF-")
         self.calls += 1
-        if isinstance(self.result, Exception):
-            raise self.result
-        return copy.deepcopy(self.result)
+        # Daftar hasil = satu hasil per file (unggahan beberapa invoice), berurutan
+        result = self.result.pop(0) if isinstance(self.result, list) else self.result
+        if isinstance(result, Exception):
+            raise result
+        return copy.deepcopy(result)
 
 
 # Proses background yang menunggu dijalankan (lihat fixture tx)
@@ -128,7 +130,7 @@ def upload(email="pic.alpha@amiga.test", client="PT Klien Alpha", pdf=None, file
     data = {"client_id": client_id(client), "request_type": "Pembayaran vendor", "channel": "Email",
             "submitted_date": "2026-10-14", **form}
     return api(email).post("/documents", data=data,
-                           files={"file": (filename, pdf if pdf is not None else make_pdf(), "application/pdf")})
+                           files={"files": (filename, pdf if pdf is not None else make_pdf(), "application/pdf")})
 
 
 def detail(doc_id, email="pic.alpha@amiga.test"):

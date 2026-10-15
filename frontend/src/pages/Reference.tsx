@@ -3,7 +3,7 @@ import { Building2, Pencil, Plus, Star } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Alert, Loading, Modal, useApi } from "../components/ui";
-import type { ClientRef, Signatory, SignatoryKind, Vendor } from "../types";
+import type { ClientRef, Signatory, Vendor } from "../types";
 
 const VENDOR_FIELDS: { key: keyof Vendor; label: string; hint?: string; wide?: boolean }[] = [
   { key: "name", label: "Nama perusahaan vendor", wide: true },
@@ -175,20 +175,16 @@ function VendorModal({ vendor, clientId, onClose, onDone }: {
 
 // --- Penanda tangan ---
 
-const KIND_LABEL: Record<SignatoryKind, string> = { PENGAJU: "Diajukan oleh", PENYETUJU: "Disetujui oleh" };
-const KIND_NOTE: Record<SignatoryKind, string> = {
-  PENGAJU: "Pihak PIC Klien yang mengajukan pembayaran. Satu default.",
-  PENYETUJU: "Direktur, bendahara, atau pejabat lain yang menyetujui. Boleh beberapa default (maks. 3 di voucher).",
-};
-
 export function Signatories() {
   const { user, has } = useAuth();
   const clients = user?.clients ?? [];
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
-  const [editing, setEditing] = useState<Signatory | { kind: SignatoryKind } | null>(null);
+  const [editing, setEditing] = useState<Signatory | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canEdit = has("PIC_KLIEN");
   const list = useApi(() => api.get<Signatory[]>("/signatories", { client_id: clientId, include_inactive: true }), [clientId]);
+  const items = list.data ?? [];
+  const clientName = clients.find((c) => c.id === clientId)?.name ?? "-";
 
   async function toggle(s: Signatory) {
     setError(null);
@@ -203,60 +199,55 @@ export function Signatories() {
       <div className="page-head">
         <div>
           <h1>Penanda tangan voucher</h1>
-          <p>Nama yang dicetak di kotak tanda tangan voucher. Penanda tangan default terpilih otomatis saat unggah invoice.</p>
+          <p>Pemberi persetujuan yang bisa dipilih di kotak "Disetujui oleh". Yang default otomatis mengisi kotak pertama saat unggah.</p>
         </div>
         <ClientPicker clients={clients} value={clientId} onChange={setClientId} />
       </div>
       {(error || list.error) && <Alert>{error ?? list.error}</Alert>}
+      <Alert kind="info">
+        Kotak <b>Diajukan oleh</b> di voucher otomatis berisi nama perusahaan (<b>{clientName}</b>) yang dipilih saat unggah,
+        jadi tidak perlu didaftarkan di sini.
+      </Alert>
       {list.loading && !list.data ? <Loading /> : (
-        <div className="grid-2">
-          {(["PENGAJU", "PENYETUJU"] as SignatoryKind[]).map((kind) => {
-            const items = (list.data ?? []).filter((s) => s.kind === kind);
-            return (
-              <section key={kind} className="card panel">
-                <div className="panel-head">
-                  <div><h2>{KIND_LABEL[kind]}</h2><p>{KIND_NOTE[kind]}</p></div>
-                  {canEdit && <button className="btn sm" onClick={() => setEditing({ kind })}><Plus /> Tambah</button>}
-                </div>
-                {!items.length ? <p className="muted" style={{ margin: 0 }}>Belum ada. Kotak akan dicetak kosong di voucher.</p> : (
-                  <table className="table compact">
-                    <tbody>
-                      {items.map((s) => (
-                        <tr key={s.id} style={s.is_active ? undefined : { opacity: 0.55 }}>
-                          <td><b>{s.full_name}</b><div className="muted" style={{ fontSize: 12 }}>{s.position}</div></td>
-                          <td>{s.is_default && s.is_active && <span className="chip ok"><Star size={11} /> Default</span>}
-                            {!s.is_active && <span className="chip gray">Nonaktif</span>}</td>
-                          {canEdit && (
-                            <td className="right">
-                              <span className="actions" style={{ justifyContent: "flex-end" }}>
-                                <button className="btn sm" onClick={() => setEditing(s)}>Ubah</button>
-                                <button className="btn sm" onClick={() => toggle(s)}>{s.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
-                              </span>
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </section>
-            );
-          })}
-        </div>
+        <section className="card panel" style={{ maxWidth: 760 }}>
+          <div className="panel-head">
+            <div><h2>Disetujui oleh</h2><p>Direktur, bendahara, atau pejabat lain yang menyetujui. Maks. 5 kotak per voucher.</p></div>
+            {canEdit && <button className="btn sm" onClick={() => setEditing("new")}><Plus /> Tambah</button>}
+          </div>
+          {!items.length ? <p className="muted" style={{ margin: 0 }}>Belum ada. Kotak "Disetujui oleh" dicetak kosong di voucher.</p> : (
+            <table className="table compact">
+              <tbody>
+                {items.map((s) => (
+                  <tr key={s.id} style={s.is_active ? undefined : { opacity: 0.55 }}>
+                    <td><b>{s.full_name}</b><div className="muted" style={{ fontSize: 12 }}>{s.position}</div></td>
+                    <td>{s.is_default && s.is_active && <span className="chip ok"><Star size={11} /> Default</span>}
+                      {!s.is_active && <span className="chip gray">Nonaktif</span>}</td>
+                    {canEdit && (
+                      <td className="right">
+                        <span className="actions" style={{ justifyContent: "flex-end" }}>
+                          <button className="btn sm" onClick={() => setEditing(s)}>Ubah</button>
+                          <button className="btn sm" onClick={() => toggle(s)}>{s.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
+                        </span>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
       )}
       {editing && (
-        <SignatoryModal value={editing} clientId={clientId} onClose={() => setEditing(null)}
+        <SignatoryModal value={editing === "new" ? null : editing} clientId={clientId} onClose={() => setEditing(null)}
                         onDone={() => { setEditing(null); list.reload(); }} />
       )}
     </>
   );
 }
 
-function SignatoryModal({ value, clientId, onClose, onDone }: {
-  value: Signatory | { kind: SignatoryKind }; clientId: string; onClose: () => void; onDone: () => void;
+function SignatoryModal({ value: existing, clientId, onClose, onDone }: {
+  value: Signatory | null; clientId: string; onClose: () => void; onDone: () => void;
 }) {
-  const existing = "id" in value ? value : null;
-  const [kind, setKind] = useState<SignatoryKind>(value.kind);
   const [name, setName] = useState(existing?.full_name ?? "");
   const [position, setPosition] = useState(existing?.position ?? "");
   const [isDefault, setIsDefault] = useState(existing?.is_default ?? true);
@@ -266,7 +257,7 @@ function SignatoryModal({ value, clientId, onClose, onDone }: {
   async function submit() {
     setBusy(true);
     setError(null);
-    const body = { kind, full_name: name.trim(), position: position.trim(), is_default: isDefault };
+    const body = { kind: "PENYETUJU", full_name: name.trim(), position: position.trim(), is_default: isDefault };
     try {
       if (existing) await api.put(`/signatories/${existing.id}`, body);
       else await api.post("/signatories", { ...body, client_id: clientId });
@@ -278,26 +269,19 @@ function SignatoryModal({ value, clientId, onClose, onDone }: {
   }
 
   return (
-    <Modal title={existing ? `Ubah ${existing.full_name}` : `Tambah penanda tangan`} onClose={onClose}>
+    <Modal title={existing ? `Ubah ${existing.full_name}` : `Tambah pemberi persetujuan`} onClose={onClose}>
       {error && <Alert>{error}</Alert>}
-      <div className="field">
-        <label htmlFor="s-kind">Kotak tanda tangan</label>
-        <select id="s-kind" className="input" value={kind} onChange={(e) => setKind(e.target.value as SignatoryKind)}>
-          <option value="PENGAJU">Diajukan oleh</option>
-          <option value="PENYETUJU">Disetujui oleh</option>
-        </select>
-      </div>
       <div className="field">
         <label htmlFor="s-name">Nama lengkap</label>
         <input id="s-name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div className="field">
         <label htmlFor="s-pos">Jabatan</label>
-        <input id="s-pos" className="input" value={position} placeholder={kind === "PENGAJU" ? "mis. Staf Keuangan" : "mis. Direktur, Bendahara"}
+        <input id="s-pos" className="input" value={position} placeholder="mis. Direktur, Bendahara"
                onChange={(e) => setPosition(e.target.value)} />
       </div>
       <label className="toggle"><input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
-        Jadikan default (otomatis terpilih saat unggah invoice)</label>
+        Jadikan default (mengisi kotak pertama saat unggah invoice; hanya satu per perusahaan)</label>
       <div className="actions" style={{ justifyContent: "flex-end" }}>
         <button className="btn" onClick={onClose}>Batal</button>
         <button className="btn primary" disabled={busy || name.trim().length < 2 || position.trim().length < 2} onClick={submit}>Simpan</button>

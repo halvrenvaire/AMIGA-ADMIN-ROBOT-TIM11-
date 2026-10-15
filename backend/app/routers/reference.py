@@ -152,10 +152,17 @@ def _get_signatory(db: Session, user: User, signatory_id: uuid.UUID) -> Signator
 
 
 def _apply_default(db: Session, sig: Signatory) -> None:
-    """"Diajukan oleh" hanya boleh satu default per klien; "Disetujui oleh" boleh beberapa."""
-    if sig.is_default and sig.kind == SignatoryKind.PENGAJU:
+    """Satu default per klien: kotak "Disetujui oleh" pertama yang terisi otomatis saat unggah."""
+    if sig.is_default:
         db.execute(update(Signatory).where(Signatory.client_id == sig.client_id, Signatory.id != sig.id,
-                                           Signatory.kind == SignatoryKind.PENGAJU).values(is_default=False))
+                                           Signatory.kind == sig.kind).values(is_default=False))
+
+
+def _only_approvers(kind: SignatoryKind) -> None:
+    if kind != SignatoryKind.PENYETUJU:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "Kotak \"Diajukan oleh\" otomatis berisi perusahaan klien; daftar ini hanya untuk "
+                            "pemberi persetujuan (\"Disetujui oleh\").")
 
 
 @router.get("/signatories", response_model=list[SignatoryOut])
@@ -164,7 +171,9 @@ def list_signatories(client_id: uuid.UUID | None = None, include_inactive: bool 
     ids = accessible_client_ids(db, user)
     if client_id is not None:
         ids &= {client_id}
-    query = select(Signatory).where(Signatory.client_id.in_(ids)).order_by(Signatory.kind, Signatory.full_name)
+    # "Diajukan oleh" kini perusahaan klien; data PENGAJU lama tidak ditampilkan lagi
+    query = select(Signatory).where(Signatory.client_id.in_(ids), Signatory.kind == SignatoryKind.PENYETUJU) \
+        .order_by(Signatory.is_default.desc(), Signatory.full_name)
     if not include_inactive:
         query = query.where(Signatory.is_active.is_(True))
     return db.scalars(query).all()
@@ -173,6 +182,7 @@ def list_signatories(client_id: uuid.UUID | None = None, include_inactive: bool 
 @router.post("/signatories", response_model=SignatoryOut, status_code=201)
 def create_signatory(body: SignatoryCreate, user: User = Depends(signatory_editors), db: Session = Depends(get_db)):
     ensure_client_access(db, user, body.client_id)
+    _only_approvers(body.kind)
     sig = Signatory(client_id=body.client_id, kind=body.kind, full_name=body.full_name.strip(),
                     position=body.position.strip(), is_default=body.is_default, created_by=user.id)
     db.add(sig)
@@ -189,6 +199,7 @@ def create_signatory(body: SignatoryCreate, user: User = Depends(signatory_edito
 def update_signatory(signatory_id: uuid.UUID, body: SignatoryIn, user: User = Depends(signatory_editors),
                      db: Session = Depends(get_db)):
     sig = _get_signatory(db, user, signatory_id)
+    _only_approvers(body.kind)
     old = f"{sig.full_name} ({sig.position}) {sig.kind.value}{' default' if sig.is_default else ''}"
     sig.kind, sig.full_name, sig.position, sig.is_default = (body.kind, body.full_name.strip(),
                                                              body.position.strip(), body.is_default)

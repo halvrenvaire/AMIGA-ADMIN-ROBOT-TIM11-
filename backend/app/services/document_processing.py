@@ -1,7 +1,7 @@
 """Alur otomatis setelah unggah atau perbaikan PIC (BPMN, SOP 7.2):
 
-PROCESSING → AI membaca invoice → isian PIC didahulukan → sistem memverifikasi →
-READY_FOR_REVIEW (reviewer ditugaskan) atau EXCEPTION (kode + alasan).
+PROCESSING → AI membaca setiap invoice → hasil digabung untuk satu voucher → isian PIC didahulukan →
+sistem memverifikasi → READY_FOR_REVIEW (reviewer ditugaskan) atau EXCEPTION (kode + alasan).
 
 Dijalankan di background setelah respons dikirim, dengan sesi database sendiri.
 """
@@ -14,11 +14,11 @@ from decimal import Decimal
 from sqlalchemy import select, update
 
 from app import db as db_module
-from app.models import DocStatus, Document, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
+from app.models import DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
 from app.services import audit_service, storage
-from app.services.extraction_service import ExtractedInvoice, ExtractionError, InvoiceExtractor
+from app.services.extraction_service import ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor
 from app.services.reviewer_assignment import pick_reviewer
-from app.services.verification import InvoiceData, normalize, verify
+from app.services.verification import InvoiceData, Issue, normalize, verify
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,37 @@ def set_status(db, doc: Document, new: DocStatus, note: str | None = None) -> No
                          status_before=old.value if old else None, status_after=new.value, note=note)
 
 
+def combine(parts: list[ExtractedInvoice]) -> ExtractedInvoice:
+    """Gabungkan hasil baca beberapa invoice menjadi data satu voucher.
+
+    Nomor invoice digabung dengan koma, total dijumlahkan, rincian barang diberi awalan nomor
+    invoice. Vendor dan rekening diambil dari invoice pertama yang memuatnya; perbedaan antar
+    invoice diperiksa sistem di verifikasi (VENDOR_MISMATCH)."""
+    if len(parts) == 1:
+        return parts[0]
+    first = lambda name: next((getattr(p, name) for p in parts if getattr(p, name)), None)  # noqa: E731
+    totals = [p.total for p in parts]
+    lines = []
+    for i, p in enumerate(parts, start=1):
+        tag = p.invoice_no or f"Invoice {i}"
+        lines += [ExtractedLine(description=f"[{tag}] {line.description or '-'}", qty=line.qty,
+                                unit_price=line.unit_price, subtotal=line.subtotal) for line in p.line_items]
+    numbers = [p.invoice_no for p in parts if p.invoice_no]
+    dates = [p.invoice_date for p in parts if p.invoice_date]
+    return ExtractedInvoice(
+        vendor_name=first("vendor_name"),
+        # Bila ada invoice tanpa nomor, field dibiarkan kosong supaya terdeteksi MISSING_EVIDENCE
+        invoice_no=", ".join(numbers)[:500] if len(numbers) == len(parts) else None,
+        invoice_date=min(dates) if len(dates) == len(parts) else None,
+        line_items=lines,
+        total=sum(totals, Decimal(0)) if all(t is not None for t in totals) else None,
+        bank_name=first("bank_name"), account_no=first("account_no"), account_name=first("account_name"),
+        raw={"invoices": [p.raw for p in parts],
+             # Penerima per invoice, untuk cek satu voucher satu vendor & rekening
+             "payees": [{"vendor_name": p.vendor_name, "account_no": p.account_no} for p in parts]},
+    )
+
+
 def _save_extraction(db, doc: Document, data: ExtractedInvoice, duration_ms: int) -> Extraction:
     extraction = doc.extraction or Extraction(document_id=doc.id)
     for name in PIC_FIELDS:
@@ -72,22 +103,37 @@ def _save_extraction(db, doc: Document, data: ExtractedInvoice, duration_ms: int
     return extraction
 
 
+def _invoice_norms(doc: Document, extraction: Extraction) -> set[str]:
+    """Nomor invoice (dinormalisasi) di pengajuan ini: per file, atau isian gabungan bila diubah."""
+    norms = {f.invoice_no_norm for f in doc.files if f.invoice_no_norm}
+    if extraction.invoice_no:
+        norms |= {n for part in extraction.invoice_no.split(",") if (n := normalize(part))}
+    return norms
+
+
 def _duplicate_of(db, doc: Document, extraction: Extraction) -> str | None:
-    """Request ID invoice lain milik klien yang sama dengan vendor dan nomor invoice sama."""
-    if not extraction.vendor_norm or not extraction.invoice_no_norm:
+    """Request ID pengajuan lain milik klien yang sama dengan vendor sama dan salah satu nomor invoice sama."""
+    norms = _invoice_norms(doc, extraction)
+    if not extraction.vendor_norm or not norms:
         return None
     return db.scalar(
         select(Document.request_id)
         .join(Extraction, Extraction.document_id == Document.id)
+        .outerjoin(DocumentFile, DocumentFile.document_id == Document.id)
         .where(
             Document.client_id == doc.client_id,
             Document.id != doc.id,
             Extraction.vendor_norm == extraction.vendor_norm,
-            Extraction.invoice_no_norm == extraction.invoice_no_norm,
+            (Extraction.invoice_no_norm.in_(norms) | DocumentFile.invoice_no_norm.in_(norms)),
         )
         .order_by(Document.created_at)
         .limit(1)
     )
+
+
+def _same_batch_duplicate(doc: Document) -> bool:
+    norms = [f.invoice_no_norm for f in doc.files if f.invoice_no_norm]
+    return len(norms) != len(set(norms))
 
 
 def uploader_ids(doc: Document) -> set[uuid.UUID]:
@@ -109,12 +155,22 @@ def run_verification(db, doc: Document) -> list:
         account_name=extraction.account_name,
         subtotals=[line.subtotal for line in extraction.line_items],
     )
-    issues = verify(invoice, _duplicate_of(db, doc, extraction))
+    issues = verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction))
+    if _same_batch_duplicate(doc):
+        issues.append(Issue(IssueCode.POSSIBLE_DUPLICATE, "invoice_no",
+                            "Ada nomor invoice yang sama lebih dari sekali dalam pengajuan ini. Periksa apakah "
+                            "file yang sama terunggah dua kali."))
     _resolve_open_issues(db, doc)
     for issue in issues:
         db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field, message=issue.message))
     db.flush()
     return issues
+
+
+def _payees(extraction: Extraction) -> list[tuple[str | None, str | None]]:
+    """(vendor, rekening) per invoice dari hasil baca AI, untuk cek satu voucher satu penerima."""
+    payees = extraction.raw_json.get("payees") if isinstance(extraction.raw_json, dict) else None
+    return [(normalize(p.get("vendor_name")), normalize(p.get("account_no"))) for p in payees or []]
 
 
 def send_to_review(db, doc: Document, note: str) -> None:
@@ -142,8 +198,19 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
             db.commit()
 
         started = time.monotonic()
+        files = doc.files or []
         try:
-            data = extractor.extract(storage.load(doc.file_key))
+            if files:
+                parts = []
+                for f in files:
+                    try:
+                        parts.append(extractor.extract(storage.load(f.file_key)))
+                    except ExtractionError as e:
+                        raise ExtractionError(f"{f.original_filename}: {e}" if len(files) > 1 else str(e)) from e
+                    f.invoice_no_norm = normalize(parts[-1].invoice_no)
+                data = combine(parts)
+            else:
+                data = extractor.extract(storage.load(doc.file_key))
         except (ExtractionError, storage.StorageError) as e:
             log.warning("Ekstraksi %s gagal: %s", doc.request_id, e)
             _resolve_open_issues(db, doc)
@@ -156,7 +223,8 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
 
         extraction = _save_extraction(db, doc, data, duration_ms)
         audit_service.record(db, None, "EXTRACTED", document_id=doc.id, client_id=doc.client_id,
-                             note=f"AI membaca {len(extraction.line_items)} baris dalam {duration_ms} ms")
+                             note=f"AI membaca {len(files) or 1} invoice, {len(extraction.line_items)} baris "
+                                  f"dalam {duration_ms} ms")
 
         issues = run_verification(db, doc)
         if issues:
