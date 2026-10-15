@@ -233,7 +233,9 @@ function UploadAside({ company, requestType, dueDate, files, approvers }: {
         <div className="panel-head"><div><h2>Agar tidak tertahan</h2><p>Penyebab kendala yang paling sering</p></div></div>
         <ul className="tips">
           <li><b>Satu voucher, satu vendor.</b> Semua invoice harus untuk vendor dan rekening tujuan yang sama.</li>
-          <li><b>Invoice, bukan struk.</b> Struk kasir atau voucher lain akan ditolak AI.</li>
+          <li><b>Invoice, bukan struk.</b> Struk/nota disusun AI sebagai draft dan ditahan sampai ada invoice resmi atau
+            keputusan Finance Reviewer. Dokumen yang tidak relevan langsung ditolak.</li>
+          <li><b>Rekening dicek ke data vendor.</b> Rekening yang berbeda dari data vendor terverifikasi akan ditahan.</li>
           <li><b>Rekening terbaca.</b> Pastikan nama bank dan nomor rekening vendor tertulis jelas.</li>
           <li><b>Jangan unggah ulang.</b> Invoice yang pernah diajukan ditandai sebagai kemungkinan duplikat.</li>
         </ul>

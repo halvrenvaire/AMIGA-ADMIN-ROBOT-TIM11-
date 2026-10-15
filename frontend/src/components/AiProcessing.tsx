@@ -1,25 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, CheckCircle2, Cpu, FileSearch, Inbox, ScanText, ShieldCheck, Sparkles, UserCheck, X } from "lucide-react";
+import { type ReactNode } from "react";
+import { AlertTriangle, Check, CheckCircle2, Cpu, FileSearch, Inbox, Loader2, ScanText, ShieldCheck, UserCheck, X } from "lucide-react";
 import { rupiah } from "../format";
 import type { DocumentDetail, IssueCode } from "../types";
 
-const LOOKING_FOR = ["Nama vendor", "Nomor invoice", "Tanggal", "Rincian barang", "Total tagihan", "Rekening tujuan"];
-
 type StepState = "done" | "active" | "todo";
-
-/** Detik berjalan sejak `since` (jam server bisa sedikit berbeda, jadi tidak pernah negatif). */
-function useElapsed(since: string) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 100);
-    return () => clearInterval(t);
-  }, []);
-  return Math.max(0, (now - new Date(since).getTime()) / 1000);
-}
 
 /** Kartu proses AI selama QUEUED/PROCESSING. Tahap dan progres per file diambil dari data server, bukan simulasi. */
 export function AiProcessingCard({ doc }: { doc: DocumentDetail }) {
-  const elapsed = useElapsed(doc.updated_at);
   const files = doc.files.length ? doc.files : [{ position: 1, original_filename: doc.original_filename, page_count: doc.page_count, read_at: null }];
   const read = files.filter((f) => f.read_at).length;
   const current = files.find((f) => !f.read_at);
@@ -44,10 +31,9 @@ export function AiProcessingCard({ doc }: { doc: DocumentDetail }) {
       <div className="ai-card-head">
         <span className="ai-orb" aria-hidden="true"><Cpu /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span className="ai-eyebrow"><Sparkles size={12} /> AMIGA AI Engine</span>
+          <span className="ai-eyebrow">AMIGA AI Engine</span>
           <h2>{queued ? "Invoice masuk antrean AI" : "AI sedang memproses invoice Anda"}</h2>
         </div>
-        <span className="ai-timer" title="Waktu berjalan">{elapsed.toFixed(1)} dtk</span>
       </div>
 
       {files.length > 1 && (
@@ -60,18 +46,12 @@ export function AiProcessingCard({ doc }: { doc: DocumentDetail }) {
       <ol className="ai-steps">
         {steps.map(({ icon: Icon, title, detail, state }) => (
           <li key={title} className={state}>
-            <span className="ai-step-ic">{state === "done" ? <Check /> : <Icon />}</span>
+            <span className="ai-step-ic">{state === "done" ? <Check /> : state === "active" ? <Loader2 className="spin" /> : <Icon />}</span>
             <div><b>{title}</b><small>{detail}</small></div>
           </li>
         ))}
       </ol>
 
-      {!queued && !allRead && (
-        <div className="ai-looking">
-          <span className="muted">Yang dicari AI</span>
-          <div>{LOOKING_FOR.map((f, i) => <span key={f} className="ai-chip" style={{ animationDelay: `${i * 0.25}s` }}>{f}</span>)}</div>
-        </div>
-      )}
       <small className="muted">Halaman diperbarui otomatis. Anda boleh meninggalkan halaman ini; prosesnya tetap berjalan.</small>
     </section>
   );
@@ -85,21 +65,24 @@ const CHECKS: { code: IssueCode; label: string }[] = [
   { code: "VENDOR_MISMATCH", label: "Satu vendor dan satu rekening tujuan" },
 ];
 
-/** Ringkasan hasil kerja AI dan verifikasi sistem setelah selesai. `fresh` = baru selesai saat halaman dibuka (animasi masuk). */
-export function AiResultCard({ doc, fresh, onClose }: { doc: DocumentDetail; fresh: boolean; onClose?: () => void }) {
+/** Ringkasan hasil kerja AI dan verifikasi sistem setelah selesai. */
+export function AiResultCard({ doc, onClose }: { doc: DocumentDetail; onClose?: () => void }) {
   const ex = doc.extraction;
   if (!ex) return null;
   const codes = new Set(doc.issues.map((i) => i.code));
   const notInvoice = codes.has("NOT_AN_INVOICE");
+  // Struk/nota atau dokumen meragukan juga gagal di pemeriksaan "invoice vendor"
+  const notOfficial = codes.has("RECEIPT_NOT_INVOICE") || codes.has("NEEDS_MANUAL_REVIEW");
+  const account = doc.account_check;
   const passed = !doc.issues.length && doc.status !== "EXCEPTION";
   const seconds = ex.duration_ms != null ? (ex.duration_ms / 1000).toFixed(1) : null;
 
   return (
-    <section className={`card ai-card result${fresh ? " fresh" : ""}`}>
+    <section className="card ai-card result">
       <div className="ai-card-head">
         <span className={`ai-orb ${passed ? "ok" : "warn"}`} aria-hidden="true">{passed ? <CheckCircle2 /> : <AlertTriangle />}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <span className="ai-eyebrow"><Sparkles size={12} /> Hasil AMIGA AI Engine</span>
+          <span className="ai-eyebrow">Hasil AMIGA AI Engine</span>
           <h2>{passed ? "Lolos semua pemeriksaan" : `${doc.issues.length} kendala perlu ditindaklanjuti`}</h2>
         </div>
         {onClose && <button className="btn ghost sm" onClick={onClose} aria-label="Tutup ringkasan"><X /></button>}
@@ -114,16 +97,23 @@ export function AiResultCard({ doc, fresh, onClose }: { doc: DocumentDetail; fre
       {ex.vendor_name && <p className="ai-found"><FileSearch size={14} /> Vendor terbaca: <b>{ex.vendor_name}</b>{ex.invoice_no && <> · No. {ex.invoice_no}</>}</p>}
 
       <ul className="ai-checks">
-        {CHECKS.map(({ code, label }, i) => {
-          const failed = codes.has(code);
+        {CHECKS.map(({ code, label }) => {
+          const failed = codes.has(code) || (code === "NOT_AN_INVOICE" && notOfficial);
           const skipped = notInvoice && code !== "NOT_AN_INVOICE";
           return (
-            <li key={code} className={failed ? "fail" : skipped ? "skip" : "pass"} style={{ animationDelay: `${0.15 + i * 0.12}s` }}>
+            <li key={code} className={failed ? "fail" : skipped ? "skip" : "pass"} >
               <span>{failed ? <X /> : skipped ? "–" : <Check />}</span>{label}
               {skipped && <small className="muted"> · dilewati</small>}
             </li>
           );
         })}
+        {account && !notInvoice && (
+          <li className={account.state === "VERIFIED" ? "pass" : account.state === "MISMATCH" ? "fail" : "skip"}>
+            <span>{account.state === "VERIFIED" ? <Check /> : account.state === "MISMATCH" ? <X /> : "?"}</span>
+            Rekening cocok dengan data vendor terverifikasi
+            {account.state === "UNVERIFIED" && <small className="muted"> · belum terverifikasi</small>}
+          </li>
+        )}
       </ul>
       {passed && doc.assigned_reviewer && (
         <p className="ai-found"><UserCheck size={14} /> Ditugaskan ke <b>{doc.assigned_reviewer}</b> untuk ditinjau.</p>
@@ -132,12 +122,7 @@ export function AiResultCard({ doc, fresh, onClose }: { doc: DocumentDetail; fre
   );
 }
 
-/** Garis pindai di atas pratinjau PDF selama AI membaca. */
+/** Label kecil di atas pratinjau PDF selama AI membaca. */
 export function AiScanOverlay({ label }: { label: string }) {
-  return (
-    <div className="ai-scan" aria-hidden="true">
-      <span className="ai-scan-beam" />
-      <span className="ai-scan-label"><Sparkles size={12} /> {label}</span>
-    </div>
-  );
+  return <span className="ai-scan-label" aria-hidden="true"><Loader2 className="spin" size={12} /> {label}</span>;
 }

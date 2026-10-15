@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Building2, PenLine, Pencil, Plus, Star } from "lucide-react";
+import { Building2, PenLine, Pencil, Plus, ShieldCheck, Star } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignatureImage, SignatureModal } from "../components/Signature";
@@ -41,6 +41,8 @@ export function Vendors() {
   const [editing, setEditing] = useState<Vendor | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canEdit = has("PIC_KLIEN", "INTAKE_SUPPORT");
+  const canVerify = has("FINANCE_REVIEWER");
+  const [verifying, setVerifying] = useState<Vendor | null>(null);
   const vendors = useApi(() => api.get<Vendor[]>("/vendors", { client_id: clientId, q, include_inactive: inactive }),
     [clientId, q, inactive]);
 
@@ -65,6 +67,10 @@ export function Vendors() {
         </div>
       </div>
       {(error || vendors.error) && <Alert>{error ?? vendors.error}</Alert>}
+      <Alert kind="info">
+        Rekening vendor menjadi acuan tepercaya setelah <b>diverifikasi Finance Reviewer</b> (bukan pendaftarnya). Invoice
+        dengan rekening berbeda dari data terverifikasi otomatis ditahan; mengubah data bank membatalkan verifikasi.
+      </Alert>
       <section className="card panel">
         <div className="filters">
           <input className="input" placeholder="Cari nama atau NPWP" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 260 }} />
@@ -76,21 +82,27 @@ export function Vendors() {
         ) : (
           <div className="table-wrap">
             <table className="table docs">
-              <thead><tr><th>Vendor</th><th>NPWP</th><th>Kontak</th><th>Rekening</th><th className="right">Dokumen</th><th>Status</th>{canEdit && <th className="right">Aksi</th>}</tr></thead>
+              <thead><tr><th>Vendor</th><th>NPWP</th><th>Kontak</th><th>Rekening</th><th className="right">Dokumen</th><th>Status</th>{(canEdit || canVerify) && <th className="right">Aksi</th>}</tr></thead>
               <tbody>
                 {vendors.data.map((v) => (
                   <tr key={v.id} style={v.is_active ? undefined : { opacity: 0.55 }}>
                     <td className="vendor"><b>{v.name}</b>{v.address && <div className="muted" style={{ fontSize: 12 }}>{v.address}</div>}</td>
                     <td className="mono">{v.npwp ?? "-"}</td>
                     <td className="wrap">{v.contact_name ?? "-"}{v.phone && <div className="muted" style={{ fontSize: 12 }}>{v.phone}</div>}</td>
-                    <td className="wrap">{v.bank_name ?? "-"}{v.account_no && <div className="mono">{v.account_no}</div>}</td>
+                    <td className="wrap">{v.bank_name ?? "-"}{v.account_no && <div className="mono">{v.account_no}</div>}
+                      {v.account_no && (v.verified_at
+                        ? <span className="chip ok" title={`Diverifikasi ${v.verified_by ?? ""}`}><ShieldCheck size={11} /> Terverifikasi</span>
+                        : <span className="chip warn">Belum diverifikasi</span>)}</td>
                     <td className="right num">{v.documents}</td>
                     <td>{v.is_active ? <span className="chip ok">Aktif</span> : <span className="chip gray">Nonaktif</span>}</td>
-                    {canEdit && (
+                    {(canEdit || canVerify) && (
                       <td className="right">
                         <span className="actions" style={{ justifyContent: "flex-end" }}>
-                          <button className="btn sm" onClick={() => setEditing(v)}><Pencil /> Ubah</button>
-                          <button className="btn sm" onClick={() => toggle(v)}>{v.is_active ? "Nonaktifkan" : "Aktifkan"}</button>
+                          {canVerify && !v.verified_at && v.is_active && v.account_no && (
+                            <button className="btn sm" onClick={() => setVerifying(v)}><ShieldCheck /> Verifikasi rekening</button>
+                          )}
+                          {canEdit && <button className="btn sm" onClick={() => setEditing(v)}><Pencil /> Ubah</button>}
+                          {canEdit && <button className="btn sm" onClick={() => toggle(v)}>{v.is_active ? "Nonaktifkan" : "Aktifkan"}</button>}
                         </span>
                       </td>
                     )}
@@ -101,6 +113,28 @@ export function Vendors() {
           </div>
         )}
       </section>
+      {verifying && (
+        <Modal title={`Verifikasi rekening ${verifying.name}`} onClose={() => setVerifying(null)}>
+          {error && <Alert>{error}</Alert>}
+          <dl className="meta">
+            <dt>Bank</dt><dd>{verifying.bank_name ?? "-"}</dd>
+            <dt>No. rekening</dt><dd className="mono">{verifying.account_no ?? "-"}</dd>
+            <dt>Atas nama</dt><dd>{verifying.account_name ?? "-"}</dd>
+          </dl>
+          <Alert kind="warn">
+            Verifikasi hanya setelah rekening dicek ke sumber tepercaya, mis. konfirmasi langsung ke vendor lewat kontak resmi,
+            bukan dari invoice atau isian PIC. Tindakan ini tercatat di jejak audit atas nama Anda.
+          </Alert>
+          <div className="actions" style={{ justifyContent: "flex-end" }}>
+            <button className="btn" onClick={() => setVerifying(null)}>Batal</button>
+            <button className="btn primary" onClick={async () => {
+              setError(null);
+              try { await api.post(`/vendors/${verifying.id}/verify`); setVerifying(null); vendors.reload(); }
+              catch (e) { setError((e as Error).message); }
+            }}><ShieldCheck /> Rekening sudah saya cek</button>
+          </div>
+        </Modal>
+      )}
       {editing && (
         <VendorModal vendor={editing === "new" ? null : editing} clientId={clientId}
                      onClose={() => setEditing(null)} onDone={() => { setEditing(null); vendors.reload(); }} />

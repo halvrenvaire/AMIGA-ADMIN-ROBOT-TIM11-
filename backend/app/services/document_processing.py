@@ -16,7 +16,10 @@ from sqlalchemy import select, update
 from app import db as db_module
 from app.models import AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
 from app.services import audit_service, storage
-from app.services.extraction_service import ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor
+from app.services.account_check import MISMATCH, check_account
+from app.services.extraction_service import (
+    INVOICE, IRRELEVANT, RECEIPT, UNCERTAIN, ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor,
+)
 from app.services.reviewer_assignment import pick_reviewer
 from app.services.verification import InvoiceData, Issue, normalize, verify
 
@@ -83,21 +86,57 @@ def combine(parts: list[ExtractedInvoice]) -> ExtractedInvoice:
 
 def document_checks(names: list[str], parts: list[ExtractedInvoice]) -> list[dict]:
     """Hasil pemeriksaan jenis dokumen per file, disimpan di raw_json untuk verifikasi."""
-    return [{"file": name, "is_invoice": p.is_invoice, "document_type": p.document_type,
+    return [{"file": name, "doc_class": p.doc_class, "is_invoice": p.is_invoice, "document_type": p.document_type,
              "reason": p.not_invoice_reason} for name, p in zip(names, parts)]
 
 
-def _not_invoice_issues(extraction: Extraction) -> list[Issue]:
-    checks = extraction.raw_json.get("document_checks") if isinstance(extraction.raw_json, dict) else None
-    issues = []
-    for c in checks or []:
-        if c.get("is_invoice") is False:
-            kind = f" (terbaca sebagai: {c['document_type']})" if c.get("document_type") else ""
-            reason = f" {c['reason'].rstrip('.')}." if c.get("reason") else ""
-            issues.append(Issue(IssueCode.NOT_AN_INVOICE, None,
-                                f"File {c.get('file') or 'ini'} bukan invoice{kind}.{reason} Unggah ulang pengajuan "
-                                "hanya dengan file invoice/tagihan dari vendor."))
-    return issues
+def file_class(check: dict) -> str:
+    """Kelas file; data lama (sebelum klasifikasi 4 kelas) hanya punya is_invoice."""
+    return check.get("doc_class") or (INVOICE if check.get("is_invoice") is not False else IRRELEVANT)
+
+
+def classification(extraction: Extraction | None) -> dict | None:
+    """Ringkasan klasifikasi untuk layar detail: kelas dokumen, per file, dan keputusan reviewer."""
+    raw = extraction.raw_json if extraction and isinstance(extraction.raw_json, dict) else {}
+    checks = raw.get("document_checks") or []
+    if not checks:
+        return None
+    classes = [file_class(c) for c in checks]
+    overall = next((k for k in (IRRELEVANT, UNCERTAIN, RECEIPT) if k in classes), INVOICE)
+    return {"doc_class": overall, "files": [{**c, "doc_class": file_class(c)} for c in checks],
+            "decision": raw.get("classification_decision")}
+
+
+def _classification_issues(extraction: Extraction) -> tuple[list[Issue], bool]:
+    """(kendala klasifikasi, tolak?) Tidak relevan → NOT_AN_INVOICE dan verifikasi lain dilewati.
+    Struk/nota → RECEIPT_NOT_INVOICE; meragukan → NEEDS_MANUAL_REVIEW; datanya tetap diverifikasi sebagai
+    draft supaya kekurangan terlihat. Keputusan Finance Reviewer (classification_decision) menutup keduanya."""
+    info = classification(extraction)
+    if info is None:
+        return [], False
+    decision = (info["decision"] or {}).get("decision")
+    rejected, issues = [], []
+    for c in info["files"]:
+        kind = f" (terbaca sebagai: {c['document_type']})" if c.get("document_type") else ""
+        reason = f" {c['reason'].rstrip('.')}." if c.get("reason") else ""
+        name = c.get("file") or "ini"
+        if c["doc_class"] == IRRELEVANT:
+            rejected.append(Issue(IssueCode.NOT_AN_INVOICE, None,
+                                  f"File {name} ditolak karena bukan dokumen tagihan{kind}.{reason} Unggah ulang pengajuan "
+                                  "hanya dengan file invoice/tagihan dari vendor."))
+        elif decision in ("INVOICE", "RECEIPT_ACCEPTED"):
+            continue
+        elif c["doc_class"] == RECEIPT:
+            issues.append(Issue(IssueCode.RECEIPT_NOT_INVOICE, None,
+                                f"File {name} adalah struk/nota pembelian{kind}, bukan invoice resmi vendor.{reason} Datanya "
+                                "disusun sebagai draft. Minta invoice resmi ke vendor dan unggah ulang, atau Finance "
+                                "Reviewer menerimanya sebagai dasar pembayaran setelah data wajib lengkap dan rekening "
+                                "terverifikasi."))
+        elif c["doc_class"] == UNCERTAIN:
+            issues.append(Issue(IssueCode.NEEDS_MANUAL_REVIEW, None,
+                                f"Jenis dokumen {name} meragukan{kind}.{reason} Finance Reviewer akan memeriksanya secara "
+                                "manual."))
+    return (rejected, True) if rejected else (issues, False)
 
 
 def _save_extraction(db, doc: Document, data: ExtractedInvoice, duration_ms: int) -> Extraction:
@@ -187,15 +226,20 @@ def run_verification(db, doc: Document) -> list:
         account_name=extraction.account_name,
         subtotals=[line.subtotal for line in extraction.line_items],
     )
-    not_invoice = _not_invoice_issues(extraction)
-    if not_invoice:
-        # Pemeriksaan data invoice tidak relevan bila ada file yang bukan invoice
+    class_issues, rejected = _classification_issues(extraction)
+    if rejected:
+        # Pemeriksaan data tidak relevan bila ada file yang bukan dokumen tagihan
         _resolve_open_issues(db, doc)
-        for issue in not_invoice:
+        for issue in class_issues:
             db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field, message=issue.message))
         db.flush()
-        return not_invoice
-    issues = verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction))
+        return class_issues
+    issues = class_issues + verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction))
+    db.flush()  # vendor_id baru dipakai pemeriksaan rekening
+    db.refresh(doc, ["vendor"])
+    account = check_account(db, doc)
+    if account.state == MISMATCH:
+        issues.append(Issue(IssueCode.ACCOUNT_MISMATCH, "account_no", account.message))
     if _same_batch_duplicate(doc):
         issues.append(Issue(IssueCode.POSSIBLE_DUPLICATE, "invoice_no",
                             "Ada nomor invoice yang sama lebih dari sekali dalam pengajuan ini. Periksa apakah "

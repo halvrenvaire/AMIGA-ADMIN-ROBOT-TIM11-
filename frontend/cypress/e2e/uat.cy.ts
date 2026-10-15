@@ -48,6 +48,8 @@ describe("UAT AMIGA Robot Admin", () => {
 
     reviewerOf().then((reviewer) => {
       cy.visitAs(reviewer, `/dokumen/${docs.normal.id}`);
+      // Rekening vendor belum terverifikasi di data E2E: reviewer wajib mengonfirmasi pengecekan
+      cy.get(".account-confirm input[type=checkbox]").check();
       cy.contains(".decision button", "Setujui").click();
       cy.contains(".alert", "Disetujui. Voucher");
       badge().should("have.text", "Disetujui");
@@ -104,6 +106,8 @@ describe("UAT AMIGA Robot Admin", () => {
   it("UAT 5 — Segregation of Duties: pengunggah tidak bisa menyetujui, dialihkan otomatis", () => {
     upload("multi@amiga.test", "05_normal_jasa.pdf", "sod");
     waitStatus("Siap ditinjau");
+    // Rekening vendor belum terverifikasi di data E2E: reviewer wajib mengonfirmasi pengecekan
+    cy.get(".account-confirm input[type=checkbox]").check();
     cy.contains(".decision button", "Setujui").click();
     cy.contains(".alert", "Segregation of Duties").should("contain.text", "dialihkan");
     badge().should("have.text", "Siap ditinjau");

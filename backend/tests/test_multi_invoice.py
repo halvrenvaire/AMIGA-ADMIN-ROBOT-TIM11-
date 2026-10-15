@@ -101,7 +101,8 @@ def test_pdf_that_is_not_an_invoice_is_an_exception(extractor):
     assert doc["status"] == "EXCEPTION"
     # Hanya kendala "bukan invoice", tanpa daftar data yang hilang
     assert codes(doc) == [("NOT_AN_INVOICE", None)]
-    assert "inv1.pdf bukan invoice (terbaca sebagai: Surat lamaran). Berisi lamaran kerja." in doc["issues"][0]["message"]
+    assert "inv1.pdf ditolak karena bukan dokumen tagihan (terbaca sebagai: Surat lamaran). Berisi lamaran kerja." \
+        in doc["issues"][0]["message"]
 
 
 def test_non_invoice_file_in_batch_is_named(extractor):

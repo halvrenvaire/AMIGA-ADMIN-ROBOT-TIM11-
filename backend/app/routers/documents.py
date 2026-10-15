@@ -26,7 +26,10 @@ from app.schemas.schemas import (
 )
 from app.services import audit_service, signer_service, storage
 from app.services.access_rules import accessible_client_ids
-from app.services.document_processing import PIC_FIELDS, parse_pic_value, process_document, set_status
+from app.services.account_check import check_account
+from app.services.document_processing import (
+    PIC_FIELDS, classification, parse_pic_value, process_document, set_status,
+)
 
 router = APIRouter(prefix="/documents", tags=["Dokumen Invoice"])
 
@@ -81,6 +84,8 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         signers=doc.signers or [],
         files=[DocumentFileOut.model_validate(f) for f in doc.files],
         cancellation=_cancellation(db, doc),
+        classification=classification(doc.extraction),
+        account_check=vars(check_account(db, doc)) if doc.extraction else None,
     )
 
 

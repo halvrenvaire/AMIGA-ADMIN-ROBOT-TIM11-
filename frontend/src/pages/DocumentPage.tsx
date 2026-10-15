@@ -4,6 +4,7 @@ import { Ban, CheckCircle2, FileClock, Plus, Receipt, RotateCcw, Save, Trash2, U
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { AiProcessingCard, AiResultCard, AiScanOverlay } from "../components/AiProcessing";
+import { AccountCheckBox, ClassificationPanel } from "../components/DocumentPreview";
 import { ReassignModal } from "../components/ReassignModal";
 import { SignerPicker } from "../components/SignerPicker";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
@@ -156,8 +157,10 @@ export function DocumentPage() {
 
           {processing && <AiProcessingCard doc={d} />}
           {!processing && !resultClosed && d.extraction && (fresh || d.status === "READY_FOR_REVIEW" || d.status === "EXCEPTION") && (
-            <AiResultCard doc={d} fresh={fresh} onClose={() => setResultClosed(true)} />
+            <AiResultCard doc={d} onClose={() => setResultClosed(true)} />
           )}
+          <ClassificationPanel doc={d} canDecide={isReviewer && d.status === "EXCEPTION"}
+                               onDecided={(n, text) => update(n, { kind: "ok", text })} />
 
           {d.issues.length > 0 && (
             <section className="card panel">
@@ -213,6 +216,7 @@ function ReadOnlyData({ doc }: { doc: DocumentDetail }) {
         ))}
       </dl>
       <LinesTable lines={toLines(ex)} total={ex.total} />
+      {doc.account_check && <AccountCheckBox check={doc.account_check} />}
     </section>
   );
 }
@@ -264,7 +268,12 @@ function ReviewForm({ doc, onChange, onNotice }: {
   const [lines, setLines] = useState(initial.lines);
   const [busy, setBusy] = useState(false);
   const [returning, setReturning] = useState(false);
-  useEffect(() => { setFields(initial.fields); setLines(initial.lines); }, [initial]);
+  // Rekening yang belum terverifikasi wajib dicek manual dan dikonfirmasi sebelum menyetujui
+  const [accountConfirmed, setAccountConfirmed] = useState(false);
+  const [accountNote, setAccountNote] = useState("");
+  const account = doc.account_check;
+  const needsConfirm = account?.state === "UNVERIFIED";
+  useEffect(() => { setFields(initial.fields); setLines(initial.lines); setAccountConfirmed(false); }, [initial]);
 
   const dirty = JSON.stringify({ fields, lines }) !== JSON.stringify(initial);
   const flags = flagged(doc.issues);
@@ -296,7 +305,8 @@ function ReviewForm({ doc, onChange, onNotice }: {
   async function approve() {
     setBusy(true);
     try {
-      const next = await api.post<DocumentDetail>(`/documents/${doc.id}/approve`);
+      const next = await api.post<DocumentDetail>(`/documents/${doc.id}/approve`,
+                                                  { account_confirmed: accountConfirmed, account_note: accountNote.trim() || null });
       onChange(next, { kind: "ok", text: `Disetujui. Voucher ${next.voucher?.voucher_no} sudah dibuat.` });
     } catch (e) {
       // Penolakan SoD: dokumen sudah dialihkan otomatis oleh sistem
@@ -348,13 +358,27 @@ function ReviewForm({ doc, onChange, onNotice }: {
       <div className="section-title">Data pembayaran</div>
       <div className="grid-2">{PAYMENT_FIELDS.map(fieldInput)}</div>
       <small className="muted">Cek nomor rekening digit per digit dengan PDF (SOP 7.4).</small>
+      {account && <AccountCheckBox check={account} />}
+      {needsConfirm && !dirty && (
+        <div className="account-confirm">
+          <label className="toggle" style={{ alignItems: "flex-start" }}>
+            <input type="checkbox" checked={accountConfirmed} onChange={(e) => setAccountConfirmed(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>Saya sudah mencocokkan rekening <b className="mono">{fields.account_no || "-"}</b> dengan sumber tepercaya
+              (mis. konfirmasi langsung ke vendor), bukan hanya dari dokumen atau isian PIC.</span>
+          </label>
+          <input className="input" placeholder="Cara pengecekan (opsional), mis. telepon bagian keuangan vendor" value={accountNote}
+                 onChange={(e) => setAccountNote(e.target.value)} maxLength={500} aria-label="Catatan pengecekan rekening" />
+        </div>
+      )}
 
       <div className="decision">
         {dirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
         <button className="btn" disabled={busy || !dirty} onClick={save}><Save /> Simpan & verifikasi ulang</button>
         <button className="btn danger" disabled={busy} onClick={() => setReturning(true)}>Kembalikan ke PIC</button>
-        <button className="btn success" disabled={busy || dirty || doc.issues.length > 0} onClick={approve}
-                title={dirty ? "Simpan perubahan dulu" : doc.issues.length ? "Masih ada kendala" : undefined}>
+        <button className="btn success" onClick={approve}
+                disabled={busy || dirty || doc.issues.length > 0 || account?.state === "MISMATCH" || (needsConfirm && !accountConfirmed)}
+                title={dirty ? "Simpan perubahan dulu" : doc.issues.length ? "Masih ada kendala"
+                  : needsConfirm && !accountConfirmed ? "Konfirmasi pengecekan rekening dulu" : undefined}>
           <CheckCircle2 /> Setujui
         </button>
       </div>

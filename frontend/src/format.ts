@@ -29,7 +29,10 @@ export const ISSUE_LABEL: Record<IssueCode, string> = {
   EXTRACTION_FAILED: "AI gagal membaca",
   RETURNED_BY_REVIEWER: "Dikembalikan reviewer",
   VENDOR_MISMATCH: "Vendor/rekening berbeda",
-  NOT_AN_INVOICE: "Bukan invoice",
+  NOT_AN_INVOICE: "Dokumen tidak relevan",
+  RECEIPT_NOT_INVOICE: "Struk/nota, bukan invoice resmi",
+  NEEDS_MANUAL_REVIEW: "Perlu pemeriksaan manual",
+  ACCOUNT_MISMATCH: "Rekening tidak cocok",
 };
 
 export const FIELD_LABEL: Record<string, string> = {

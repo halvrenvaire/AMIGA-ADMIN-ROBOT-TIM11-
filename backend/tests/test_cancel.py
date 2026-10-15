@@ -25,7 +25,7 @@ def test_ready_document_can_be_cancelled_but_not_after_voucher(extractor):
     ready = detail(upload().json()["id"])
     assert ready["status"] == "READY_FOR_REVIEW"
     assert api(PIC).post(f"/documents/{ready['id']}/cancel", json=REASON).status_code == 200
-    reviewer_cannot = api("reviewer1@amiga.test").post(f"/documents/{ready['id']}/approve")
+    reviewer_cannot = api("reviewer1@amiga.test").post(f"/documents/{ready['id']}/approve", json={"account_confirmed": True})
     assert reviewer_cannot.status_code == 409
 
     extractor.result = invoice(invoice_no="INV-VOUCHER")

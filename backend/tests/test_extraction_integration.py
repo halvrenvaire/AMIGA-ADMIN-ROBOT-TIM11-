@@ -121,3 +121,18 @@ def test_subtotal_row_is_not_counted_twice(extractor):
 def test_receipts_and_vouchers_are_not_invoices(extractor, kind, title, body):
     result = extractor.extract(_text_pdf(title, body))
     assert result.is_invoice is False, (kind, result.raw)
+    # Struk → draft (data transaksi diekstrak); voucher pembayaran → tidak relevan
+    if kind == "struk kasir":
+        assert result.doc_class == "RECEIPT", result.raw
+        assert result.total == Decimal(70300) and result.account_no is None, result.raw
+    else:
+        assert result.doc_class == "IRRELEVANT", result.raw
+
+
+def test_purchase_note_without_change_line_is_a_receipt_draft(extractor):
+    body = ("NOTA PEMBELIAN No. 0457\nTanggal: 12-10-2026\nSemen 50kg   3 x 65.000   195.000\n"
+            "Paku 1kg   2 x 22.000   44.000\nTOTAL 239.000\nLUNAS - Terima kasih")
+    result = extractor.extract(_text_pdf("TOKO BANGUNAN SINAR JAYA", body))
+    assert result.doc_class == "RECEIPT", result.raw
+    assert result.total == Decimal(239000) and len(result.line_items) == 2, result.raw
+    assert result.account_no is None, result.raw  # tidak mengarang rekening

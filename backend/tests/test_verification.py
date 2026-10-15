@@ -135,18 +135,22 @@ def test_discount_is_always_negative():
 
 def test_document_type_overrides_inconsistent_is_invoice():
     inv = parse_response('{"is_invoice": true, "document_type": "Voucher Pembayaran Vendor", "line_items": []}')
-    assert inv.is_invoice is False and "Voucher Pembayaran Vendor" in inv.not_invoice_reason
-    assert parse_response('{"is_invoice": true, "document_type": "Struk kasir belanja"}').is_invoice is False
+    assert inv.doc_class == "IRRELEVANT" and "Voucher Pembayaran Vendor" in inv.not_invoice_reason
+    # Struk dengan data transaksi → draft (RECEIPT), bukan ditolak
+    receipt = parse_response('{"is_invoice": true, "document_type": "Struk kasir belanja", "total": "70.300"}')
+    assert receipt.doc_class == "RECEIPT" and receipt.is_invoice is False
     # Jenis yang memang tagihan tidak terpengaruh
-    assert parse_response('{"is_invoice": true, "document_type": "Faktur"}').is_invoice is True
-    assert parse_response('{"is_invoice": true, "document_type": "Invoice pembayaran"}').is_invoice is True
+    assert parse_response('{"is_invoice": true, "document_type": "Faktur", "vendor_name": "PT A"}').is_invoice is True
+    assert parse_response('{"is_invoice": true, "document_type": "Invoice pembayaran", "total": "10"}').is_invoice is True
 
 
 def test_change_line_marks_cashier_receipt():
     inv = parse_response('{"is_invoice": true, "document_type": "Invoice", "total": "70.300", "line_items": ['
                          '{"kind": "item", "description": "GULA", "subtotal": "70.300"},'
                          '{"kind": "summary", "description": "KEMBALI", "subtotal": "29.700"}]}')
-    assert inv.is_invoice is False and inv.document_type == "Struk kasir"
+    assert inv.doc_class == "RECEIPT" and inv.document_type == "Struk kasir"
+    # Data transaksinya tetap diekstrak untuk Preview Draft
+    assert inv.total == Decimal(70300) and inv.line_items[0].description == "GULA"
 
 
 def test_discount_recognised_by_description_even_if_labelled_fee():

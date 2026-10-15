@@ -31,6 +31,8 @@ ACTION_LABEL = {
     "SOD_REJECTED": "Persetujuan ditolak (SoD)", "REVIEWER_REASSIGNED": "Reviewer dialihkan",
     "DUPLICATE_DISMISSED": "Ditandai bukan duplikat", "SIGNERS_CHANGED": "Penanda tangan diubah",
     "DOCUMENT_CANCELLED": "Pengajuan dibatalkan", "E_SIGNATURE_APPLIED": "Tanda tangan elektronik dibubuhkan",
+    "CLASSIFICATION_DECIDED": "Klasifikasi diputuskan reviewer",
+    "ACCOUNT_CONFIRMED_BY_REVIEWER": "Rekening dikonfirmasi reviewer",
 }
 ROLE_LABEL = {
     Role.PIC_KLIEN: "PIC Klien", Role.INTAKE_SUPPORT: "Intake Support", Role.FINANCE_REVIEWER: "Finance Reviewer",

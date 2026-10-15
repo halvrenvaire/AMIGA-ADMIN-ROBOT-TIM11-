@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from typing import Literal
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -329,6 +330,9 @@ class DocumentDetail(DocumentSummary):
     signers: list[Signer] = []
     files: list[DocumentFileOut] = []  # file invoice yang digabung dalam voucher ini
     cancellation: CancellationOut | None = None  # siapa, kapan, dan alasan bila dibatalkan
+    # Klasifikasi AI (invoice / struk / tidak relevan / meragukan) dan pemeriksaan rekening
+    classification: dict | None = None
+    account_check: dict | None = None
 
 
 class FixRequest(BaseModel):
@@ -351,6 +355,18 @@ class ReviewUpdate(BaseModel):
     `line_items` bila dikirim menggantikan seluruh rincian."""
     fields: dict[str, str | None] = {}
     line_items: list[LineItemIn] | None = None
+
+
+class ApproveRequest(BaseModel):
+    """Rekening yang belum terverifikasi terhadap data referensi wajib dikonfirmasi reviewer."""
+    account_confirmed: bool = False
+    account_note: str | None = Field(None, max_length=500)
+
+
+class ClassificationDecision(BaseModel):
+    """Keputusan manual Finance Reviewer atas dokumen struk/nota atau meragukan."""
+    decision: Literal["INVOICE", "RECEIPT_ACCEPTED", "IRRELEVANT"]
+    reason: str = Field(min_length=5, max_length=1000)
 
 
 class ReasonRequest(BaseModel):
@@ -426,6 +442,9 @@ class VendorOut(VendorIn):
     documents: int = 0
     created_at: datetime
     updated_at: datetime
+    # Rekening diverifikasi Finance Reviewer (data referensi tepercaya); None = belum
+    verified_at: datetime | None = None
+    verified_by: str | None = None
 
 
 class VendorCheck(BaseModel):

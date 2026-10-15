@@ -41,8 +41,14 @@ class IssueCode(str, enum.Enum):
     RETURNED_BY_REVIEWER = "RETURNED_BY_REVIEWER"
     # Beberapa invoice dalam satu voucher harus untuk satu vendor dan satu rekening tujuan
     VENDOR_MISMATCH = "VENDOR_MISMATCH"
-    # AI (Invoice Verification Officer) menilai PDF bukan invoice
+    # AI (Invoice Verification Officer) menilai PDF bukan invoice dan tidak relevan: ditolak
     NOT_AN_INVOICE = "NOT_AN_INVOICE"
+    # Struk/bon/nota pembelian: data diekstrak sebagai draft, tetapi bukan invoice resmi vendor
+    RECEIPT_NOT_INVOICE = "RECEIPT_NOT_INVOICE"
+    # Jenis dokumen meragukan atau datanya terlalu sedikit: Finance Reviewer memeriksa manual
+    NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
+    # Rekening berbeda dengan rekening vendor yang sudah diverifikasi Finance Reviewer
+    ACCOUNT_MISMATCH = "ACCOUNT_MISMATCH"
 
 
 def _uuid() -> uuid.UUID:
@@ -132,6 +138,12 @@ class Vendor(Base):
     account_name: Mapped[str | None] = mapped_column(String(200))
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Data referensi tepercaya: rekening vendor diverifikasi Finance Reviewer (bukan pendaftarnya).
+    # Direset otomatis bila data bank vendor diubah.
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verified_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Siapa yang terakhir mengisi/mengubah data bank; tidak boleh memverifikasinya sendiri (SoD)
+    bank_updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

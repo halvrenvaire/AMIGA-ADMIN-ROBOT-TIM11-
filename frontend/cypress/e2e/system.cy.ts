@@ -224,6 +224,8 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.a.id}`);
       reviewer().then((email) => {
         cy.visitAs(email, `/dokumen/${docs.a.id}`);
+        // Rekening vendor belum terverifikasi di data E2E: reviewer wajib mengonfirmasi pengecekan
+        cy.get(".account-confirm input[type=checkbox]").check();
         cy.contains(".decision button", "Setujui").click();
         cy.contains(".alert", /Disetujui\. Voucher VCH\/\d{4}\/\d{2}\/\d{4}/);
       });

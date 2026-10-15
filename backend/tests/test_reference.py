@@ -24,7 +24,7 @@ def add_signatory(kind, name, position, default=True, email="pic.alpha@amiga.tes
 
 
 def approve(doc):
-    return api(NAMES[doc["assigned_reviewer"]]).post(f"/documents/{doc['id']}/approve").json()
+    return api(NAMES[doc["assigned_reviewer"]]).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).json()
 
 
 # --- Vendor ---

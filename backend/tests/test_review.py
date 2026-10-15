@@ -44,7 +44,7 @@ def pdf_text(data: bytes) -> str:
 def test_uat1_normal_flow_ends_sent_to_client(extractor):
     doc = ready_doc()
     started = time.monotonic()
-    r = reviewer_of(doc).post(f"/documents/{doc['id']}/approve")
+    r = reviewer_of(doc).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
     assert r.status_code == 200
     assert time.monotonic() - started <= 3  # FR-5.1
     body = r.json()
@@ -72,21 +72,21 @@ def test_uat1_normal_flow_ends_sent_to_client(extractor):
 def test_reviewer_download_does_not_hand_over(extractor, email):
     # multi@ juga Intake Support, tetapi bukan pengunggah dokumen ini
     doc = ready_doc()
-    reviewer_of(doc).post(f"/documents/{doc['id']}/approve")
+    reviewer_of(doc).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
     api(email).get(f"/documents/{doc['id']}/voucher", params={"download": True})
     assert detail(doc["id"])["status"] == "AMIGA_REVIEWED"
 
 
 def test_intake_uploader_download_hands_over(extractor):
     doc = ready_doc(email="intake@amiga.test")
-    reviewer_of(doc).post(f"/documents/{doc['id']}/approve")
+    reviewer_of(doc).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
     api("intake@amiga.test").get(f"/documents/{doc['id']}/voucher", params={"download": True})
     assert detail(doc["id"])["status"] == "SENT_TO_CLIENT"
 
 
 def test_service_lead_cannot_open_voucher(extractor):
     doc = ready_doc()
-    reviewer_of(doc).post(f"/documents/{doc['id']}/approve")
+    reviewer_of(doc).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
     assert api("lead@amiga.test").get(f"/documents/{doc['id']}/voucher").status_code == 403
 
 
@@ -95,7 +95,7 @@ def test_voucher_numbers_are_sequential(extractor):
     for n in range(2):
         extractor.result = invoice(invoice_no=f"INV-50{n}")
         doc = ready_doc()
-        numbers.append(reviewer_of(doc).post(f"/documents/{doc['id']}/approve").json()["voucher"]["voucher_no"])
+        numbers.append(reviewer_of(doc).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).json()["voucher"]["voucher_no"])
     first, second = (int(n.rsplit("/", 1)[1]) for n in numbers)
     assert second == first + 1
 
@@ -103,21 +103,21 @@ def test_voucher_numbers_are_sequential(extractor):
 @pytest.mark.parametrize("email", ["admin@amiga.test", "lead@amiga.test", "pic.alpha@amiga.test"])
 def test_only_finance_reviewer_can_approve(extractor, email):
     doc = ready_doc()
-    assert api(email).post(f"/documents/{doc['id']}/approve").status_code == 403
+    assert api(email).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 403
     assert detail(doc["id"])["status"] == "READY_FOR_REVIEW"
 
 
 def test_cannot_approve_exception_document(extractor):
     extractor.result = invoice(account_no=None)
     doc_id = upload().json()["id"]
-    assert api("reviewer1@amiga.test").post(f"/documents/{doc_id}/approve").status_code == 409
+    assert api("reviewer1@amiga.test").post(f"/documents/{doc_id}/approve", json={"account_confirmed": True}).status_code == 409
 
 
 # --- UAT 5: Segregation of Duties ---
 
 def test_uat5_uploader_cannot_approve_and_document_is_reassigned(extractor):
     doc = ready_doc(email="multi@amiga.test")  # Intake Support + Finance Reviewer
-    r = api("multi@amiga.test").post(f"/documents/{doc['id']}/approve")
+    r = api("multi@amiga.test").post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
     assert r.status_code == 403
     assert "Segregation of Duties" in r.json()["detail"]
 
@@ -127,7 +127,7 @@ def test_uat5_uploader_cannot_approve_and_document_is_reassigned(extractor):
     assert after["assigned_reviewer"] in r.json()["detail"]
     assert [a.action for a in audit(doc["id"])][-2:] == ["SOD_REJECTED", "REVIEWER_REASSIGNED"]
 
-    assert reviewer_of(after).post(f"/documents/{doc['id']}/approve").json()["status"] == "AMIGA_REVIEWED"
+    assert reviewer_of(after).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).json()["status"] == "AMIGA_REVIEWED"
 
 
 # --- UAT 7: koreksi tercatat di jejak audit; field gagal verifikasi ditandai ---
@@ -139,7 +139,7 @@ def test_uat7_reviewer_correction_is_audited_and_reverified(extractor):
     assert r.status_code == 200
     assert [i["code"] for i in r.json()["issues"]] == ["CALCULATION_DISCREPANCY"]
     assert r.json()["status"] == "READY_FOR_REVIEW"
-    assert reviewer.post(f"/documents/{doc['id']}/approve").status_code == 409
+    assert reviewer.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 409
 
     log = audit(doc["id"], "CORRECTED_BY_REVIEWER")[-1]
     assert (log.field, Decimal(log.old_value), log.new_value) == ("total", Decimal(900000), "950000")
@@ -152,7 +152,7 @@ def test_uat7_reviewer_correction_is_audited_and_reverified(extractor):
     r = reviewer.put(f"/documents/{doc['id']}/extraction", json={"line_items": lines})
     assert r.json()["issues"] == []
     assert audit(doc["id"], "CORRECTED_BY_REVIEWER")[-1].field == "line_items[3].subtotal"
-    assert reviewer.post(f"/documents/{doc['id']}/approve").status_code == 200
+    assert reviewer.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 200
 
 
 def test_correction_rejects_invalid_values(extractor):

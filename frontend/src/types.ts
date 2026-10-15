@@ -7,7 +7,21 @@ export type DocStatus =
 
 export type IssueCode =
   | "MISSING_EVIDENCE" | "CALCULATION_DISCREPANCY" | "POSSIBLE_DUPLICATE" | "EXTRACTION_FAILED"
-  | "RETURNED_BY_REVIEWER" | "VENDOR_MISMATCH" | "NOT_AN_INVOICE";
+  | "RETURNED_BY_REVIEWER" | "VENDOR_MISMATCH" | "NOT_AN_INVOICE"
+  | "RECEIPT_NOT_INVOICE" | "NEEDS_MANUAL_REVIEW" | "ACCOUNT_MISMATCH";
+
+/** Klasifikasi AI: invoice resmi, struk/nota (draft), tidak relevan (ditolak), meragukan (cek manual). */
+export type DocClass = "INVOICE" | "RECEIPT" | "IRRELEVANT" | "UNCERTAIN";
+export interface Classification {
+  doc_class: DocClass;
+  files: { file: string; doc_class: DocClass; document_type: string | null; reason: string | null }[];
+  decision: { decision: "INVOICE" | "RECEIPT_ACCEPTED" | "IRRELEVANT"; by: string; at: string; reason: string } | null;
+}
+/** Pemeriksaan rekening terhadap data vendor yang diverifikasi Finance Reviewer. */
+export interface AccountCheck {
+  state: "VERIFIED" | "MISMATCH" | "UNVERIFIED" | "MISSING";
+  message: string; source: "AI" | "PIC"; vendor: string | null; verified_by: string | null;
+}
 
 export interface ClientRef { id: string; name: string }
 export interface ClientOverview extends ClientRef { created_at: string; pics: string[]; intakes: string[] }
@@ -79,6 +93,8 @@ export interface DocumentDetail extends DocumentSummary {
   signers: Signer[];
   files: { position: number; original_filename: string; page_count: number; read_at: string | null }[];
   cancellation?: { by: string; at: string; reason: string } | null;
+  classification?: Classification | null;
+  account_check?: AccountCheck | null;
 }
 
 export interface AuditItem {
@@ -154,6 +170,8 @@ export interface Vendor {
   notes: string | null;
   is_active: boolean;
   documents: number;
+  verified_at: string | null;
+  verified_by: string | null;
   created_at: string;
   updated_at: string;
 }

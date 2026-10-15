@@ -5,6 +5,7 @@ Sistem menolak persetujuan itu dan mengalihkan dokumen otomatis ke reviewer lain
 """
 import time
 import uuid
+from datetime import datetime, timezone
 from decimal import InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,7 +17,10 @@ from app.auth import get_current_user, require_roles
 from app.db import get_db
 from app.models import AuditLog, DocStatus, Document, IssueCode, LineItem, Role, User, ValidationIssue
 from app.routers.documents import _detail, _get_document
-from app.schemas.schemas import AuditItem, DocumentDetail, ReasonRequest, ReviewUpdate
+from app.schemas.schemas import (
+    ApproveRequest, AuditItem, ClassificationDecision, DocumentDetail, ReasonRequest, ReviewUpdate,
+)
+from app.services.account_check import MISMATCH, UNVERIFIED, VERIFIED, check_account
 from app.services import audit_service, storage
 from app.services.access_rules import can_access_client
 from app.services.document_processing import (
@@ -105,8 +109,10 @@ def correct_extraction(document_id: uuid.UUID, body: ReviewUpdate, user: User = 
 
 
 @router.post("/{document_id}/approve", response_model=DocumentDetail)
-def approve(document_id: uuid.UUID, user: User = Depends(reviewer_only), db: Session = Depends(get_db)):
-    """Setujui (FR-4.3–4.5). Sistem mengecek SoD; bila lolos → AMIGA_REVIEWED dan voucher dibuat."""
+def approve(document_id: uuid.UUID, body: ApproveRequest | None = None, user: User = Depends(reviewer_only),
+            db: Session = Depends(get_db)):
+    """Setujui (FR-4.3–4.5). Sistem mengecek SoD dan rekening; bila lolos → AMIGA_REVIEWED dan voucher dibuat."""
+    body = body or ApproveRequest()
     doc = _get_document(db, user, document_id)
     _require_status(doc, DocStatus.READY_FOR_REVIEW)
     open_issues = _open_issues(db, doc)
@@ -114,6 +120,14 @@ def approve(document_id: uuid.UUID, user: User = Depends(reviewer_only), db: Ses
         codes = ", ".join(sorted({i.code.value for i in open_issues}))
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Masih ada kendala ({codes}). Koreksi datanya atau kembalikan ke PIC.")
+    # Rekening dicek ulang saat menyetujui: data vendor bisa diverifikasi/diubah setelah verifikasi sistem
+    account = check_account(db, doc)
+    if account.state == MISMATCH:
+        raise HTTPException(status.HTTP_409_CONFLICT, account.message)
+    if account.state == UNVERIFIED and not body.account_confirmed:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"Rekening belum terverifikasi: {account.message} Cocokkan rekening dengan sumber tepercaya "
+                            "(mis. konfirmasi langsung ke vendor), lalu centang konfirmasi pengecekan rekening.")
 
     submitters = submitter_ids(db, doc)
     if user.id in submitters:
@@ -132,6 +146,10 @@ def approve(document_id: uuid.UUID, user: User = Depends(reviewer_only), db: Ses
                             "datanya), sesuai Segregation of Duties. "
                             f"Dokumen otomatis dialihkan ke {_name(db, doc.assigned_reviewer_id)}.")
 
+    if account.state == UNVERIFIED:
+        audit_service.record(db, user, "ACCOUNT_CONFIRMED_BY_REVIEWER", document_id=doc.id, client_id=doc.client_id,
+                             field="account_no", new_value=doc.extraction.account_no if doc.extraction else None,
+                             note=(body.account_note or "").strip() or "Rekening dicek manual oleh Finance Reviewer")
     started = time.monotonic()
     set_status(db, doc, DocStatus.AMIGA_REVIEWED, "Disetujui Finance Reviewer")
     audit_service.record(db, user, "APPROVED", document_id=doc.id, client_id=doc.client_id,
@@ -184,6 +202,59 @@ def dismiss_duplicate(document_id: uuid.UUID, body: ReasonRequest, user: User = 
     audit_service.record(db, user, "DUPLICATE_DISMISSED", document_id=doc.id, client_id=doc.client_id,
                          note=body.reason.strip())
     send_to_review(db, doc, "Ditandai bukan duplikat")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.post("/{document_id}/classification", response_model=DocumentDetail)
+def decide_classification(document_id: uuid.UUID, body: ClassificationDecision, user: User = Depends(reviewer_only),
+                          db: Session = Depends(get_db)):
+    """Keputusan manual atas struk/nota (RECEIPT_NOT_INVOICE) atau dokumen meragukan (NEEDS_MANUAL_REVIEW).
+
+    - INVOICE: dokumen meragukan ternyata invoice; diverifikasi ulang seperti invoice biasa.
+    - RECEIPT_ACCEPTED: struk/nota diterima sebagai dasar pembayaran. Hanya bila tidak ada kendala lain
+      (data wajib lengkap) DAN rekening cocok dengan vendor terverifikasi. Tetap harus disetujui di peninjauan.
+    - IRRELEVANT: dokumen ditolak sebagai tidak relevan.
+    Tidak oleh pihak pengaju (SoD). Voucher tidak pernah terbit dari langkah ini."""
+    doc = _get_document(db, user, document_id)
+    _require_status(doc, DocStatus.EXCEPTION)
+    codes = {i.code for i in _open_issues(db, doc)}
+    if not codes & {IssueCode.RECEIPT_NOT_INVOICE, IssueCode.NEEDS_MANUAL_REVIEW}:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Hanya untuk dokumen struk/nota atau yang perlu pemeriksaan manual.")
+    if user.id in submitter_ids(db, doc):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Pihak pengaju (pengunggah atau yang memperbaiki data) tidak boleh memutuskan klasifikasi "
+                            "dokumen ini (Segregation of Duties).")
+    if body.decision == "INVOICE" and IssueCode.RECEIPT_NOT_INVOICE in codes:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "Struk/nota tidak bisa dijadikan invoice resmi. Terima sebagai dasar pembayaran (bila "
+                            "syarat terpenuhi) atau minta invoice resmi ke vendor.")
+    extraction = doc.extraction
+    if body.decision == "RECEIPT_ACCEPTED":
+        others = codes - {IssueCode.RECEIPT_NOT_INVOICE, IssueCode.NEEDS_MANUAL_REVIEW}
+        if others:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Struk belum bisa diterima: masih ada kendala lain ({', '.join(sorted(c.value for c in others))}). "
+                                "Data wajib harus lengkap lebih dulu.")
+        account = check_account(db, doc)
+        if account.state != VERIFIED:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Struk belum bisa diterima: rekening belum terverifikasi. {account.message} Verifikasi "
+                                "data rekening vendor di Data Referensi lebih dulu.")
+    raw = dict(extraction.raw_json or {})
+    if body.decision == "IRRELEVANT":
+        raw["document_checks"] = [{**c, "doc_class": "IRRELEVANT", "reason": body.reason.strip()}
+                                  for c in raw.get("document_checks") or []]
+    raw["classification_decision"] = {"decision": body.decision, "by": user.full_name,
+                                      "at": datetime.now(timezone.utc).isoformat(), "reason": body.reason.strip()}
+    extraction.raw_json = raw
+    audit_service.record(db, user, "CLASSIFICATION_DECIDED", document_id=doc.id, client_id=doc.client_id,
+                         new_value=body.decision, note=body.reason.strip())
+    issues = run_verification(db, doc)
+    if issues:
+        set_status(db, doc, DocStatus.EXCEPTION, "Keputusan klasifikasi: " + ", ".join(sorted({i.code.value for i in issues})))
+    else:
+        send_to_review(db, doc, f"Keputusan klasifikasi {body.decision}")
     db.commit()
     return _detail(db, doc)
 

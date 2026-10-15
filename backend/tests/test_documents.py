@@ -49,6 +49,7 @@ def invoice(**kw) -> ExtractedInvoice:
     )
     for key, value in kw.items():
         setattr(base, key, value)
+    base.__post_init__()  # selaraskan is_invoice dan doc_class setelah field diganti
     return base
 
 

@@ -36,7 +36,7 @@ def test_dual_role_user_who_fixed_the_data_cannot_review_it(extractor):
     assert d["status"] == "READY_FOR_REVIEW"
     assert d["assigned_reviewer"] != NAMES["multi@amiga.test"]
 
-    r = yoga.post(f"/documents/{doc['id']}/approve")
+    r = yoga.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
     assert r.status_code == 403 and "pihak pengaju" in r.json()["detail"]
     assert detail(doc["id"])["status"] == "READY_FOR_REVIEW"
 

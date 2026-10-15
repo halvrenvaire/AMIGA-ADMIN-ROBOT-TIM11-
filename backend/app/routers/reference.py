@@ -27,6 +27,9 @@ vendor_editors = require_roles(Role.PIC_KLIEN, Role.INTAKE_SUPPORT)
 signatory_editors = require_roles(Role.PIC_KLIEN)
 VENDOR_FIELDS = ("name", "npwp", "address", "contact_name", "phone", "email",
                  "bank_name", "account_no", "account_name", "notes")
+# Perubahan field ini membatalkan verifikasi rekening vendor
+BANK_FIELDS = ("name", "bank_name", "account_no", "account_name")
+reviewer_only = require_roles(Role.FINANCE_REVIEWER)
 
 
 def _clean(value: str | None) -> str | None:
@@ -36,9 +39,11 @@ def _clean(value: str | None) -> str | None:
 
 def _vendor_out(db: Session, v: Vendor) -> VendorOut:
     docs = db.scalar(select(func.count()).select_from(Document).where(Document.vendor_id == v.id))
+    verifier = db.get(User, v.verified_by) if v.verified_by else None
     return VendorOut(**{f: getattr(v, f) for f in VENDOR_FIELDS}, id=v.id, is_active=v.is_active,
                      client=ClientRef(id=v.client.id, name=v.client.name), documents=docs,
-                     created_at=v.created_at, updated_at=v.updated_at)
+                     created_at=v.created_at, updated_at=v.updated_at,
+                     verified_at=v.verified_at, verified_by=verifier.full_name if verifier else None)
 
 
 def _find_by_name(db: Session, client_id: uuid.UUID, name: str, exclude: uuid.UUID | None = None) -> Vendor | None:
@@ -99,7 +104,8 @@ def create_vendor(body: VendorCreate, user: User = Depends(vendor_editors), db: 
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Vendor \"{existing.name}\" sudah terdaftar. Gunakan data yang ada.")
     data = {f: _clean(getattr(body, f)) for f in VENDOR_FIELDS}
-    vendor = Vendor(**data, client_id=body.client_id, name_norm=normalize(data["name"]), created_by=user.id)
+    vendor = Vendor(**data, client_id=body.client_id, name_norm=normalize(data["name"]), created_by=user.id,
+                    bank_updated_by=user.id)
     db.add(vendor)
     db.flush()
     link_documents(db, vendor)
@@ -122,6 +128,12 @@ def update_vendor(vendor_id: uuid.UUID, body: VendorIn, user: User = Depends(ven
             audit_service.record(db, user, "VENDOR_UPDATED", client_id=vendor.client_id, field=f,
                                  old_value=old, new_value=new, note=vendor.name)
             setattr(vendor, f, new)
+            if f in BANK_FIELDS:
+                vendor.bank_updated_by = user.id
+                if vendor.verified_at is not None:
+                    vendor.verified_at = vendor.verified_by = None
+                    audit_service.record(db, user, "VENDOR_VERIFICATION_RESET", client_id=vendor.client_id,
+                                         field=f, note=f"{vendor.name}: data bank berubah, perlu diverifikasi ulang")
     vendor.name_norm = normalize(vendor.name)
     link_documents(db, vendor)
     db.commit()
@@ -140,6 +152,29 @@ def set_vendor_active(vendor_id: uuid.UUID, body: ActiveUpdate, user: User = Dep
                              client_id=vendor.client_id, note=vendor.name)
         db.commit()
         db.refresh(vendor)
+    return _vendor_out(db, vendor)
+
+
+@router.post("/vendors/{vendor_id}/verify", response_model=VendorOut)
+def verify_vendor(vendor_id: uuid.UUID, user: User = Depends(reviewer_only), db: Session = Depends(get_db)):
+    """Finance Reviewer menyatakan rekening vendor sudah dicek ke sumber tepercaya (mis. konfirmasi langsung ke
+    vendor). Menjadi acuan pemeriksaan rekening invoice. Tidak oleh pendaftar/pengubah terakhir data bank (SoD)."""
+    vendor = _get_vendor(db, user, vendor_id)
+    if not vendor.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Vendor nonaktif tidak bisa diverifikasi.")
+    if not (vendor.bank_name and vendor.account_no and vendor.account_name):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "Lengkapi nama bank, nomor rekening, dan nama pemilik rekening sebelum diverifikasi.")
+    if user.id in {vendor.created_by, vendor.bank_updated_by}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Anda yang mendaftarkan atau terakhir mengubah data bank vendor ini, jadi tidak boleh "
+                            "memverifikasinya sendiri (Segregation of Duties).")
+    vendor.verified_at = datetime.now(timezone.utc)
+    vendor.verified_by = user.id
+    audit_service.record(db, user, "VENDOR_VERIFIED", client_id=vendor.client_id, field="account_no",
+                         new_value=f"{vendor.bank_name} {vendor.account_no} a.n. {vendor.account_name}", note=vendor.name)
+    db.commit()
+    db.refresh(vendor)
     return _vendor_out(db, vendor)
 
 

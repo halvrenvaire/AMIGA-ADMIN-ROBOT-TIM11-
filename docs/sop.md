@@ -52,6 +52,11 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 | CALCULATION_DISCREPANCY | Kendala: jumlah rincian barang tidak sama dengan total invoice |
 | POSSIBLE_DUPLICATE | Kendala: ada invoice lain dengan nomor dan vendor yang sama |
 | RETURNED_BY_REVIEWER | Kendala: Finance Reviewer mengembalikan dokumen ke PIC Klien disertai alasan |
+| NOT_AN_INVOICE | Kendala: dokumen tidak relevan (bukan dokumen tagihan, mis. CV, surat, purchase order) dan ditolak |
+| RECEIPT_NOT_INVOICE | Kendala: dokumen adalah struk/bon/nota pembelian. Datanya disusun sebagai draft, tetapi bukan invoice resmi vendor |
+| NEEDS_MANUAL_REVIEW | Kendala: jenis dokumen meragukan atau datanya terlalu sedikit; Finance Reviewer memeriksa secara manual |
+| ACCOUNT_MISMATCH | Kendala: nomor rekening berbeda dengan rekening vendor yang sudah diverifikasi Finance Reviewer |
+| Vendor terverifikasi | Vendor di Data Referensi yang rekeningnya sudah dicek Finance Reviewer ke sumber tepercaya. Menjadi acuan pemeriksaan rekening |
 | Saluran | Asal pengajuan invoice sebelum diunggah ke sistem, misalnya Email atau WhatsApp. Hanya dicatat sebagai keterangan |
 | Segregation of Duties (SoD) | Aturan bahwa pengunggah dokumen tidak boleh menyetujui dokumen yang sama |
 
@@ -93,13 +98,19 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 
 1. Status berubah menjadi **PROCESSING** saat AI mulai membaca invoice.
-2. AI **hanya mengekstrak** data: vendor, nomor dan tanggal invoice, rincian barang, total, bank, nomor rekening, dan nama penerima. Target waktunya **≤ 15 detik** per dokumen. AI tidak memverifikasi dan tidak menyetujui.
-3. **Sistem** (bukan AI) menjalankan tiga verifikasi:
-   - nomor rekening ada → bila tidak, **MISSING_EVIDENCE**;
+2. AI **mengklasifikasikan** setiap file lebih dulu:
+   - **Invoice vendor** → lanjut ke ekstraksi dan verifikasi seperti biasa.
+   - **Struk, bon, atau nota pembelian** yang memuat data transaksi (barang, harga, kuantitas, total) → datanya diekstrak sebagai **Preview Draft** dengan kode **RECEIPT_NOT_INVOICE**. Struk/nota **tidak otomatis menjadi invoice resmi** dan voucher tidak terbit.
+   - **Dokumen tidak relevan** → langsung ditolak dengan kode **NOT_AN_INVOICE** beserta alasannya.
+   - **Dokumen meragukan atau tidak lengkap** → ditandai **NEEDS_MANUAL_REVIEW** untuk diperiksa Finance Reviewer.
+3. AI **hanya mengekstrak** data yang tertulis: vendor, nomor dan tanggal invoice, rincian barang, total, bank, nomor rekening, dan nama penerima. Data yang tidak ada dibiarkan kosong, **tidak ditebak**. Target waktunya **≤ 15 detik** per dokumen. AI tidak memverifikasi dan tidak menyetujui.
+4. **Sistem** (bukan AI) menjalankan verifikasi:
+   - data wajib ada, termasuk nomor rekening → bila tidak, **MISSING_EVIDENCE**;
    - jumlah rincian sama dengan total → bila tidak, **CALCULATION_DISCREPANCY**;
-   - tidak ada invoice lain dengan nomor dan vendor yang sama → bila ada, **POSSIBLE_DUPLICATE**.
-4. Jika semua lolos, status menjadi **READY_FOR_REVIEW**. Jika ada kendala, status menjadi **EXCEPTION** dan sistem menampilkan kode kendala beserta alasannya.
-5. Jika AI gagal membaca, dokumen tetap tersimpan. Finance Reviewer dapat memproses ulang atau mengisi data secara manual.
+   - tidak ada invoice lain dengan nomor dan vendor yang sama → bila ada, **POSSIBLE_DUPLICATE**;
+   - nomor rekening dicocokkan dengan rekening **vendor terverifikasi** di Data Referensi → bila berbeda, **ACCOUNT_MISMATCH**. Rekening dari invoice maupun isian PIC tidak dianggap benar dengan sendirinya.
+5. Jika semua lolos, status menjadi **READY_FOR_REVIEW**. Jika ada kendala, status menjadi **EXCEPTION** dan sistem menampilkan kode kendala beserta alasannya.
+6. Jika AI gagal membaca, dokumen tetap tersimpan. Finance Reviewer dapat memproses ulang atau mengisi data secara manual.
 
 ### 7.3 Penanganan kendala (EXCEPTION) — PIC Klien / Intake Support
 
@@ -113,6 +124,9 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
    | CALCULATION_DISCREPANCY | Konfirmasi ke vendor apakah total atau rinciannya yang benar. Bila perlu, minta invoice revisi lalu unggah ulang |
    | POSSIBLE_DUPLICATE | Periksa apakah tagihan ini memang sudah pernah diajukan. Jika ya, beri tahu Finance Reviewer agar dokumen tidak diproses |
    | RETURNED_BY_REVIEWER | Ikuti alasan yang ditulis Finance Reviewer, lalu klik **Kirim perbaikan** |
+   | NOT_AN_INVOICE | Batalkan pengajuan, lalu unggah ulang hanya dengan file invoice/tagihan dari vendor |
+   | RECEIPT_NOT_INVOICE | Minta invoice resmi ke vendor lalu ajukan ulang. Bila vendor memang hanya memberi struk/nota, lengkapi data wajib dan tunggu keputusan Finance Reviewer |
+   | ACCOUNT_MISMATCH | Jangan ubah rekening sendiri. Konfirmasi ke vendor lewat kontak resmi; bila rekening vendor memang berganti, perbarui Data Referensi agar diverifikasi ulang Finance Reviewer |
 
 4. Setelah perbaikan dikirim, dokumen **kembali ke tahap ekstraksi** (PROCESSING) dengan **Request ID yang sama**, lalu diverifikasi ulang oleh sistem. Sistem tidak menerbitkan Request ID baru.
 5. Data yang Anda isi atau perbaiki **tidak ditimpa** oleh hasil ekstraksi ulang AI.
@@ -130,8 +144,14 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 5. Ambil keputusan:
    - **Setujui** — hanya bila status **READY_FOR_REVIEW** dan semua data sudah sesuai dengan PDF.
    - **Kembalikan ke PIC** — **wajib** menulis alasan yang jelas, misalnya "Lampirkan invoice revisi dengan total yang benar." Status menjadi **EXCEPTION** dengan kode **RETURNED_BY_REVIEWER**.
-6. Saat Anda klik **Setujui**, sistem mengecek **Segregation of Duties**. Jika Anda adalah pengunggah dokumen, sistem **menolak persetujuan dan otomatis mengalihkan** dokumen ke reviewer lain dengan antrean tertunda paling sedikit. Anda tidak perlu menghubungi Service Lead. Penolakan dan pengalihan tercatat di jejak audit.
-7. Jika lolos cek SoD, status menjadi **AMIGA_REVIEWED** dan voucher PDF terbentuk otomatis (target **≤ 3 detik**).
+6. Periksa status rekening di layar peninjauan. Bila **Rekening belum terverifikasi**, cocokkan rekening dengan sumber tepercaya (mis. konfirmasi langsung ke vendor lewat kontak resmi), lalu centang konfirmasi pengecekan rekening sebelum **Setujui**. Konfirmasi ini tercatat di jejak audit. Rekening yang **tidak cocok** dengan vendor terverifikasi tidak bisa disetujui.
+7. Untuk dokumen **NEEDS_MANUAL_REVIEW** atau **RECEIPT_NOT_INVOICE**, Finance Reviewer yang bukan pihak pengaju memutuskan dengan alasan tertulis:
+   - **Proses sebagai invoice** — hanya untuk dokumen meragukan yang ternyata invoice resmi;
+   - **Terima struk sebagai dasar pembayaran** — hanya bila semua data wajib lengkap dan rekening cocok dengan vendor terverifikasi. Dokumen lalu masuk antrean dan **tetap harus disetujui** Finance Reviewer;
+   - **Tolak: tidak relevan**.
+8. Verifikasi rekening vendor dilakukan Finance Reviewer di **Data Referensi → Vendor**, setelah dicek ke sumber tepercaya. Pendaftar atau pengubah terakhir data bank vendor tidak boleh memverifikasinya sendiri. Mengubah data bank vendor membatalkan verifikasi.
+9. Saat Anda klik **Setujui**, sistem mengecek **Segregation of Duties**. Jika Anda adalah pengunggah dokumen, sistem **menolak persetujuan dan otomatis mengalihkan** dokumen ke reviewer lain dengan antrean tertunda paling sedikit. Anda tidak perlu menghubungi Service Lead. Penolakan dan pengalihan tercatat di jejak audit.
+10. Jika lolos cek SoD, status menjadi **AMIGA_REVIEWED** dan voucher PDF terbentuk otomatis (target **≤ 3 detik**).
 
 ### 7.5 Pengaturan beban reviewer — Service Lead
 
