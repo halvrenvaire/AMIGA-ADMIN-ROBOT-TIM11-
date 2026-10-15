@@ -401,6 +401,9 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains(".meta dt", "Jumlah invoice").next("dd").should("have.text", "2 file");
     cy.contains(".file-list.selectable button", "sys_multi_d.pdf").click();
     cy.get(".pdf-preview iframe").should("have.attr", "title", "Preview sys_multi_d.pdf");
+    // URL PDF di iframe harus masih hidup (tidak dicabut sebelum dimuat)
+    cy.get(".pdf-preview iframe").invoke("attr", "src").then((src) =>
+      cy.window().then((win) => win.fetch(src as string).then((r) => expect(r.ok).to.eq(true))));
     // Kembali ubah: isian dan file tetap ada
     cy.contains("button", "Kembali ubah").click();
     cy.get(".file-list li").should("have.length", 2);

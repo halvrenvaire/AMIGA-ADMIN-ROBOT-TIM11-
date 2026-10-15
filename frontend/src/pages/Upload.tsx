@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Eye, FileText, Send, UploadCloud, X } from "lucide-react";
 import { api } from "../api";
@@ -196,8 +196,14 @@ function Preview({ companyName, requestType, channel, submittedDate, dueDate, ap
   approvers: Signatory[]; files: File[]; error: string | null; busy: boolean; onBack: () => void; onSend: () => void;
 }) {
   const [active, setActive] = useState(0);
-  const urls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
-  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+  // URL dibuat dan dicabut di efek yang sama: di StrictMode efek dijalankan dua kali, jadi URL
+  // yang dibuat di luar efek (useMemo) sudah dicabut saat iframe memuatnya
+  const [urls, setUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const created = files.map((f) => URL.createObjectURL(f));
+    setUrls(created);
+    return () => created.forEach((u) => URL.revokeObjectURL(u));
+  }, [files]);
 
   return (
     <>
