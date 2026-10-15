@@ -60,7 +60,7 @@ export function App() {
             <Route path="dokumen/:id/voucher" element={<VoucherPage />} />
             <Route path="dokumen/:id/riwayat" element={<HistoryPage />} />
             <Route path="akun" element={<Account />} />
-            <Route path="asisten" element={<Protected roles={["FINANCE_REVIEWER", "SERVICE_LEAD", "SYSTEM_ADMIN"]}><AssistantPage /></Protected>} />
+            <Route path="asisten" element={<AssistantPage />} />
             <Route path="admin/pengguna" element={<Protected roles={["SYSTEM_ADMIN"]}><AdminUsers /></Protected>} />
             <Route path="admin/klien" element={<Protected roles={["SYSTEM_ADMIN"]}><AdminClients /></Protected>} />
             <Route path="*" element={<Home />} />

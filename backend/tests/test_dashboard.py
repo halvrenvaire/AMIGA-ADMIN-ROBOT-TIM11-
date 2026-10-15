@@ -172,6 +172,7 @@ class PlannerBedrock(FakeBedrock):
     def generate(self, system_prompt, messages, **kw):
         if system_prompt.startswith("Kamu menerjemahkan"):
             self.planner_messages = messages
+            self.planner_system = system_prompt
             return self.plan
         return super().generate(system_prompt, messages, **kw)
 
@@ -227,20 +228,46 @@ def test_sop_plan_or_unreadable_plan_falls_back(docs):
     assert body["data_tables"] == []
 
 
-def test_admin_never_gets_query_data(docs):
-    body = ask_with_plan("admin@amiga.test", "progres PIC?", '{"query": "progres_pengguna"}')
-    assert body["data_tables"] == [] and body["used_queue_data"] is False
+@pytest.mark.parametrize("plan", ['{"query": "progres_pengguna"}', '{"query": "dokumen_terakhir"}',
+                                  '{"query": "daftar_dokumen"}'])
+def test_admin_never_gets_document_data(docs, plan):
+    body = ask_with_plan("admin@amiga.test", "progres PIC?", plan)
+    assert body["data_tables"] == [] and body["cards"] == []
+    assert "tidak tersedia untuk peran penanya" in app.state.bedrock.last_system
+
+
+def test_admin_gets_user_and_client_overview(docs):
+    body = ask_with_plan("admin@amiga.test", "ada berapa user di sistem?", '{"query": "pengguna"}')
+    [recap] = body["data_tables"]
+    rows = {r[0]: r for r in recap["rows"]}
+    assert int(rows["Finance Reviewer"][1]) >= 3 and recap["links"][0]["href"] == "/admin/pengguna"
+
+    body = ask_with_plan("admin@amiga.test", "PIC Alpha?", '{"query": "pengguna", "peran": "PIC_KLIEN", "klien": "Alpha"}')
+    names = [r[0] for r in body["data_tables"][1]["rows"]]
+    assert "Rina (PIC Alpha)" in names and "Budi (PIC Beta)" not in names
+    body = ask_with_plan("admin@amiga.test", "klien tanpa PIC", '{"query": "data_klien", "tanpa_pic": true}')
+    assert all(r[1] == "Belum ada PIC" for r in body["data_tables"][0]["rows"])
+
+
+def test_non_admin_cannot_query_admin_data(docs):
+    body = ask_with_plan("lead@amiga.test", "ada berapa user?", '{"query": "pengguna"}')
+    assert body["data_tables"] == []
+    assert "tidak tersedia untuk peran penanya" in app.state.bedrock.last_system
 
 
 def test_query_document_detail(docs):
     _, a_problem, _ = docs
     body = ask_with_plan("lead@amiga.test", f"detail {a_problem['request_id']}",
                          f'{{"query": "detail_dokumen", "request_ids": ["{a_problem['request_id'].lower()}"]}}')
-    [table] = body["data_tables"]
-    assert table["title"] == a_problem["request_id"]
-    fields = dict(table["rows"])
-    assert fields["Status"] == "Ada kendala" and "MISSING_EVIDENCE" in fields["Kendala aktif"]
+    [card] = body["cards"]
+    assert card["request_id"] == a_problem["request_id"] and card["href"] == f"/dokumen/{a_problem['id']}"
+    fields = dict(card["fields"])
+    assert card["status_label"] == "Ada kendala" and "MISSING_EVIDENCE" in fields["Kendala aktif"]
     assert fields["Pengaju"] == "Rina (PIC Alpha)"
+    assert [s["state"] for s in card["steps"]][:3] == ["done", "done", "bad"]
+    assert card["history"][0]["action"] and "@" not in " ".join(h["actor"] for h in card["history"])
+    # Service Lead tidak membuka voucher; tombolnya ke Dashboard Antrean
+    assert {l["href"] for l in card["links"]} >= {card["href"], f"{card['href']}/riwayat", "/antrean"}
 
 
 def test_follow_up_sees_previous_plan_and_data(docs):
@@ -255,7 +282,7 @@ def test_follow_up_sees_previous_plan_and_data(docs):
 
     previous = app.state.bedrock.planner_messages[-2]["content"]
     assert '"tenggat": "lewat"' in previous and a_problem["request_id"] in previous
-    assert body["data_tables"][0]["title"] == a_problem["request_id"]
+    assert body["cards"][0]["request_id"] == a_problem["request_id"]
 
 
 def test_sessions_are_listed_per_user_with_tables(docs):
@@ -285,3 +312,83 @@ def test_parse_plan_tolerates_model_mistakes():
     assert plan.query == "daftar_dokumen" and plan.klien == "Alpha" and plan.tenggat is None and plan.periode_hari is None
     assert parse_plan('{"query": "hapus_semua"}') is None
     assert parse_plan("[1, 2]") is None
+
+
+# --- Asisten untuk semua peran: data dibatasi klien penanya ---
+
+def request_ids(body):
+    return {r[0] for t in body["data_tables"] for r in t["rows"]} | {c["request_id"] for c in body["cards"]}
+
+
+@pytest.mark.parametrize("email", ["pic.alpha@amiga.test", "intake@amiga.test"])
+def test_submitter_roles_only_see_their_clients(docs, email):
+    a_ready, a_problem, b_ready = docs
+    body = ask_with_plan(email, "dokumen apa saja?", '{"query": "daftar_dokumen"}')
+    ids = request_ids(body)
+    assert {a_ready["request_id"], a_problem["request_id"]} <= ids and b_ready["request_id"] not in ids
+
+    # Meminta klien lain secara eksplisit tetap tidak menghasilkan data
+    body = ask_with_plan(email, "dokumen PT Klien Beta", '{"query": "daftar_dokumen", "klien": "Beta"}')
+    assert body["data_tables"][0]["rows"] == []
+    assert "tidak ditemukan di perusahaan yang bisa Anda akses" in body["data_tables"][0]["note"]
+    body = ask_with_plan(email, "detail", f'{{"query": "detail_dokumen", "request_ids": ["{b_ready["request_id"]}"]}}')
+    assert b_ready["request_id"] not in request_ids(body)
+
+    body = ask_with_plan(email, "ringkasan per klien", '{"query": "ringkasan", "kelompok": "klien"}')
+    assert [r[0] for r in body["data_tables"][0]["rows"]] == ["PT Klien Alpha"]
+
+
+def test_reviewer_and_lead_see_every_client(docs):
+    _, _, b_ready = docs
+    for email in ("reviewer1@amiga.test", "lead@amiga.test"):
+        body = ask_with_plan(email, "ringkasan per klien", '{"query": "ringkasan", "kelompok": "klien"}')
+        assert {r[0] for r in body["data_tables"][0]["rows"]} == {"PT Klien Alpha", "PT Klien Beta"}
+
+
+def test_pic_sees_only_reviewers_of_own_client(docs):
+    _, _, b_ready = docs
+    plan = '{"query": "progres_pengguna", "peran": "FINANCE_REVIEWER"}'
+    beta_reviewer = detail(b_ready["id"], "pic.beta@amiga.test")["assigned_reviewer"]
+    rows = ask_with_plan("pic.beta@amiga.test", "progres reviewer", plan)["data_tables"][0]["rows"]
+    assert [r[0] for r in rows] == [beta_reviewer]
+    all_rows = ask_with_plan("lead@amiga.test", "progres reviewer", plan)["data_tables"][0]["rows"]
+    assert len(all_rows) > 1
+
+
+def test_planner_knows_who_is_asking(docs):
+    ask_with_plan("pic.alpha@amiga.test", "progres pengajuan saya", '{"query": "progres_pengguna", "orang": "Rina"}')
+    assert "Penanya: Rina (PIC Alpha) (peran: PIC_KLIEN)" in app.state.bedrock.planner_system
+
+
+def test_submitter_can_open_assistant_history(docs):
+    ask_with_plan("intake@amiga.test", "progres?", '{"query": "ringkasan"}')
+    assert api("intake@amiga.test").get("/ask-agent/sessions").status_code == 200
+
+
+
+def test_last_touched_document_is_the_askers_own(docs):
+    a_ready, a_problem, b_ready = docs
+    # PIC Alpha terakhir mengunggah a_problem (a_ready lebih dulu); dokumen Beta bukan miliknya
+    body = ask_with_plan("pic.alpha@amiga.test", "progres invoice yang terakhir saya update", '{"query": "dokumen_terakhir"}')
+    [card] = body["cards"]
+    assert card["request_id"] == a_problem["request_id"]
+    assert card["hint"].startswith("Ada kendala yang perlu Anda perbaiki")
+    assert {l["href"] for l in card["links"]} >= {f"/dokumen/{a_problem['id']}", "/pengajuan"}
+
+    body = ask_with_plan("pic.beta@amiga.test", "invoice terakhir saya", '{"query": "dokumen_terakhir", "jumlah": 5}')
+    assert [c["request_id"] for c in body["cards"]] == [b_ready["request_id"]]
+
+
+def test_document_list_rows_link_to_detail(docs):
+    a_ready, a_problem, _ = docs
+    body = ask_with_plan("pic.alpha@amiga.test", "dokumen saya", '{"query": "daftar_dokumen"}')
+    table = body["data_tables"][0]
+    links = dict(zip((r[0] for r in table["rows"]), table["row_links"]))
+    assert links[a_ready["request_id"]] == f"/dokumen/{a_ready['id']}"
+    assert {"label": "Pengajuan Saya", "href": "/pengajuan"} in table["links"]
+
+
+def test_cards_are_kept_in_history(docs):
+    ask_with_plan("pic.alpha@amiga.test", "terakhir", '{"query": "dokumen_terakhir"}')
+    messages = api("pic.alpha@amiga.test").get("/ask-agent/sessions/t-pic.alpha@amiga.test").json()
+    assert messages[-1]["cards"][0]["steps"]

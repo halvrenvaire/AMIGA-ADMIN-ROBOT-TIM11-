@@ -59,13 +59,6 @@ def test_me_lists_only_assigned_clients(api):
     assert [c["name"] for c in me["clients"]] == ["PT Klien Alpha"]
 
 
-@pytest.mark.parametrize("email", ["pic.alpha@amiga.test", "intake@amiga.test"])
-def test_assistant_is_for_internal_reviewer_lead_admin_only(api, email):
-    r = api.post("/ask", json={"question": "Apa itu QUEUED?", "session_id": "x"},
-                 headers=auth_header(email))
-    assert r.status_code == 403
-
-
 def test_client_lists_are_isolated(api):
     names = [c["name"] for c in api.get("/clients", headers=auth_header("pic.beta@amiga.test")).json()]
     assert names == ["PT Klien Beta"]

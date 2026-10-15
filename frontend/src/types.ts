@@ -106,11 +106,23 @@ export interface DashboardSummary {
   due_soon_days: number;
 }
 
-export interface DataTable { title: string; columns: string[]; rows: string[][]; note: string | null }
+export interface AssistantLink { label: string; href: string; primary?: boolean }
+export interface DataTable {
+  title: string; columns: string[]; rows: string[][]; note: string | null;
+  links?: AssistantLink[]; row_links?: (string | null)[];
+}
+export interface DocCard {
+  request_id: string; href: string; status: DocStatus; status_label: string; subtitle: string;
+  fields: string[][];
+  steps: { label: string; state: "done" | "active" | "todo" | "bad" | "skip"; at?: string | null; detail?: string | null }[];
+  history: { at: string; action: string; actor: string; note: string }[];
+  links: AssistantLink[]; hint: string | null;
+}
 
 export interface AssistantSession { session_id: string; title: string; last_activity: string; messages: number }
 export interface AssistantMessage {
   role: "user" | "assistant"; content: string; created_at: string; query_label: string | null; data_tables: DataTable[];
+  cards: DocCard[];
 }
 
 export interface AskAgentResponse {
@@ -121,6 +133,7 @@ export interface AskAgentResponse {
   used_queue_data: boolean;
   query_label: string | null;
   data_tables: DataTable[];
+  cards: DocCard[];
   sources: { source: string; score: number; preview: string }[];
 }
 

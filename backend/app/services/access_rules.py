@@ -16,8 +16,9 @@ ALL_CLIENT_ROLES = {Role.FINANCE_REVIEWER, Role.SERVICE_LEAD}
 
 INTERNAL_ROLES = {Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER, Role.SERVICE_LEAD, Role.SYSTEM_ADMIN}
 
-# Peran yang boleh memakai Asisten AI di dashboard (System Admin: SOP saja)
-ASSISTANT_ROLES = {Role.FINANCE_REVIEWER, Role.SERVICE_LEAD, Role.SYSTEM_ADMIN}
+# Asisten AI terbuka untuk semua peran. Data yang dijawab tetap dibatasi accessible_client_ids
+# (PIC Klien / Intake Support: klien yang ditugaskan; Reviewer / Lead: semua); System Admin: SOP saja.
+ASSISTANT_ROLES = set(Role)
 
 
 class RoleCombinationError(ValueError):

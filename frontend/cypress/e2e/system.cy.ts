@@ -75,7 +75,8 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.visitAs("pic.alpha@amiga.test", "/antrean");
     cy.location("pathname").should("eq", "/dashboard");
     cy.get(".nav").should("not.contain.text", "Dashboard Antrean").and("contain.text", "Unggah Dokumen");
-    cy.get(".fab").should("not.exist"); // Asisten hanya untuk peran internal
+    cy.get(".nav").should("contain.text", "Asisten AI"); // Asisten untuk semua peran, data sesuai klien
+    cy.get(".fab").should("exist");
   });
 
   // --- Unggah dokumen ---

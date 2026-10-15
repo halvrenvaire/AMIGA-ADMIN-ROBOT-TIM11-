@@ -16,6 +16,9 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.config import settings
+from app.services.assistant_cards import (
+    AdminTable, DocCard, clients_overview, document_cards, page_links, recent_document_ids, users_overview,
+)
 from app.models import (
     AuditLog, Client, DocStatus, Document, DocumentFile, Extraction, Role, User, UserClientAssignment, UserRole,
     ValidationIssue, Voucher,
@@ -38,7 +41,8 @@ GROUP_LABEL = {"status": "Status", "klien": "Klien", "vendor": "Vendor", "review
 
 class QueryPlan(BaseModel):
     """Rencana query yang dipilih model. Semua filter opsional."""
-    query: Literal["progres_pengguna", "daftar_dokumen", "detail_dokumen", "ringkasan", "sop"]
+    query: Literal["progres_pengguna", "daftar_dokumen", "detail_dokumen", "dokumen_terakhir", "ringkasan",
+                   "pengguna", "data_klien", "sop"]
     peran: Literal["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER"] | None = None
     orang: str | None = Field(None, max_length=100)
     klien: str | None = Field(None, max_length=100)
@@ -48,32 +52,31 @@ class QueryPlan(BaseModel):
     periode_hari: int | None = Field(None, ge=1, le=365)
     kelompok: Literal["status", "klien", "vendor", "reviewer", "pengaju"] | None = None
     request_ids: list[str] | None = Field(None, max_length=MAX_ROWS)
+    jumlah: int | None = Field(None, ge=1, le=MAX_DETAIL)  # dokumen_terakhir: berapa dokumen
+    aktif: bool | None = None  # pengguna: hanya akun aktif / nonaktif
+    tanpa_pic: bool | None = None  # data_klien: hanya klien yang belum punya PIC Klien
+
+
+# Jenis query yang boleh dipakai: data dokumen untuk peran operasional, data administrasi untuk System Admin
+DOCUMENT_QUERIES = {"progres_pengguna", "daftar_dokumen", "detail_dokumen", "dokumen_terakhir", "ringkasan"}
+ADMIN_QUERIES = {"pengguna", "data_klien"}
+
+
+def allowed_queries(roles: set[Role]) -> set[str]:
+    allowed = {"sop"}
+    if roles - {Role.SYSTEM_ADMIN}:
+        allowed |= DOCUMENT_QUERIES
+    if Role.SYSTEM_ADMIN in roles:
+        allowed |= ADMIN_QUERIES
+    return allowed
 
 
 PLANNER_PROMPT = """Kamu menerjemahkan pertanyaan pengguna AMIGA Robot Admin menjadi rencana query JSON.
-Balas HANYA satu objek JSON, tanpa penjelasan.
+Balas HANYA satu objek JSON, tanpa penjelasan. Pakai hanya jenis query di bawah ini.
 
 Jenis query:
-- "progres_pengguna": progres/kinerja/beban per ORANG. Pengaju (PIC Klien, Intake Support): jumlah
-  pengajuan per status. Finance Reviewer: menunggu review, lewat tenggat, disetujui, dikembalikan.
-  Pakai "peran" bila pengguna menyebut satu peran.
-- "daftar_dokumen": daftar dokumen/invoice tertentu (mis. yang bermasalah, yang lewat tenggat, milik vendor X).
-- "detail_dokumen": rincian lengkap dokumen (invoice, rekening, kendala, voucher, pengaju, reviewer). Pakai
-  "request_ids" bila Request ID-nya diketahui, atau filter yang sama dengan daftar dokumen.
-- "ringkasan": jumlah dan total nilai dokumen dikelompokkan per "kelompok"
-  (status | klien | vendor | reviewer | pengaju). Untuk "progres secara umum" pakai kelompok "status".
+{catalog}
 - "sop": pertanyaan tentang prosedur, aturan, definisi, atau hal lain yang tidak butuh data.
-
-Filter opsional: "peran" (PIC_KLIEN | INTAKE_SUPPORT | FINANCE_REVIEWER), "orang" (nama), "klien" (nama
-perusahaan), "vendor", "tenggat" ("lewat" | "dekat"), "periode_hari" (angka; "minggu ini" = 7, "bulan ini" = 30),
-"status" (daftar kode status, tulis PERSIS kodenya):
-  QUEUED = antre, baru diunggah; PROCESSING = sedang dibaca AI;
-  READY_FOR_REVIEW = menunggu review / siap ditinjau reviewer; EXCEPTION = ada kendala / bermasalah;
-  AMIGA_REVIEWED = disetujui, voucher sudah terbit; SENT_TO_CLIENT = diserahkan ke klien; CANCELLED = dibatalkan.
-  "Sedang berjalan" / "belum selesai" = QUEUED, PROCESSING, READY_FOR_REVIEW, EXCEPTION.
-  "Selesai" / "sudah disetujui" = AMIGA_REVIEWED, SENT_TO_CLIENT.
-Pertanyaan "berapa ..." dengan status tertentu pakai "daftar_dokumen" (jumlahnya ikut ditampilkan).
-"request_ids" (daftar Request ID, mis. ["REQ-20261015-7F2A1C"]).
 Jangan isi filter yang tidak disebut pengguna.
 
 Pertanyaan lanjutan ("tampilkan detailnya", "yang tadi", "dokumen tersebut", "kalau reviewer?") merujuk ke
@@ -81,24 +84,72 @@ jawaban sebelumnya. Jawaban berbasis data di riwayat percakapan diakhiri "[Renca
 "[Data yang ditampilkan]". Salin filter dari rencana itu, atau ambil Request ID dari data itu.
 
 Contoh:
-"progres PIC gimana?" -> {{"query": "progres_pengguna", "peran": "PIC_KLIEN"}}
-"siapa reviewer yang paling banyak kerjaan?" -> {{"query": "progres_pengguna", "peran": "FINANCE_REVIEWER"}}
-"progres Rina minggu ini" -> {{"query": "progres_pengguna", "orang": "Rina", "periode_hari": 7}}
-"invoice mana yang bermasalah di PT Klien Alpha?" -> {{"query": "daftar_dokumen", "status": ["EXCEPTION"], "klien": "PT Klien Alpha"}}
-"dokumen yang lewat tenggat" -> {{"query": "daftar_dokumen", "tenggat": "lewat"}}
-"sekarang progresnya gimana?" -> {{"query": "ringkasan", "kelompok": "status"}}
-"berapa voucher yang sudah disetujui?" -> {{"query": "daftar_dokumen", "status": ["AMIGA_REVIEWED", "SENT_TO_CLIENT"]}}
-"ada berapa invoice yang nunggu review?" -> {{"query": "daftar_dokumen", "status": ["READY_FOR_REVIEW"]}}
-"total tagihan per vendor bulan ini" -> {{"query": "ringkasan", "kelompok": "vendor", "periode_hari": 30}}
-"detail REQ-20261015-7F2A1C" -> {{"query": "detail_dokumen", "request_ids": ["REQ-20261015-7F2A1C"]}}
-(setelah daftar dokumen lewat tenggat) "tampilkan detail dokumen tersebut" -> {{"query": "detail_dokumen", "tenggat": "lewat"}}
+{examples}
 "apa itu MISSING_EVIDENCE?" -> {{"query": "sop"}}
 
-Hari ini: {today}."""
+Hari ini: {today}. Penanya: {user} (peran: {roles}). "Saya", "punya saya", atau "pengajuan saya" berarti
+penanya: isi "orang" dengan namanya (kecuali untuk "dokumen_terakhir", yang selalu milik penanya)."""
+
+DOCUMENT_CATALOG = """- "progres_pengguna": progres/kinerja/beban per ORANG. Pengaju (PIC Klien, Intake Support): jumlah
+  pengajuan per status. Finance Reviewer: menunggu review, lewat tenggat, disetujui, dikembalikan.
+  Pakai "peran" bila pengguna menyebut satu peran.
+- "dokumen_terakhir": invoice/dokumen yang TERAKHIR disentuh penanya (diunggah, diperbaiki, ditinjau, diubah),
+  lengkap dengan progres, riwayat, dan detailnya. "jumlah" = berapa dokumen (bawaan 1, maks. 5).
+- "daftar_dokumen": daftar dokumen/invoice tertentu (mis. yang bermasalah, yang lewat tenggat, milik vendor X).
+- "detail_dokumen": rincian lengkap dokumen tertentu (progres, riwayat, invoice, rekening, kendala, voucher). Pakai
+  "request_ids" bila Request ID-nya diketahui, atau filter yang sama dengan daftar dokumen.
+- "ringkasan": jumlah dan total nilai dokumen dikelompokkan per "kelompok"
+  (status | klien | vendor | reviewer | pengaju). Untuk "progres secara umum" pakai kelompok "status".
+Filter dokumen: "peran" (PIC_KLIEN | INTAKE_SUPPORT | FINANCE_REVIEWER), "orang" (nama), "klien" (nama
+perusahaan), "vendor", "tenggat" ("lewat" | "dekat"), "periode_hari" (angka; "minggu ini" = 7, "bulan ini" = 30),
+"request_ids" (daftar Request ID, mis. ["REQ-20261015-7F2A1C"]),
+"status" (daftar kode status, tulis PERSIS kodenya):
+  QUEUED = antre, baru diunggah; PROCESSING = sedang dibaca AI;
+  READY_FOR_REVIEW = menunggu review / siap ditinjau reviewer; EXCEPTION = ada kendala / bermasalah;
+  AMIGA_REVIEWED = disetujui, voucher sudah terbit; SENT_TO_CLIENT = diserahkan ke klien; CANCELLED = dibatalkan.
+  "Sedang berjalan" / "belum selesai" = QUEUED, PROCESSING, READY_FOR_REVIEW, EXCEPTION.
+  "Selesai" / "sudah disetujui" = AMIGA_REVIEWED, SENT_TO_CLIENT.
+Pertanyaan "berapa ..." dengan status tertentu pakai "daftar_dokumen" (jumlahnya ikut ditampilkan)."""
+
+DOCUMENT_EXAMPLES = """"progres invoice yang terakhir saya update" -> {"query": "dokumen_terakhir"}
+"3 dokumen terakhir yang saya tinjau" -> {"query": "dokumen_terakhir", "jumlah": 3}
+"progres PIC gimana?" -> {"query": "progres_pengguna", "peran": "PIC_KLIEN"}
+"siapa reviewer yang paling banyak kerjaan?" -> {"query": "progres_pengguna", "peran": "FINANCE_REVIEWER"}
+"progres Rina minggu ini" -> {"query": "progres_pengguna", "orang": "Rina", "periode_hari": 7}
+"invoice mana yang bermasalah di PT Klien Alpha?" -> {"query": "daftar_dokumen", "status": ["EXCEPTION"], "klien": "PT Klien Alpha"}
+"dokumen yang lewat tenggat" -> {"query": "daftar_dokumen", "tenggat": "lewat"}
+"sekarang progresnya gimana?" -> {"query": "ringkasan", "kelompok": "status"}
+"berapa voucher yang sudah disetujui?" -> {"query": "daftar_dokumen", "status": ["AMIGA_REVIEWED", "SENT_TO_CLIENT"]}
+"ada berapa invoice yang nunggu review?" -> {"query": "daftar_dokumen", "status": ["READY_FOR_REVIEW"]}
+"total tagihan per vendor bulan ini" -> {"query": "ringkasan", "kelompok": "vendor", "periode_hari": 30}
+"detail REQ-20261015-7F2A1C" -> {"query": "detail_dokumen", "request_ids": ["REQ-20261015-7F2A1C"]}
+(setelah daftar dokumen lewat tenggat) "tampilkan detail dokumen tersebut" -> {"query": "detail_dokumen", "tenggat": "lewat"}"""
+
+ADMIN_CATALOG = """- "pengguna": akun pengguna. Tanpa filter = rekap jumlah per peran; dengan filter = daftar pengguna.
+  Filter: "peran" (PIC_KLIEN | INTAKE_SUPPORT | FINANCE_REVIEWER | SERVICE_LEAD | SYSTEM_ADMIN), "klien",
+  "orang" (nama/email), "aktif" (true | false).
+- "data_klien": klien yang dilayani beserta PIC Klien dan Intake Support-nya. "tanpa_pic": true untuk klien yang
+  belum punya PIC. Filter "klien" (nama).
+Data invoice, voucher, dan dokumen TIDAK tersedia untuk System Admin: pertanyaan seperti itu pakai "sop"."""
+
+ADMIN_EXAMPLES = """"coba rekap ada berapa user di sistem" -> {"query": "pengguna"}
+"siapa saja PIC Klien PT Klien Alpha?" -> {"query": "pengguna", "peran": "PIC_KLIEN", "klien": "PT Klien Alpha"}
+"akun mana yang nonaktif?" -> {"query": "pengguna", "aktif": false}
+"klien mana yang belum punya PIC?" -> {"query": "data_klien", "tanpa_pic": true}
+"daftar klien" -> {"query": "data_klien"}"""
 
 
-def planner_prompt() -> str:
-    return PLANNER_PROMPT.format(today=date.today().isoformat())
+def planner_prompt(user_name: str = "-", roles: str = "-", user_roles: set[Role] | None = None) -> str:
+    allowed = allowed_queries(user_roles if user_roles is not None else set(Role) - {Role.SYSTEM_ADMIN})
+    catalog = [DOCUMENT_CATALOG] if allowed & DOCUMENT_QUERIES else []
+    examples = [DOCUMENT_EXAMPLES] if allowed & DOCUMENT_QUERIES else []
+    if allowed & ADMIN_QUERIES:
+        catalog.append(ADMIN_CATALOG)
+        examples.append(ADMIN_EXAMPLES)
+    # Katalog dan contoh berisi kurung kurawal JSON, jadi disisipkan setelah format
+    return (PLANNER_PROMPT.replace("{catalog}", "\x00C").replace("{examples}", "\x00E")
+            .format(today=date.today().isoformat(), user=user_name, roles=roles)
+            .replace("\x00C", "\n".join(catalog)).replace("\x00E", "\n".join(examples)))
 
 
 # Model kadang menulis status dengan bahasa sehari-hari; dipetakan ke kode status
@@ -151,6 +202,9 @@ class DataTable:
     columns: list[str]
     rows: list[list[str]]
     note: str | None = None
+    # Tombol ke halaman terkait, dan tautan per baris (mis. Request ID → detail dokumen)
+    links: list[dict] = field(default_factory=list)
+    row_links: list[str | None] = field(default_factory=list)
 
 
 @dataclass
@@ -158,14 +212,21 @@ class QueryResult:
     label: str
     plan: QueryPlan
     tables: list[DataTable] = field(default_factory=list)
+    cards: list[DocCard] = field(default_factory=list)
+    denied: bool = False  # jenis informasi ini tidak tersedia untuk peran penanya
 
     def to_data(self) -> dict:
-        """Disimpan di riwayat percakapan: untuk menampilkan ulang tabel dan untuk pertanyaan lanjutan."""
+        """Disimpan di riwayat percakapan: untuk menampilkan ulang tabel/kartu dan untuk pertanyaan lanjutan."""
         return {"label": self.label, "plan": self.plan.model_dump(exclude_none=True, mode="json"),
-                "tables": [vars(t) for t in self.tables], "text": self.as_text()}
+                "tables": [vars(t) for t in self.tables], "cards": [vars(c) for c in self.cards],
+                "text": self.as_text()}
 
     def as_text(self) -> str:
         parts = [f"Interpretasi query: {self.label}"]
+        if self.denied:
+            parts.append("Informasi ini tidak tersedia untuk peran penanya. Sampaikan dengan sopan dan sebutkan "
+                         "informasi apa yang bisa ia tanyakan.")
+        parts += [c.as_text() for c in self.cards]
         for t in self.tables:
             parts.append(f"\n{t.title}" + (f" ({t.note})" if t.note else ""))
             parts.append(" | ".join(t.columns))
@@ -216,6 +277,9 @@ def describe(plan: QueryPlan) -> str:
         "progres_pengguna": "Progres per " + (ROLE_LABEL[Role(plan.peran)] if plan.peran else "pengguna"),
         "daftar_dokumen": "Daftar dokumen",
         "detail_dokumen": "Detail dokumen",
+        "dokumen_terakhir": "Dokumen terakhir Anda",
+        "pengguna": "Pengguna",
+        "data_klien": "Klien tanpa PIC" if plan.tanpa_pic else "Klien",
         "ringkasan": f"Ringkasan per {GROUP_LABEL[plan.kelompok or 'status'].lower()}",
     }[plan.query]
     bits = []
@@ -236,21 +300,49 @@ def describe(plan: QueryPlan) -> str:
     return what + (f" · {'; '.join(bits)}" if bits else "")
 
 
-def run(db: Session, plan: QueryPlan, client_ids: set[uuid.UUID], today: date | None = None) -> QueryResult:
+def run(db: Session, plan: QueryPlan, client_ids: set[uuid.UUID], today: date | None = None,
+        full_scope: bool = True, user: User | None = None) -> QueryResult:
+    """`client_ids` = klien yang boleh dibuka penanya; setiap query dibatasi ke sini. `full_scope` False
+    (PIC Klien / Intake Support): reviewer yang tidak pernah menangani klien penanya tidak ikut ditampilkan.
+    `user` = penanya: menentukan jenis query yang boleh, dokumen "terakhir saya", dan tautan di kartu."""
     today = today or date.today()
-    clients = _filtered_clients(db, client_ids, plan)
+    roles = user.roles if user is not None else set(Role) - {Role.SYSTEM_ADMIN}
     result = QueryResult(label=describe(plan), plan=plan)
-    if plan.query == "progres_pengguna":
+    if plan.query not in allowed_queries(roles):
+        result.denied = True
+        return result
+    if plan.query in ADMIN_QUERIES:
+        tables = (users_overview(db, plan.peran, plan.klien, plan.orang, plan.aktif) if plan.query == "pengguna"
+                  else clients_overview(db, plan.klien, bool(plan.tanpa_pic)))
+        result.tables += [DataTable(**vars(t)) for t in tables]
+        return result
+
+    clients = _filtered_clients(db, client_ids, plan)
+    if plan.query == "dokumen_terakhir":
+        ids, mine = recent_document_ids(db, user, clients, plan.jumlah or 1) if user else ([], False)
+        result.cards = document_cards(db, ids, user) if user else []
+        if ids and not mine:
+            result.label += " · Anda belum pernah mengubah dokumen; ini dokumen terbaru di perusahaan Anda"
+    elif plan.query == "detail_dokumen" and user is not None:
+        result.cards = document_cards(db, _matching_ids(db, plan, clients, today, MAX_DETAIL), user)
+    elif plan.query == "progres_pengguna":
         if plan.peran in (None, "PIC_KLIEN", "INTAKE_SUPPORT"):
             result.tables.append(_submitter_progress(db, plan, clients, today))
         if plan.peran in (None, "FINANCE_REVIEWER"):
-            result.tables.append(_reviewer_progress(db, plan, clients, today))
+            result.tables.append(_reviewer_progress(db, plan, clients, today, full_scope))
     elif plan.query == "daftar_dokumen":
         result.tables.append(_document_list(db, plan, clients, today))
     elif plan.query == "detail_dokumen":
         result.tables += _document_details(db, plan, clients, today)
     elif plan.query == "ringkasan":
         result.tables.append(_summary(db, plan, clients, today))
+    for t in result.tables:
+        t.links = t.links or page_links(roles)
+    if plan.klien and not clients:
+        # Tidak membedakan "tidak ada" dan "bukan hak Anda", supaya keberadaan klien lain tidak bocor
+        for t in result.tables:
+            t.note = f'klien "{plan.klien}" tidak ditemukan di perusahaan yang bisa Anda akses'
+
     return result
 
 
@@ -299,7 +391,8 @@ def _submitter_progress(db: Session, plan: QueryPlan, clients: set[uuid.UUID], t
                      note=_period_note(plan))
 
 
-def _reviewer_progress(db: Session, plan: QueryPlan, clients: set[uuid.UUID], today: date) -> DataTable:
+def _reviewer_progress(db: Session, plan: QueryPlan, clients: set[uuid.UUID], today: date,
+                       full_scope: bool = True) -> DataTable:
     users = _users_with_roles(db, [Role.FINANCE_REVIEWER], plan.orang)
     ids = [u[0] for u in users]
     open_docs = dict(db.execute(
@@ -325,6 +418,10 @@ def _reviewer_progress(db: Session, plan: QueryPlan, clients: set[uuid.UUID], to
         .group_by(AuditLog.actor_id, AuditLog.action)):
         decided.setdefault(actor, {})[action] = n
 
+    if not full_scope:
+        handled = set(db.scalars(select(Document.assigned_reviewer_id).where(
+            Document.client_id.in_(clients), Document.assigned_reviewer_id.in_(ids)).distinct()))
+        users = [u for u in users if u[0] in handled or u[0] in decided]
     rows = []
     for uid, name, _ in users:
         pending = open_docs.get(uid, 0)
@@ -351,7 +448,7 @@ def _document_list(db: Session, plan: QueryPlan, clients: set[uuid.UUID], today:
     if plan.orang:
         conds.append(or_(uploader.full_name.ilike(_like(plan.orang)), reviewer.full_name.ilike(_like(plan.orang))))
     base = (select(Document.request_id, Client.name, Extraction.vendor_name, Document.status, Extraction.total,
-                   Document.due_date, uploader.full_name, reviewer.full_name)
+                   Document.due_date, uploader.full_name, reviewer.full_name, Document.id)
             .join(Client, Client.id == Document.client_id)
             .join(uploader, uploader.id == Document.uploaded_by)
             .outerjoin(reviewer, reviewer.id == Document.assigned_reviewer_id)
@@ -364,9 +461,24 @@ def _document_list(db: Session, plan: QueryPlan, clients: set[uuid.UUID], today:
         title="Dokumen",
         columns=["Request ID", "Klien", "Vendor", "Status", "Total", "Tenggat", "Pengaju", "Reviewer"],
         rows=[[rid, client, vendor or "-", STATUS_LABEL[st], _rp(amount), due.isoformat() if due else "-",
-               up, rev or "-"] for rid, client, vendor, st, amount, due, up, rev in rows],
+               up, rev or "-"] for rid, client, vendor, st, amount, due, up, rev, _ in rows],
         note=f"{total} dokumen" + (f", {MAX_ROWS} ditampilkan" if total > MAX_ROWS else ""),
+        row_links=[f"/dokumen/{row[-1]}" for row in rows],
     )
+
+
+def _matching_ids(db: Session, plan: QueryPlan, clients: set[uuid.UUID], today: date, limit: int) -> list[uuid.UUID]:
+    """Dokumen yang cocok dengan filter (dibatasi klien penanya), tenggat terdekat dulu."""
+    uploader, reviewer = aliased(User), aliased(User)
+    conds = _doc_filters(plan, clients, today)
+    if plan.orang:
+        conds.append(or_(uploader.full_name.ilike(_like(plan.orang)), reviewer.full_name.ilike(_like(plan.orang))))
+    return list(db.scalars(
+        select(Document.id).join(uploader, uploader.id == Document.uploaded_by)
+        .outerjoin(reviewer, reviewer.id == Document.assigned_reviewer_id)
+        .outerjoin(Extraction, Extraction.document_id == Document.id)
+        .where(and_(*conds))
+        .order_by(Document.due_date.is_(None), Document.due_date, Document.created_at.desc()).limit(limit)))
 
 
 def _summary(db: Session, plan: QueryPlan, clients: set[uuid.UUID], today: date) -> DataTable:

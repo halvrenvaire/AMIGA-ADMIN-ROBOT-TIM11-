@@ -39,6 +39,22 @@ class DataTableOut(BaseModel):
     columns: list[str]
     rows: list[list[str]]
     note: str | None = None
+    links: list[dict] = []  # tombol ke halaman terkait: {label, href}
+    row_links: list[str | None] = []  # tautan per baris, mis. ke detail dokumen
+
+
+class DocCardOut(BaseModel):
+    """Kartu dokumen interaktif di jawaban Asisten: progres, detail, riwayat, saran, dan tautan."""
+    request_id: str
+    href: str
+    status: str
+    status_label: str
+    subtitle: str
+    fields: list[list[str]]
+    steps: list[dict]
+    history: list[dict]
+    links: list[dict]
+    hint: str | None = None
 
 
 class AssistantSession(BaseModel):
@@ -55,6 +71,7 @@ class AssistantMessage(BaseModel):
     created_at: datetime
     query_label: str | None = None
     data_tables: list[DataTableOut] = []
+    cards: list[DocCardOut] = []
 
 
 class AskAgentResponse(AskResponse):
@@ -68,6 +85,7 @@ class AskAgentResponse(AskResponse):
     # Text-to-query: interpretasi pertanyaan dan tabel hasilnya (kosong bila menjawab dari SOP)
     query_label: str | None = None
     data_tables: list[DataTableOut] = []
+    cards: list[DocCardOut] = []  # kartu dokumen interaktif (progres, riwayat, tautan)
 
 
 class FeedbackRequest(BaseModel):

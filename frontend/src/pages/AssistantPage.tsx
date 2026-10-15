@@ -13,7 +13,7 @@ import type { AssistantSession } from "../types";
 /** Asisten AI layar penuh: riwayat percakapan di kiri, percakapan aktif di kanan. */
 export function AssistantPage() {
   const { user } = useAuth();
-  const { adminOnly } = useAssistantAccess();
+  const { adminOnly, submitter } = useAssistantAccess();
   const [params, setParams] = useSearchParams();
   const sessions = useApi(() => api.get<AssistantSession[]>("/ask-agent/sessions"), []);
   const chat = useAssistantChat(() => sessions.reload());
@@ -69,12 +69,14 @@ export function AssistantPage() {
           <div style={{ flex: 1 }}>
             <b>Asisten AMIGA</b>
             <div className="muted" style={{ fontSize: 12 }}>
-              {adminOnly ? "Menjawab dari SOP AMIGA" : "Menjawab dari SOP dan data sistem, sesuai hak akses Anda"}
+              {adminOnly ? "Menjawab dari SOP AMIGA"
+                : submitter ? "Menjawab dari SOP dan data perusahaan yang ditugaskan kepada Anda"
+                : "Menjawab dari SOP dan data semua perusahaan, sesuai hak akses Anda"}
             </div>
           </div>
         </div>
         {(error || sessions.error) && <div style={{ padding: "10px 14px 0" }}><Alert>{error ?? sessions.error}</Alert></div>}
-        <ChatThread chat={chat} adminOnly={adminOnly} greeting={greetingText(user?.full_name, adminOnly)} />
+        <ChatThread chat={chat} adminOnly={adminOnly} greeting={greetingText(user?.full_name, adminOnly, submitter)} />
         <ChatInput chat={chat} autoFocus />
       </section>
     </div>

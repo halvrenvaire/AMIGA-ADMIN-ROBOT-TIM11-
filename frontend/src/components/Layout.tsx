@@ -24,7 +24,7 @@ const NAV: NavItem[] = [
   { to: "/voucher", label: "Voucher", icon: Receipt, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
   { to: "/rekap-voucher", label: "Rekap Voucher", icon: FileBarChart, roles: ["SERVICE_LEAD"] },
   { to: "/riwayat", label: "Riwayat & Audit", icon: FileClock, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
-  { to: "/asisten", label: "Asisten AI", icon: Bot, roles: ["FINANCE_REVIEWER", "SERVICE_LEAD", "SYSTEM_ADMIN"] },
+  { to: "/asisten", label: "Asisten AI", icon: Bot, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD", "SYSTEM_ADMIN"] },
 ];
 const REFERENCE_NAV: NavItem[] = [
   { to: "/referensi/vendor", label: "Vendor", icon: Store, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },

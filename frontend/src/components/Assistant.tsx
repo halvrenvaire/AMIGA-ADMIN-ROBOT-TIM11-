@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Database, Loader2, Maximize2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
+import { ArrowUpRight, Bot, Check, ChevronDown, Database, Lightbulb, Loader2, Maximize2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
-import type { AskAgentResponse, AssistantMessage, DataTable } from "../types";
+import { StatusBadge } from "./ui";
+import type { AskAgentResponse, AssistantLink, AssistantMessage, DataTable, DocCard } from "../types";
 
 export interface Message {
   role: "user" | "bot";
@@ -14,16 +15,19 @@ export interface Message {
   feedback?: 1 | -1;
   queryLabel?: string | null;
   tables?: DataTable[];
+  cards?: DocCard[];
 }
 
 export const newSession = () => `web-${crypto.randomUUID()}`;
 
-/** Siapa yang boleh memakai Asisten: Finance Reviewer, Service Lead, System Admin (System Admin: SOP saja). */
+/** Asisten untuk semua peran. Data dibatasi server: PIC Klien / Intake Support hanya klien yang ditugaskan,
+ *  Finance Reviewer / Service Lead semua klien, System Admin hanya SOP. */
 export function useAssistantAccess() {
   const { user, has } = useAuth();
-  const allowed = has("FINANCE_REVIEWER", "SERVICE_LEAD", "SYSTEM_ADMIN");
+  const allowed = Boolean(user);
   const adminOnly = user?.roles.length === 1 && user.roles[0] === "SYSTEM_ADMIN";
-  return { allowed, adminOnly };
+  const submitter = !has("FINANCE_REVIEWER", "SERVICE_LEAD") && has("PIC_KLIEN", "INTAKE_SUPPORT");
+  return { allowed, adminOnly, submitter };
 }
 
 /** State percakapan Asisten, dipakai widget mengambang dan halaman Asisten layar penuh. */
@@ -40,7 +44,7 @@ export function useAssistantChat(onAnswered?: () => void) {
       const res = await api.post<AskAgentResponse>("/ask-agent", { question, session_id: session });
       setMessages((m) => [...m, {
         role: "bot", text: res.answer, answerId: res.answer_id, usedData: res.used_queue_data, sources: res.sources.length,
-        queryLabel: res.query_label, tables: res.data_tables,
+        queryLabel: res.query_label, tables: res.data_tables, cards: res.cards,
       }]);
       onAnswered?.();
     } catch (e) {
@@ -65,24 +69,32 @@ export function useAssistantChat(onAnswered?: () => void) {
     setSession(id);
     setMessages(rows.map((r) => (r.role === "user" ? { role: "user", text: r.content } : {
       role: "bot", text: r.content, usedData: Boolean(r.query_label) || undefined, queryLabel: r.query_label, tables: r.data_tables,
+      cards: r.cards,
     })));
   }, []);
 
   return { messages, busy, session, ask, rate, reset, load };
 }
 
-export function suggestionsFor(adminOnly: boolean) {
-  return adminOnly
-    ? ["Apa itu Segregation of Duties?", "Siapa yang boleh mengelola akun?"]
-    : ["Progres PIC Klien gimana?", "Progres Finance Reviewer minggu ini", "Invoice mana yang lewat tenggat?",
-       "Apa arti MISSING_EVIDENCE?"];
+export function suggestionsFor(adminOnly: boolean, submitter = false) {
+  if (adminOnly) {
+    return ["Ada berapa user di sistem?", "Klien mana yang belum punya PIC?", "Akun mana yang nonaktif?",
+            "Apa itu Segregation of Duties?"];
+  }
+  if (submitter) {
+    return ["Progres invoice yang terakhir saya update", "Invoice mana yang ada kendala?",
+            "Berapa voucher yang sudah disetujui?", "Apa arti MISSING_EVIDENCE?"];
+  }
+  return ["Dokumen yang terakhir saya tangani", "Progres Finance Reviewer minggu ini", "Invoice mana yang lewat tenggat?",
+          "Apa arti MISSING_EVIDENCE?"];
 }
 
 /** Daftar pesan, termasuk sapaan + saran pertanyaan saat percakapan masih kosong. */
-export function ChatThread({ chat, adminOnly, greeting }: {
-  chat: ReturnType<typeof useAssistantChat>; adminOnly: boolean; greeting: ReactNode;
+export function ChatThread({ chat, adminOnly, greeting, onNavigate }: {
+  chat: ReturnType<typeof useAssistantChat>; adminOnly: boolean; greeting: ReactNode; onNavigate?: () => void;
 }) {
   const { messages, busy, ask, rate } = chat;
+  const { submitter } = useAssistantAccess();
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => { bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight); }, [messages, busy]);
 
@@ -91,13 +103,14 @@ export function ChatThread({ chat, adminOnly, greeting }: {
       {messages.length === 0 && (
         <>
           <div className="msg bot">{greeting}</div>
-          <div className="suggest">{suggestionsFor(adminOnly).map((s) => <button key={s} onClick={() => ask(s)}>{s}</button>)}</div>
+          <div className="suggest">{suggestionsFor(adminOnly, submitter).map((s) => <button key={s} onClick={() => ask(s)}>{s}</button>)}</div>
         </>
       )}
       {messages.map((m, i) => (
-        <div key={i} className={`msg ${m.role}${m.tables?.length ? " wide" : ""}`}>
+        <div key={i} className={`msg ${m.role}${m.tables?.length || m.cards?.length ? " wide" : ""}`}>
           {m.role === "bot" ? <RichText text={m.text} /> : m.text}
-          {m.tables?.map((t, j) => <ResultTable key={`${t.title}-${j}`} table={t} />)}
+          {m.cards?.map((c) => <DocCardView key={c.request_id} card={c} onNavigate={onNavigate} />)}
+          {m.tables?.map((t, j) => <ResultTable key={`${t.title}-${j}`} table={t} onNavigate={onNavigate} />)}
           {m.role === "bot" && (m.usedData !== undefined) && (
             <div className="msg-meta">
               {m.usedData
@@ -138,11 +151,16 @@ export function ChatInput({ chat, autoFocus }: { chat: ReturnType<typeof useAssi
   );
 }
 
-export function greetingText(name: string | undefined, adminOnly: boolean) {
+export function greetingText(name: string | undefined, adminOnly: boolean, submitter = false) {
+  const data = submitter
+    ? "Tanya juga soal pengajuan perusahaan Anda, mis. progres, invoice yang ada kendala, atau voucher yang sudah terbit"
+    : "Tanya juga soal data, mis. progres PIC, beban reviewer, atau invoice yang bermasalah";
   return (
     <>
-      Halo {name?.split(" ")[0]}! Saya menjawab dari SOP AMIGA
-      {adminOnly ? "." : ". Tanya juga soal data, mis. progres PIC, beban reviewer, atau invoice yang bermasalah; jawabannya diambil langsung dari sistem. Bisa lanjut bertanya, mis. \"tampilkan detail dokumen tersebut\"."}
+      Halo {name?.split(" ")[0]}! Saya asisten pribadi akun Anda. Saya menjawab dari SOP AMIGA
+      {adminOnly
+        ? " dan data administrasi: akun pengguna, peran, dan klien. Hasilnya bisa diklik untuk membuka halaman terkait."
+        : `. ${data}; jawabannya diambil langsung dari sistem dan bisa diklik untuk membuka halaman terkait. Bisa lanjut bertanya, mis. "tampilkan detail dokumen tersebut".`}
     </>
   );
 }
@@ -151,7 +169,7 @@ export function greetingText(name: string | undefined, adminOnly: boolean) {
 export function Assistant() {
   const { user } = useAuth();
   const { pathname } = useLocation();
-  const { allowed, adminOnly } = useAssistantAccess();
+  const { allowed, adminOnly, submitter } = useAssistantAccess();
   const [open, setOpen] = useState(false);
   const chat = useAssistantChat();
 
@@ -170,7 +188,8 @@ export function Assistant() {
             <button className="btn ghost sm" title="Percakapan baru" onClick={chat.reset}><RotateCcw /></button>
             <button className="btn ghost sm" onClick={() => setOpen(false)} aria-label="Tutup asisten"><X /></button>
           </div>
-          <ChatThread chat={chat} adminOnly={adminOnly} greeting={greetingText(user?.full_name, adminOnly)} />
+          <ChatThread chat={chat} adminOnly={adminOnly} greeting={greetingText(user?.full_name, adminOnly, submitter)}
+                      onNavigate={() => setOpen(false)} />
           <ChatInput chat={chat} autoFocus />
         </section>
       )}
@@ -200,7 +219,69 @@ function RichText({ text }: { text: string }) {
   );
 }
 
-function ResultTable({ table }: { table: DataTable }) {
+/** Hanya tautan internal aplikasi (diawali "/"), supaya isi data tidak bisa membuat tautan keluar. */
+const internal = (href: string | null | undefined): href is string => Boolean(href && href.startsWith("/") && !href.startsWith("//"));
+
+function LinkRow({ links, onNavigate }: { links?: AssistantLink[]; onNavigate?: () => void }) {
+  const safe = (links ?? []).filter((l) => internal(l.href));
+  if (!safe.length) return null;
+  return (
+    <div className="chat-links">
+      {safe.map((l) => (
+        <Link key={l.href + l.label} to={l.href} className={`chat-link${l.primary ? " primary" : ""}`} onClick={onNavigate}>
+          {l.label} <ArrowUpRight size={13} />
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+/** Kartu dokumen: status, tahapan progres, detail, riwayat, saran langkah berikutnya, dan tautan. */
+function DocCardView({ card, onNavigate }: { card: DocCard; onNavigate?: () => void }) {
+  const [showHistory, setShowHistory] = useState(false);
+  return (
+    <div className="doc-card">
+      <div className="doc-card-head">
+        {internal(card.href)
+          ? <Link to={card.href} className="mono doc-card-id" onClick={onNavigate}>{card.request_id}</Link>
+          : <b className="mono">{card.request_id}</b>}
+        <StatusBadge status={card.status} />
+      </div>
+      <div className="doc-card-sub">{card.subtitle}</div>
+      <ol className="doc-steps">
+        {card.steps.map((s) => (
+          <li key={s.label} className={s.state} title={[s.at, s.detail].filter(Boolean).join(" · ")}>
+            <span>{s.state === "done" ? <Check size={11} /> : s.state === "bad" ? <X size={11} /> : null}</span>
+            <b>{s.label}</b>
+            <small>{s.detail ?? s.at ?? ""}</small>
+          </li>
+        ))}
+      </ol>
+      {card.hint && <div className={`doc-card-hint${card.status === "EXCEPTION" ? " warn" : ""}`}><Lightbulb size={14} /> {card.hint}</div>}
+      <dl className="chat-record">
+        {card.fields.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}
+      </dl>
+      {card.history.length > 0 && (
+        <div className="doc-history">
+          <button type="button" onClick={() => setShowHistory((v) => !v)} aria-expanded={showHistory}>
+            <ChevronDown size={14} style={{ transform: showHistory ? "rotate(180deg)" : undefined }} />
+            Riwayat aktivitas ({card.history.length} terbaru)
+          </button>
+          {showHistory && (
+            <ul>
+              {card.history.map((h, i) => (
+                <li key={i}><small>{h.at}</small><span><b>{h.action}</b> · {h.actor}{h.note && <> · {h.note}</>}</span></li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <LinkRow links={card.links} onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function ResultTable({ table, onNavigate }: { table: DataTable; onNavigate?: () => void }) {
   const record = table.columns.length === 2 && table.columns[0] === "Kolom";
   return (
     <div className="chat-table">
@@ -213,10 +294,18 @@ function ResultTable({ table }: { table: DataTable }) {
         <div className="chat-table-scroll">
           <table>
             <thead><tr>{table.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-            <tbody>{table.rows.map((r, i) => <tr key={i}>{r.map((v, j) => <td key={j}>{v}</td>)}</tr>)}</tbody>
+            <tbody>{table.rows.map((r, i) => {
+              const href = table.row_links?.[i];
+              return (
+                <tr key={i}>{r.map((v, j) => (
+                  <td key={j}>{j === 0 && internal(href) ? <Link to={href} onClick={onNavigate}>{v}</Link> : v}</td>
+                ))}</tr>
+              );
+            })}</tbody>
           </table>
         </div>
       )}
+      <LinkRow links={table.links} onNavigate={onNavigate} />
     </div>
   );
 }
