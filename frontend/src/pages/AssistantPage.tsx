@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Bot, MessageSquarePlus, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Trash2 } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import {
-  ChatInput, ChatThread, greetingText, useAssistantAccess, useAssistantChat,
+  ChatHeader, ChatInput, ChatThread, scopeText, useAssistantAccess, useAssistantChat,
 } from "../components/Assistant";
 import { Alert, useApi } from "../components/ui";
 import { waktu } from "../format";
@@ -64,19 +64,9 @@ export function AssistantPage() {
         </ul>
       </aside>
       <section className="card assistant-main" aria-label="Asisten AMIGA">
-        <div className="chat-head">
-          <Bot size={18} color="var(--primary)" />
-          <div style={{ flex: 1 }}>
-            <b>Asisten AMIGA</b>
-            <div className="muted" style={{ fontSize: 12 }}>
-              {adminOnly ? "Menjawab dari SOP AMIGA"
-                : submitter ? "Menjawab dari SOP dan data perusahaan yang ditugaskan kepada Anda"
-                : "Menjawab dari SOP dan data semua perusahaan, sesuai hak akses Anda"}
-            </div>
-          </div>
-        </div>
+        <ChatHeader subtitle={scopeText(adminOnly, submitter)} />
         {(error || sessions.error) && <div style={{ padding: "10px 14px 0" }}><Alert>{error ?? sessions.error}</Alert></div>}
-        <ChatThread chat={chat} adminOnly={adminOnly} greeting={greetingText(user?.full_name, adminOnly, submitter)} />
+        <ChatThread chat={chat} adminOnly={adminOnly} name={user?.full_name} />
         <ChatInput chat={chat} autoFocus />
       </section>
     </div>

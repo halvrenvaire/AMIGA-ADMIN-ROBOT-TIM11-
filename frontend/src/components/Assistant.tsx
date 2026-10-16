@@ -1,6 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowUpRight, Bot, Check, ChevronDown, Database, Lightbulb, Loader2, Maximize2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
+import {
+  Activity, AlertTriangle, ArrowUp, ArrowUpRight, BookOpen, Check, ChevronDown, Database, Lightbulb, Maximize2, Receipt,
+  RotateCcw, Sparkles, ThumbsDown, ThumbsUp, Users, X, type LucideIcon,
+} from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { StatusBadge } from "./ui";
@@ -89,46 +92,95 @@ export function suggestionsFor(adminOnly: boolean, submitter = false) {
           "Apa arti MISSING_EVIDENCE?"];
 }
 
+/** Ikon untuk saran pertanyaan, ditebak dari kata kuncinya. */
+function suggestionIcon(text: string): LucideIcon {
+  if (/kendala|tenggat|lewat/i.test(text)) return AlertTriangle;
+  if (/voucher/i.test(text)) return Receipt;
+  if (/^apa (arti|itu)/i.test(text)) return BookOpen;
+  if (/user|akun|klien|PIC\b/i.test(text)) return Users;
+  return Activity;
+}
+
+/** Avatar Asisten (ikon kilau di lingkaran bergradien). */
+export function ChatAvatar({ size = "sm" }: { size?: "sm" | "lg" }) {
+  return <span className={`chat-avatar ${size}`} aria-hidden="true"><Sparkles /></span>;
+}
+
+/** Sapaan singkat + kartu saran pertanyaan saat percakapan masih kosong. */
+function ChatWelcome({ name, adminOnly, submitter, onAsk }: {
+  name?: string; adminOnly: boolean; submitter: boolean; onAsk: (q: string) => void;
+}) {
+  const scope = adminOnly
+    ? "Tanya soal SOP AMIGA, akun pengguna, peran, dan klien."
+    : submitter
+      ? "Tanya soal SOP, progres pengajuan, invoice yang ada kendala, atau voucher perusahaan Anda."
+      : "Tanya soal SOP, progres tim, beban reviewer, atau invoice yang bermasalah.";
+  return (
+    <div className="chat-welcome">
+      <ChatAvatar size="lg" />
+      <h3>Halo, {name?.split(" ")[0] ?? "Anda"} 👋</h3>
+      <p>{scope}</p>
+      <p className="chat-welcome-note">Jawaban diambil langsung dari sistem sesuai hak akses Anda, dan bisa diklik untuk membuka halaman terkait.</p>
+      <div className="suggest">
+        {suggestionsFor(adminOnly, submitter).map((q) => {
+          const Icon = suggestionIcon(q);
+          return (
+            <button key={q} type="button" onClick={() => onAsk(q)}>
+              <span className="suggest-ic"><Icon /></span>
+              <span className="suggest-text">{q}</span>
+              <ArrowUpRight className="suggest-go" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Daftar pesan, termasuk sapaan + saran pertanyaan saat percakapan masih kosong. */
-export function ChatThread({ chat, adminOnly, greeting, onNavigate }: {
-  chat: ReturnType<typeof useAssistantChat>; adminOnly: boolean; greeting: ReactNode; onNavigate?: () => void;
+export function ChatThread({ chat, adminOnly, name, onNavigate }: {
+  chat: ReturnType<typeof useAssistantChat>; adminOnly: boolean; name?: string; onNavigate?: () => void;
 }) {
   const { messages, busy, ask, rate } = chat;
   const { submitter } = useAssistantAccess();
   const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight); }, [messages, busy]);
+  useEffect(() => { bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" }); }, [messages, busy]);
 
   return (
-    <div className="chat-body" ref={bodyRef}>
-      {messages.length === 0 && (
-        <>
-          <div className="msg bot">{greeting}</div>
-          <div className="suggest">{suggestionsFor(adminOnly, submitter).map((s) => <button key={s} onClick={() => ask(s)}>{s}</button>)}</div>
-        </>
-      )}
-      {messages.map((m, i) => (
-        <div key={i} className={`msg ${m.role}${m.tables?.length || m.cards?.length ? " wide" : ""}`}>
-          {m.role === "bot" ? <RichText text={m.text} /> : m.text}
-          {m.cards?.map((c) => <DocCardView key={c.request_id} card={c} onNavigate={onNavigate} />)}
-          {m.tables?.map((t, j) => <ResultTable key={`${t.title}-${j}`} table={t} onNavigate={onNavigate} />)}
-          {m.role === "bot" && (m.usedData !== undefined) && (
-            <div className="msg-meta">
-              {m.usedData
-                ? <span title={m.queryLabel ?? undefined}>
-                    <Database size={12} style={{ verticalAlign: "-2px" }} /> {m.queryLabel ?? "data antrean terkini"}
-                  </span>
-                : <span>{m.sources} kutipan SOP</span>}
-              {m.answerId && (
-                <>
-                  <button aria-pressed={m.feedback === 1} onClick={() => rate(i, true)} title="Membantu">👍</button>
-                  <button aria-pressed={m.feedback === -1} onClick={() => rate(i, false)} title="Tidak membantu">👎</button>
-                </>
+    <div className="chat-body" ref={bodyRef} aria-live="polite">
+      {messages.length === 0 && <ChatWelcome name={name} adminOnly={adminOnly} submitter={submitter} onAsk={ask} />}
+      {messages.map((m, i) => {
+        const wide = m.tables?.length || m.cards?.length ? " wide" : "";
+        return (
+          <div key={i} className={`msg-row ${m.role}${wide}`}>
+            {m.role === "bot" && <ChatAvatar />}
+            <div className={`msg ${m.role}${wide}`}>
+              {m.role === "bot" ? <RichText text={m.text} /> : m.text}
+              {m.cards?.map((c) => <DocCardView key={c.request_id} card={c} onNavigate={onNavigate} />)}
+              {m.tables?.map((t, j) => <ResultTable key={`${t.title}-${j}`} table={t} onNavigate={onNavigate} />)}
+              {m.role === "bot" && (m.usedData !== undefined) && (
+                <div className="msg-meta">
+                  {m.usedData
+                    ? <span className="msg-source" title={m.queryLabel ?? undefined}><Database /> {m.queryLabel ?? "data antrean terkini"}</span>
+                    : <span className="msg-source"><BookOpen /> {m.sources} kutipan SOP</span>}
+                  {m.answerId && (
+                    <span className="msg-rate">
+                      <button type="button" aria-pressed={m.feedback === 1} onClick={() => rate(i, true)} title="Membantu" aria-label="Jawaban membantu"><ThumbsUp /></button>
+                      <button type="button" aria-pressed={m.feedback === -1} onClick={() => rate(i, false)} title="Tidak membantu" aria-label="Jawaban tidak membantu"><ThumbsDown /></button>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
-          )}
+          </div>
+        );
+      })}
+      {busy && (
+        <div className="msg-row bot">
+          <ChatAvatar />
+          <div className="msg bot typing" role="status" aria-label="Asisten sedang menyiapkan jawaban"><i /><i /><i /></div>
         </div>
-      ))}
-      {busy && <div className="msg bot"><Loader2 className="spin" size={14} /> Menyiapkan jawaban…</div>}
+      )}
     </div>
   );
 }
@@ -143,26 +195,38 @@ export function ChatInput({ chat, autoFocus }: { chat: ReturnType<typeof useAssi
   };
   return (
     <form className="chat-form" onSubmit={submit}>
-      <textarea className="input" rows={1} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey}
-                autoFocus={autoFocus} placeholder="Tanya tentang SOP atau data… (Enter kirim, Shift+Enter baris baru)"
-                aria-label="Pertanyaan" maxLength={2000} />
-      <button className="btn primary" disabled={chat.busy || !input.trim()} aria-label="Kirim"><Send /></button>
+      <div className="chat-compose">
+        <textarea rows={1} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey}
+                  autoFocus={autoFocus} placeholder="Tulis pertanyaan tentang SOP atau data…"
+                  aria-label="Pertanyaan" maxLength={2000} />
+        <button className="chat-send" disabled={chat.busy || !input.trim()} aria-label="Kirim"><ArrowUp /></button>
+      </div>
+      <div className="chat-hint">
+        <span><kbd>Enter</kbd> kirim · <kbd>Shift</kbd>+<kbd>Enter</kbd> baris baru</span>
+        <span>AI bisa keliru, cek dokumen asli</span>
+      </div>
     </form>
   );
 }
 
-export function greetingText(name: string | undefined, adminOnly: boolean, submitter = false) {
-  const data = submitter
-    ? "Tanya juga soal pengajuan perusahaan Anda, mis. progres, invoice yang ada kendala, atau voucher yang sudah terbit"
-    : "Tanya juga soal data, mis. progres PIC, beban reviewer, atau invoice yang bermasalah";
+/** Header Asisten: avatar, nama, status, dan tombol aksi. */
+export function ChatHeader({ subtitle, children }: { subtitle: string; children?: ReactNode }) {
   return (
-    <>
-      Halo {name?.split(" ")[0]}! Saya asisten pribadi akun Anda. Saya menjawab dari SOP AMIGA
-      {adminOnly
-        ? " dan data administrasi: akun pengguna, peran, dan klien. Hasilnya bisa diklik untuk membuka halaman terkait."
-        : `. ${data}; jawabannya diambil langsung dari sistem dan bisa diklik untuk membuka halaman terkait. Bisa lanjut bertanya, mis. "tampilkan detail dokumen tersebut".`}
-    </>
+    <div className="chat-head">
+      <ChatAvatar />
+      <div className="chat-title">
+        <b>Asisten AMIGA</b>
+        <span><i className="chat-online" aria-hidden="true" />{subtitle}</span>
+      </div>
+      {children && <div className="chat-actions">{children}</div>}
+    </div>
   );
+}
+
+export function scopeText(adminOnly: boolean, submitter: boolean) {
+  return adminOnly ? "Menjawab dari SOP AMIGA"
+    : submitter ? "SOP + data perusahaan Anda"
+    : "SOP + data semua perusahaan";
 }
 
 /** Tombol chat Asisten AI di semua layar (kecuali halaman Asisten itu sendiri). */
@@ -180,21 +244,19 @@ export function Assistant() {
     <>
       {open && (
         <section className="chat" aria-label="Asisten AMIGA">
-          <div className="chat-head">
-            <Bot size={18} color="var(--primary)" />
-            <b>Asisten AMIGA</b>
-            <Link className="btn ghost sm" to={fullUrl} title="Buka layar penuh" aria-label="Buka layar penuh"
+          <ChatHeader subtitle={scopeText(adminOnly, submitter)}>
+            <Link className="chat-icon-btn" to={fullUrl} title="Buka layar penuh" aria-label="Buka layar penuh"
                   onClick={() => setOpen(false)}><Maximize2 /></Link>
-            <button className="btn ghost sm" title="Percakapan baru" onClick={chat.reset}><RotateCcw /></button>
-            <button className="btn ghost sm" onClick={() => setOpen(false)} aria-label="Tutup asisten"><X /></button>
-          </div>
-          <ChatThread chat={chat} adminOnly={adminOnly} greeting={greetingText(user?.full_name, adminOnly, submitter)}
-                      onNavigate={() => setOpen(false)} />
+            <button type="button" className="chat-icon-btn" title="Percakapan baru" aria-label="Percakapan baru"
+                    onClick={chat.reset}><RotateCcw /></button>
+            <button type="button" className="chat-icon-btn" onClick={() => setOpen(false)} aria-label="Tutup asisten"><X /></button>
+          </ChatHeader>
+          <ChatThread chat={chat} adminOnly={adminOnly} name={user?.full_name} onNavigate={() => setOpen(false)} />
           <ChatInput chat={chat} autoFocus />
         </section>
       )}
-      <button className="fab" onClick={() => setOpen((o) => !o)}>
-        {open ? <X size={18} /> : <MessageCircle size={18} />} Asisten
+      <button className={`fab${open ? " open" : ""}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {open ? <X size={18} /> : <Sparkles size={18} />} {open ? "Tutup" : "Tanya Asisten"}
       </button>
     </>
   );
