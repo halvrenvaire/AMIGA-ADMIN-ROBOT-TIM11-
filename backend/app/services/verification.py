@@ -52,6 +52,19 @@ def rupiah(value: Decimal) -> str:
     return "Rp " + (text[:-3] if text.endswith(",00") else text)
 
 
+# Tarif PPN yang berlaku (11%, dan 12% sejak 2025): selisih sebesar ini hampir pasti PPN yang belum tercatat
+PPN_RATES = (Decimal("0.11"), Decimal("0.12"))
+
+
+def _tax_hint(line_sum: Decimal, total: Decimal) -> str:
+    diff = total - line_sum
+    for rate in PPN_RATES:
+        if line_sum > 0 and abs(diff - line_sum * rate) <= 1:  # toleransi pembulatan Rp 1
+            return (f" Selisihnya {rupiah(diff)} = {int(rate * 100)}% dari jumlah rincian, kemungkinan PPN yang "
+                    "belum tercatat di rincian. Bila invoice mencantumkan PPN, tambahkan baris pajak sebesar itu.")
+    return ""
+
+
 def verify(data: InvoiceData, duplicate_request_id: str | None = None,
            payees: list[tuple[str | None, str | None]] | None = None) -> list[Issue]:
     """`payees`: (vendor, rekening) ternormalisasi per invoice bila satu voucher berisi beberapa invoice."""
@@ -74,7 +87,8 @@ def verify(data: InvoiceData, duplicate_request_id: str | None = None,
         if line_sum != data.total:
             issues.append(Issue(IssueCode.CALCULATION_DISCREPANCY, "total",
                                 f"Jumlah rincian barang ({rupiah(line_sum)}) tidak sama dengan total "
-                                f"invoice ({rupiah(data.total)}). Konfirmasi ke vendor mana yang benar."))
+                                f"invoice ({rupiah(data.total)}). Konfirmasi ke vendor mana yang benar."
+                                + _tax_hint(line_sum, data.total)))
 
     vendors = {v for v, _ in payees or [] if v}
     accounts = {a for _, a in payees or [] if a}

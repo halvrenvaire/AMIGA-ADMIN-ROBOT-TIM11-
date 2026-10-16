@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from itertools import combinations
 
 from app.config import settings
 from app.services.bedrock_client import BedrockClient, BedrockError
@@ -66,7 +67,26 @@ Tanggal di dokumen Indonesia biasanya ditulis hari-bulan-tahun ("12-10-2026" = 1
   "Total", "Total Bayar", "Grand Total", "Jumlah". Baris di bawah judul seperti "Ringkasan Biaya" yang
   menjumlahkan item sebelumnya juga "summary".
 Untuk "description", tulis teks baris itu sendiri (mis. "Subtotal Tiket"), bukan judul bagiannya.
+PENTING: pajak, biaya, dan potongan sering ditulis DI BAWAH tabel barang, di bagian ringkasan/total
+(mis. "PPN 94.050", "PPh 23", "Ongkos kirim", "Materai", "Diskon"). Baris seperti itu tetap WAJIB masuk
+line_items dengan kind "tax", "fee", atau "discount", bukan "summary". Yang "summary" hanya baris yang
+nilainya penjumlahan baris lain (mis. "Jumlah Harga Jual", "Subtotal", "DPP", "Nilai Yang Harus Dibayar").
+Lewati baris tanpa nilai uang (mis. "PPN Free" tanpa angka).
 Pada invoice yang benar, jumlah subtotal semua baris selain "summary" sama dengan "total"."""
+
+FOLLOWUP_SYSTEM_PROMPT = """Kamu memeriksa ulang satu invoice untuk bagian keuangan. Tugasmu HANYA mencari baris
+pajak, biaya, atau potongan yang terlewat pada pembacaan sebelumnya, lalu menyalinnya persis seperti tertulis.
+Jangan mengulang data lain, jangan mengklasifikasikan dokumen, dan jawab hanya dengan JSON yang diminta."""
+
+FOLLOWUP_INSTRUCTION = """Pembacaan pertama mencatat rincian berikut (selain baris ringkasan):
+{lines}
+Jumlahnya {line_sum}, sedangkan total yang harus dibayar {total}.
+Periksa ulang dokumen: adakah baris pajak (PPN, PPh), biaya (ongkos kirim, materai, admin, layanan), atau
+potongan/diskon yang BELUM tercatat di atas? Biasanya letaknya di bawah tabel barang, dekat total.
+Kembalikan HANYA satu objek JSON:
+{{"missing_lines": [{{"kind": "tax"|"fee"|"discount", "description": string, "subtotal": string}}]}}
+Salin angka persis seperti tertulis di dokumen. Jangan menghitung, menebak, atau mengarang angka.
+Jika tidak ada baris yang terlewat, kembalikan {{"missing_lines": []}}."""
 
 
 # Jenis dokumen (dari jawaban AI) yang jelas bukan tagihan vendor, dan yang jelas tagihan
@@ -74,6 +94,11 @@ NON_INVOICE_TYPE = re.compile(
     r"struk|receipt|voucher|purchase order|\bpo\b|penawaran|quotation|surat jalan|delivery|bukti (transfer|bayar|pembayaran)"
     r"|kontrak|lamaran|\bcv\b|laporan|notulen|sertifikat|sertifikasi|presentasi|formulir", re.IGNORECASE)
 DISCOUNT_DESC = re.compile(r"\b(diskon|discount|potongan|rabat)\b", re.IGNORECASE)
+# Pajak, biaya, atau potongan: komponen tagihan, bukan ringkasan
+CHARGE_DESC = re.compile(
+    r"\b(ppn|pph|pajak|tax|vat|ongkir|ongkos|biaya|materai|meterai|admin|layanan|service|pengiriman|delivery|"
+    r"diskon|discount|potongan|rabat)\b", re.IGNORECASE)
+MAX_RECOVERY_CANDIDATES = 5
 CHANGE_LINE = re.compile(r"\bkembali(an)?\b|\bchange\b", re.IGNORECASE)
 INVOICE_TYPE = re.compile(r"invoice|faktur|tagihan|nota tagihan|bill\b", re.IGNORECASE)
 # Bukti transaksi yang sudah dibayar: diekstrak sebagai draft, bukan ditolak
@@ -210,6 +235,31 @@ def drop_running_subtotals(lines: list[ExtractedLine], total: Decimal | None) ->
     return kept, [line.description or "-" for line in removed]
 
 
+def _charge_line(description: str | None, amount: Decimal | None, kind: str = "") -> ExtractedLine:
+    line = ExtractedLine(description=description, subtotal=amount)
+    if line.subtotal is not None and (kind == "discount" or DISCOUNT_DESC.search(description or "")):
+        line.subtotal = -abs(line.subtotal)
+    return line
+
+
+def complete_with_charges(lines: list[ExtractedLine], candidates: list[ExtractedLine],
+                          total: Decimal | None) -> list[ExtractedLine]:
+    """Baris pajak/biaya/potongan dari `candidates` yang membuat jumlah rincian PERSIS sama dengan total.
+    Kombinasi terkecil yang pas dipilih; bila tidak ada yang pas, tidak ada yang ditambahkan (selisih
+    tetap dilaporkan verifikasi sistem). Sistem tidak pernah menghitung atau mengarang angka sendiri."""
+    if total is None or not lines or any(line.subtotal is None for line in lines):
+        return []
+    line_sum = sum((line.subtotal for line in lines), Decimal(0))
+    pool = [c for c in candidates if c.subtotal not in (None, Decimal(0))][:MAX_RECOVERY_CANDIDATES]
+    if line_sum == total or not pool:
+        return []
+    for size in range(1, len(pool) + 1):
+        for combo in combinations(pool, size):
+            if line_sum + sum(c.subtotal for c in combo) == total:
+                return list(combo)
+    return []
+
+
 def parse_response(text: str) -> ExtractedInvoice:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
@@ -223,12 +273,15 @@ def parse_response(text: str) -> ExtractedInvoice:
 
     lines = []
     summaries = []
+    summary_charges: list[ExtractedLine] = []
     for item in data.get("line_items") or []:
         if not isinstance(item, dict):
             continue
         # Baris ringkasan (Subtotal/Total) bukan komponen tagihan; bila ikut, nilainya terhitung dua kali
         if str(item.get("kind") or "").lower() == "summary":
             summaries.append(to_text(item.get("description")) or "-")
+            if CHARGE_DESC.search(str(item.get("description") or "")):
+                summary_charges.append(_charge_line(to_text(item.get("description")), to_decimal(item.get("subtotal"))))
             continue
         line = ExtractedLine(
             description=to_text(item.get("description")),
@@ -246,6 +299,13 @@ def parse_response(text: str) -> ExtractedInvoice:
 
     total = to_decimal(data.get("total"))
     lines, removed = drop_running_subtotals(lines, total)
+    # Baris pajak/biaya yang keliru dilabeli "summary" (mis. "PPN") dikembalikan, bila membuat hitungan pas
+    recovered = complete_with_charges(lines, summary_charges, total)
+    if recovered:
+        lines = lines + recovered
+        names = {line.description or "-" for line in recovered}
+        summaries = [name for name in summaries if name not in names]
+        data = {**data, "charges_recovered_from_summary": [line.description for line in recovered]}
     if summaries or removed:
         data = {**data, "summary_lines_skipped": summaries + removed}
     # Titik ribuan terbaca sebagai desimal ("2.695.000" → 2695): koreksi hanya bila total tepat
@@ -294,6 +354,20 @@ def parse_response(text: str) -> ExtractedInvoice:
     )
 
 
+def _followup_items(answer) -> list[dict]:
+    """Baris dari jawaban pembacaan ulang. Bila AI tetap mengirim ulang seluruh data (bukan "missing_lines"),
+    baris pajak/biaya/potongan di dalamnya tetap dipakai sebagai kandidat."""
+    if not isinstance(answer, dict):
+        return []
+    found = answer.get("missing_lines")
+    if not isinstance(found, list):
+        nested = next((v for v in answer.values() if isinstance(v, dict) and "line_items" in v), {})
+        found = [item for item in answer.get("line_items") or nested.get("line_items") or []
+                 if isinstance(item, dict) and (str(item.get("kind") or "").lower() in ("tax", "fee", "discount")
+                                                or CHARGE_DESC.search(str(item.get("description") or "")))]
+    return [item for item in found if isinstance(item, dict)]
+
+
 class InvoiceExtractor:
     def __init__(self, bedrock: BedrockClient):
         self.bedrock = bedrock
@@ -304,4 +378,34 @@ class InvoiceExtractor:
                                          max_tokens=settings.extraction_max_tokens)
         except BedrockError as e:
             raise ExtractionError(str(e)) from e
-        return parse_response(text)
+        result = parse_response(text)
+        self._find_missing_charges(pdf_bytes, result)
+        return result
+
+    def _find_missing_charges(self, pdf_bytes: bytes, result: ExtractedInvoice) -> None:
+        """Bila jumlah rincian tidak sama dengan total, minta AI sekali lagi mencari baris pajak/biaya/potongan
+        yang terlewat (mis. PPN di bawah tabel). Hasilnya dipakai HANYA bila membuat hitungan pas persis."""
+        lines, total = result.line_items, result.total
+        if result.doc_class == IRRELEVANT or total is None or not lines or any(l.subtotal is None for l in lines):
+            return
+        line_sum = sum((line.subtotal for line in lines), Decimal(0))
+        if line_sum == total:
+            return
+        listing = "\n".join(f"- {line.description or '-'}: {line.subtotal}" for line in lines)
+        try:
+            text = self.bedrock.read_pdf(
+                FOLLOWUP_SYSTEM_PROMPT, pdf_bytes,
+                FOLLOWUP_INSTRUCTION.format(lines=listing, line_sum=line_sum, total=total), max_tokens=800)
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            answer = json.loads(match.group(0)) if match else {}
+        except (BedrockError, json.JSONDecodeError):
+            return  # pembacaan pertama tetap dipakai; selisih dilaporkan verifikasi sistem
+        candidates = [
+            _charge_line(to_text(item.get("description")), to_decimal(item.get("subtotal")),
+                         str(item.get("kind") or "").lower())
+            for item in _followup_items(answer)
+        ]
+        recovered = complete_with_charges(lines, candidates, total)
+        if recovered:
+            result.line_items = lines + recovered
+            result.raw = {**result.raw, "charges_recovered_by_followup": [line.description for line in recovered]}
