@@ -539,3 +539,22 @@ class DashboardMetrics(BaseModel):
 
 # DocumentDetail merujuk Signer yang didefinisikan di bawahnya
 DocumentDetail.model_rebuild()
+
+
+# --- Telegram (bot @amiga_ro_bot) ---
+
+class TelegramStatus(BaseModel):
+    configured: bool  # token bot sudah diisi di server
+    linked: bool
+    telegram_username: str | None
+    linked_at: datetime | None
+    bot_username: str
+    bot_url: str
+
+
+class TelegramLinkCodeOut(BaseModel):
+    code: str
+    expires_at: datetime
+    bot_username: str
+    # Membuka chat bot dan langsung mengirim kode (tautan t.me dengan parameter start)
+    deep_link: str

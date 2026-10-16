@@ -232,3 +232,20 @@ export interface DashboardMetrics {
   value_by_client: { client: string; value: string; count: number }[];
   top_vendors: { vendor: string; value: string; count: number }[];
 }
+
+/** Status hubungan akun dengan bot Telegram (Pengaturan akun). */
+export interface TelegramStatus {
+  configured: boolean;
+  linked: boolean;
+  telegram_username: string | null;
+  linked_at: string | null;
+  bot_username: string;
+  bot_url: string;
+}
+
+export interface TelegramLinkCode {
+  code: string;
+  expires_at: string;
+  bot_username: string;
+  deep_link: string;
+}

@@ -2,7 +2,7 @@
 
 **Sistem:** AMIGA Robot Admin (Intelligent Vendor Invoice-to-Voucher Processing)
 **Nomor SOP:** SOP-AMIGA-FIN-001
-**Versi:** 1.1 (Draft PoC — MAIN Hackathon 2026, selaras dengan BRD v1.1 dan PRD v2)
+**Versi:** 1.2 (Draft PoC — MAIN Hackathon 2026, selaras dengan BRD v1.1 dan PRD v2)
 **Tanggal berlaku:** [diisi saat disahkan]
 **Pemilik proses:** Tim AMIGA Intelligent Back Office
 **Disusun oleh:** TEAM 11 MAIN
@@ -57,7 +57,8 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 | NEEDS_MANUAL_REVIEW | Kendala: jenis dokumen meragukan atau datanya terlalu sedikit; Finance Reviewer memeriksa secara manual |
 | ACCOUNT_MISMATCH | Kendala: nomor rekening berbeda dengan rekening vendor yang sudah diverifikasi Finance Reviewer |
 | Vendor terverifikasi | Vendor di Data Referensi yang rekeningnya sudah dicek Finance Reviewer ke sumber tepercaya. Menjadi acuan pemeriksaan rekening |
-| Saluran | Asal pengajuan invoice sebelum diunggah ke sistem, misalnya Email atau WhatsApp. Hanya dicatat sebagai keterangan |
+| Saluran | Asal pengajuan invoice, misalnya Email atau WhatsApp. Hanya dicatat sebagai keterangan. Bernilai **Telegram** bila invoice diunggah lewat bot resmi |
+| Bot Telegram resmi | Bot @amiga_ro_bot yang terhubung ke akun AMIGA lewat kode sekali pakai dari Pengaturan akun. Pintu masuk resmi kedua selain dashboard |
 | Segregation of Duties (SoD) | Aturan bahwa pengunggah dokumen tidak boleh menyetujui dokumen yang sama |
 
 ## 5. Peran dan Tanggung Jawab
@@ -78,9 +79,10 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 1. Invoice wajib berformat **PDF digital, maksimal 5 halaman**.
 2. Setiap invoice **wajib ditinjau** Finance Reviewer sebelum voucher terbit. Hasil AI tidak boleh dipakai tanpa peninjauan.
 3. Pengiriman invoice lewat WhatsApp atau Email **tidak diproses**. PIC diarahkan untuk mengunggah ke sistem, dan asal pengajuan dicatat di kolom **Saluran**.
-4. Pengguna hanya mengakses data klien yang ditugaskan kepadanya.
-5. Jejak audit tidak boleh diubah atau dihapus oleh siapa pun, termasuk System Admin.
-6. Selama PoC, gunakan **data dummy atau data yang sudah dianonimkan**.
+4. Invoice boleh diunggah lewat **dashboard** atau lewat **bot Telegram resmi** (@amiga_ro_bot) dari **chat pribadi** akun yang sudah terhubung. Keduanya masuk ke sistem yang sama dengan aturan yang sama. Mengirim invoice ke nomor/akun lain, atau ke grup chat, tetap tidak diproses.
+5. Pengguna hanya mengakses data klien yang ditugaskan kepadanya.
+6. Jejak audit tidak boleh diubah atau dihapus oleh siapa pun, termasuk System Admin.
+7. Selama PoC, gunakan **data dummy atau data yang sudah dianonimkan**.
 
 ## 7. Prosedur
 
@@ -92,6 +94,14 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 4. Pastikan sistem menampilkan **Request ID** dan status **QUEUED**. Catat Request ID untuk pelacakan.
 5. Jika file ditolak (bukan PDF atau lebih dari 5 halaman), sistem mengembalikan Anda ke formulir unggah. Perbaiki file lalu ulangi dari langkah 3.
 6. Intake Support yang mengunggah atas nama klien hanya boleh melakukannya untuk klien yang didelegasikan. Sistem mencatat nama pengunggah sebenarnya.
+
+**Lewat bot Telegram (alternatif):**
+
+1. Hubungkan akun sekali saja: dashboard → **Pengaturan akun** → **Hubungkan Telegram**, lalu kirim kode ke @amiga_ro_bot. **Jangan pernah mengirim password di chat.**
+2. Kirim file invoice **PDF** (bukan foto) ke chat pribadi bot. Beberapa PDF untuk satu voucher boleh dikirim sekaligus.
+3. Pilih **perusahaan** dan **jenis permintaan** lewat tombol. Saluran terisi **Telegram** dan tanggal pengajuan terisi hari ini secara otomatis.
+4. Periksa ringkasan, lalu tekan **Kirim ke AMIGA**. Bot menampilkan **Request ID** dan status **QUEUED**, lalu mengabari hasil proses AI.
+5. Bila ada kendala, perbaiki datanya lewat dashboard (lihat 7.3).
 
 ### 7.2 Ekstraksi dan verifikasi otomatis — AI Engine dan Sistem
 
@@ -211,3 +221,4 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 | --- | --- | --- | --- |
 | 1.0 | 13 Oktober 2026 | Draf awal untuk PoC MAIN Hackathon 2026 | TEAM 11 MAIN |
 | 1.1 | 13 Oktober 2026 | Diselaraskan dengan BRD v1.1, PRD v2, dan BPMN revisi: field saluran, peran AI vs Sistem, perbaikan oleh PIC dengan ekstraksi ulang (Request ID sama), Kembalikan ke PIC, pengalihan otomatis saat penolakan SoD, Service Lead hanya mengatur beban, peran ganda | TEAM 11 MAIN |
+| 1.2 | 16 Oktober 2026 | Unggah invoice lewat bot Telegram resmi @amiga_ro_bot (6.4, 7.1); saluran Telegram | TEAM 11 MAIN |

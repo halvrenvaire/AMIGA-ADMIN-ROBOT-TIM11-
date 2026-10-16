@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, Numeric, SmallInteger, String, Text,
+    BigInteger, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, Numeric, SmallInteger, String, Text,
     UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, REAL, UUID
@@ -350,4 +350,36 @@ class QAMemory(Base):
     # Waktu index SOP saat jawaban dibuat; memori dari index lama diabaikan setelah /reindex
     index_version: Mapped[str] = mapped_column(String(64), index=True)
     feedback: Mapped[int | None] = mapped_column(SmallInteger)  # 1 = 👍, -1 = 👎, None = belum dinilai
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TelegramLink(Base):
+    """Chat Telegram pribadi yang terhubung ke akun AMIGA (bot @amiga_ro_bot).
+
+    Satu akun hanya terhubung ke satu chat, dan satu chat ke satu akun. Bot memanggil API atas nama
+    akun ini, jadi hak akses dan isolasi klien sama persis dengan dashboard.
+    """
+    __tablename__ = "telegram_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), unique=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(64))
+    # Percakapan Asisten yang sedang dipakai di Telegram; /reset membuat yang baru
+    session_id: Mapped[str] = mapped_column(String(100))
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship()
+
+
+class TelegramLinkCode(Base):
+    """Kode sekali pakai dari dashboard untuk menghubungkan Telegram, supaya password tidak pernah
+    diketik di chat. Yang disimpan hanya hash kodenya."""
+    __tablename__ = "telegram_link_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

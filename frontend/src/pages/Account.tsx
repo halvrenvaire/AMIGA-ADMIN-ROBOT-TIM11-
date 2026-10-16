@@ -1,12 +1,12 @@
-import { useState, type FormEvent } from "react";
-import { Check, Eye, EyeOff, KeyRound, Monitor, Moon, Palette, PenLine, Sun, UserRound, X } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Check, Eye, EyeOff, KeyRound, Monitor, Moon, Palette, PenLine, Send, Sun, UserRound, X } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignatureImage, SignatureModal } from "../components/Signature";
-import { Alert, initials } from "../components/ui";
+import { Alert, Loading, initials, useApi } from "../components/ui";
 import { ROLE_LABEL } from "../format";
 import { useTheme, type ThemeMode } from "../theme";
-import type { Me } from "../types";
+import type { Me, TelegramLinkCode, TelegramStatus } from "../types";
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
@@ -26,6 +26,7 @@ export function Account() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <AccountInfo user={user} />
+          <TelegramCard />
           {user.roles.includes("PIC_KLIEN") && <SignatureCard user={user} />}
           <ThemeCard />
         </div>
@@ -220,6 +221,110 @@ function SignatureCard({ user }: { user: Me }) {
       {open && (
         <SignatureModal title="Tanda tangan Anda" signer={user.full_name} onClose={() => setOpen(false)}
                         onSave={async (image) => { updateSession(await api.put<Me>("/auth/me/signature", { image })); setOpen(false); }} />
+      )}
+    </section>
+  );
+}
+
+/** Menghubungkan akun dengan bot Telegram lewat kode sekali pakai (password tidak diketik di chat). */
+function TelegramCard() {
+  const { data: status, error, loading, reload } = useApi(() => api.get<TelegramStatus>("/auth/me/telegram"), []);
+  const [code, setCode] = useState<TelegramLinkCode | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  const secondsLeft = code ? Math.max(0, Math.round((new Date(code.expires_at).getTime() - now) / 1000)) : 0;
+
+  // Selama kode tampil: hitung mundur, dan cek tiap 3 detik apakah bot sudah menerima kodenya
+  useEffect(() => {
+    if (!code) return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const poll = setInterval(async () => {
+      const s = await api.get<TelegramStatus>("/auth/me/telegram").catch(() => null);
+      if (s?.linked) {
+        setCode(null);
+        setNotice({ kind: "ok", text: `Telegram terhubung${s.telegram_username ? ` (@${s.telegram_username})` : ""}.` });
+        reload();
+      }
+    }, 3000);
+    return () => { clearInterval(tick); clearInterval(poll); };
+  }, [code, reload]);
+
+  async function createCode() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      setCode(await api.post<TelegramLinkCode>("/auth/me/telegram/link-code"));
+      setNow(Date.now());
+    } catch (e) {
+      setNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlink() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      await api.del("/auth/me/telegram");
+      setNotice({ kind: "ok", text: "Telegram diputus dari akun ini." });
+      reload();
+    } catch (e) {
+      setNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card panel">
+      <CardHead icon={Send} title="Telegram" note="Cek progres invoice dan tanya Asisten AI lewat bot Telegram." />
+      {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
+      {error && <Alert>{error}</Alert>}
+      {loading && !status ? <Loading /> : status && (
+        !status.configured ? (
+          <Alert kind="info">Bot Telegram belum diaktifkan di server. Hubungi tim teknis.</Alert>
+        ) : status.linked ? (
+          <>
+            <dl className="meta">
+              <dt>Status</dt><dd><span className="chip">Terhubung</span></dd>
+              <dt>Akun Telegram</dt><dd>{status.telegram_username ? `@${status.telegram_username}` : <span className="muted">tanpa username</span>}</dd>
+              <dt>Bot</dt><dd><a href={status.bot_url} target="_blank" rel="noreferrer">@{status.bot_username}</a></dd>
+            </dl>
+            <div className="actions">
+              <button className="btn sm" onClick={unlink} disabled={busy}>Putuskan Telegram</button>
+            </div>
+          </>
+        ) : code && secondsLeft > 0 ? (
+          <>
+            <div style={{ textAlign: "center", padding: "8px 0" }}>
+              <div className="muted" style={{ fontSize: 12.5 }}>Kode sekali pakai</div>
+              <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: 6, fontVariantNumeric: "tabular-nums" }}>{code.code}</div>
+              <div className="muted" style={{ fontSize: 12.5 }}>
+                Berlaku {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")} lagi
+              </div>
+            </div>
+            <div className="actions" style={{ justifyContent: "center" }}>
+              <a className="btn primary sm" href={code.deep_link} target="_blank" rel="noreferrer"><Send /> Buka @{code.bot_username}</a>
+              <button className="btn sm" onClick={() => setCode(null)}>Batal</button>
+            </div>
+            <small className="muted">
+              Klik tombol di atas lalu tekan <b>Start</b>, atau kirim <code>/login {code.code}</code> ke @{code.bot_username}.
+              Halaman ini otomatis berubah setelah terhubung.
+            </small>
+          </>
+        ) : (
+          <>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Belum terhubung. Buat kode, lalu kirim ke bot. Jangan pernah mengirim password Anda di chat.
+            </p>
+            <div className="actions">
+              <button className="btn primary sm" onClick={createCode} disabled={busy}><Send /> {code ? "Kode kedaluwarsa, buat lagi" : "Hubungkan Telegram"}</button>
+            </div>
+          </>
+        )
       )}
     </section>
   );

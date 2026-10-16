@@ -35,7 +35,8 @@ router = APIRouter(prefix="/documents", tags=["Dokumen Invoice"])
 
 uploader_roles = require_roles(Role.PIC_KLIEN, Role.INTAKE_SUPPORT)
 
-Channel = Literal["Email", "WhatsApp", "Lainnya"]
+# "Telegram" diisi otomatis oleh bot @amiga_ro_bot (unggah dari chat pribadi PIC yang terhubung)
+Channel = Literal["Email", "WhatsApp", "Lainnya", "Telegram"]
 
 
 # --- Helper ---

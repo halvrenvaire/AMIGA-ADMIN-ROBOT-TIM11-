@@ -62,5 +62,14 @@ class Settings(BaseSettings):
     qa_memory_min_score: float = 0.70
     qa_memory_top_k: int = 3
 
+    # Bot Telegram (backend/bot/telegram_bot.py)
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = "amiga_ro_bot"
+    # Alamat API yang dipanggil bot atas nama pengguna yang terhubung
+    bot_api_base_url: str = "http://127.0.0.1:8000"
+    # Alamat dashboard untuk tautan di pesan bot
+    frontend_url: str = "http://localhost:5173"
+    telegram_link_code_minutes: int = 10
+
 
 settings = Settings()

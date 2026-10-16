@@ -152,6 +152,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Data referensi vendor | Owner | ✅ | PIC Klien/Intake mendaftarkan vendor (NPWP, alamat, kontak, rekening) per klien; nama dinormalisasi agar tidak dobel; dipakai sebagai dropdown di filter & formulir; dokumen tertaut otomatis |
 | Penanda tangan voucher | Owner | ✅ | "Diajukan oleh" = PIC Klien yang mengajukan (nama + perusahaan); PIC Klien mendaftarkan pemberi persetujuan "Disetujui oleh" (1 kotak default, bisa ditambah hingga 5 per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
 | Manajemen voucher | Owner | ✅ | Tabel voucher dengan filter perusahaan, vendor, status, tanggal; dikelompokkan dengan subtotal; unduh CSV |
+| Bot Telegram `@amiga_ro_bot` | Tambahan | ✅ | **Unggah invoice PDF** (saluran Telegram, diproses AI lalu hasilnya dikabarkan), cek progres (`/terakhir`, `/kendala`, `/status`), dan tanya Asisten AI dari Telegram. Akun dihubungkan dengan kode sekali pakai dari Pengaturan akun; hak akses sama dengan dashboard. Lihat [Bot Telegram](#bot-telegram) |
 
 ### Rencana tahap berikutnya
 
@@ -245,6 +246,7 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
     │   └── services/           # Ekstraksi AI, verifikasi, proses dokumen, pemilihan reviewer, penyimpanan file,
     │                           # aturan akses, jejak audit, Bedrock, RAG (loader, chunker, FAISS, indexing), riwayat, memori
     ├── alembic/                # Migrasi database
+    ├── bot/telegram_bot.py     # Bot Telegram @amiga_ro_bot (program terpisah)
     ├── scripts/                # create_db.sh, make_dummy_invoices.py, e2e_server.sh (backend E2E :8001)
     ├── seed.py                 # Data dummy: 2 klien, 8 pengguna
     ├── tests/                  # pytest
@@ -316,6 +318,39 @@ npm run dev
 
 Buka <http://localhost:5173> dan login dengan akun dummy di atas. Request ke `/api/*` diteruskan Vite ke `http://localhost:8000` (ubah lewat `VITE_API_TARGET`). Cek tipe dan build produksi: `npm run build`.
 
+### Bot Telegram
+
+Bot `@amiga_ro_bot` adalah program terpisah yang membaca pesan Telegram lalu memanggil API AMIGA **atas nama akun yang terhubung**. Hak akses, isolasi klien, dan Asisten AI-nya sama persis dengan dashboard. Bot hanya melayani **chat pribadi**, bukan grup.
+
+1. Isi `TELEGRAM_BOT_TOKEN` (dari @BotFather) di `backend/.env`. ⚠️ Siapa pun yang memegang token bisa mengendalikan bot; jangan dibagikan.
+2. Jalankan server API (port 8000), lalu di **terminal lain**:
+
+   ```bash
+   cd backend
+   .venv/bin/python -m bot.telegram_bot
+   ```
+
+   Saat start, bot mendaftarkan menu perintah ke Telegram. Pesan yang menumpuk lebih dari 10 menit saat bot mati tidak dibalas.
+3. Hubungkan akun: login ke dashboard → **Pengaturan akun** → **Hubungkan Telegram** → klik **Buka @amiga_ro_bot** lalu **Start** (atau kirim `/login <kode>`). Kode 6 digit berlaku 10 menit dan sekali pakai; 5 kali salah → chat diblokir 15 menit. **Password tidak pernah diketik di chat.**
+
+| Perintah | Fungsi |
+| --- | --- |
+| `/login <kode>` | Hubungkan Telegram dengan akun AMIGA |
+| `/logout` | Putuskan Telegram dari akun |
+| `/reset` | Mulai percakapan baru dengan Asisten |
+| `/terakhir` | 5 invoice terbaru (Finance Reviewer: yang ditugaskan kepadanya) |
+| `/kendala` | Invoice berstatus EXCEPTION, tenggat terdekat di atas |
+| `/status REQ-...` | Detail dokumen: status, vendor, total, reviewer, kendala, tautan dashboard |
+| `/bantuan` | Daftar perintah dan contoh pertanyaan |
+| *(kalimat biasa)* | Dijawab Asisten AI (`/ask-agent`), termasuk pertanyaan data antrean |
+| *(kirim file PDF)* | Unggah invoice (PIC Klien / Intake Support), lihat di bawah |
+
+**Unggah invoice lewat bot** (SOP 6.4 & 7.1): kirim 1–10 file **PDF** (boleh sekaligus) → pilih perusahaan dan jenis permintaan lewat tombol → **Kirim ke AMIGA**. Bot memakai endpoint `POST /documents` yang sama dengan dashboard (saluran `Telegram`, tanggal hari ini, penanda tangan default klien), jadi semua aturan berlaku: maks. 5 halaman per file, hanya perusahaan yang ditugaskan, Request ID, ekstraksi AI, verifikasi, dan jejak audit. Setelah AI selesai (dipantau hingga 2 menit), bot mengabarkan **Siap ditinjau** atau **Ada kendala** beserta alasannya. Draft yang belum dikirim tersimpan di memori bot selama 30 menit (hilang bila bot di-restart).
+
+> ⚠️ File yang dikirim ke bot melewati server Telegram (chat bot tidak terenkripsi end-to-end). Untuk PoC memakai data dummy; untuk produksi perlu kajian UU PDP.
+
+System Admin tetap tidak bisa melihat data invoice lewat bot. Akun yang dinonaktifkan langsung kehilangan akses bot.
+
 ### Menjalankan test
 
 ```bash
@@ -361,6 +396,9 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET | `/auth/me` | Profil, peran, dan klien yang ditugaskan |
 | PATCH | `/auth/me` | Ubah nama tampilan/email sendiri (ganti email wajib password saat ini) |
 | POST | `/auth/me/password` | Ganti password sendiri; semua sesi lain keluar, respons berisi token baru |
+| GET | `/auth/me/telegram` | Status hubungan akun dengan bot Telegram |
+| POST | `/auth/me/telegram/link-code` | Kode sekali pakai (6 digit, 10 menit) + tautan `t.me` untuk menghubungkan bot |
+| DELETE | `/auth/me/telegram` | Putuskan Telegram dari akun |
 | GET | `/clients` | Klien yang ditugaskan kepada pengguna |
 | GET | `/clients/{id}` | Detail klien. Klien yang tidak ditugaskan ditolak (403) dan dicatat di jejak audit |
 | GET/POST | `/admin/users` | System Admin: daftar dan buat akun (peran + klien) |
@@ -446,6 +484,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Sumber pengetahuan Asisten | `docs/sop.md` di repo adalah sumber kebenaran; file di S3 dengan nama sama dilewati | Mencegah salinan SOP lama ikut menjawab |
 | Asisten AI | Satu fitur di dalam aplikasi (tombol chat di semua layar), hanya untuk peran internal | Data yang dijawab dibatasi hak akses pengguna, sama seperti layar biasa |
 | Memori tanya-jawab `/ask-agent` | Dipakai **sebagai referensi** (SOP tetap acuan utama); kemiripan minimal **0,70**; jawaban 👎 tidak dipakai, 👍 didahulukan; memori dari index SOP lama diabaikan setelah `/reindex`; pertanyaan lanjutan dan jawaban "tidak ada di dokumen" tidak disimpan | Diukur dengan Titan Embed v2: pertanyaan berbeda maksud bisa mencapai ~0,36 (mis. target waktu *ekstraksi* vs *voucher*), parafrase berkata mirip ~0,80. Batas 0,70 mencegah jawaban yang salah topik ikut menjadi referensi |
+| Unggah invoice lewat Telegram | Diizinkan lewat **bot resmi** dari chat pribadi akun yang terhubung (saluran `Telegram`); kirim ke WhatsApp/Email/grup tetap tidak diproses (SOP 1.2) | Bot memakai endpoint unggah yang sama dengan dashboard, jadi validasi, hak akses, dan audit identik. Disetujui tim 16/10/2026; perlu dikonfirmasi ke mentor karena PRD menaruh penarikan otomatis dari WhatsApp/Email di luar cakupan |
 
 ---
 
