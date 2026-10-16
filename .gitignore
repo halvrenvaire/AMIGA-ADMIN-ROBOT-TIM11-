@@ -28,3 +28,6 @@ frontend/cypress/downloads/
 frontend/cypress/screenshots/
 frontend/cypress/logs/
 frontend/cypress/results/
+
+# Backup database & file lokal (berisi data, jangan di-commit)
+backups/
