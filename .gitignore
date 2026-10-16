@@ -31,3 +31,5 @@ frontend/cypress/results/
 
 # Backup database & file lokal (berisi data, jangan di-commit)
 backups/
+
+*/deploy_ec2.sh
