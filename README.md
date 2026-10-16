@@ -389,7 +389,7 @@ File PDF yang diunggah disimpan di folder `storage/` (di root repo) atau di buck
 
 ## Deploy ke EC2
 
-Mengikuti panduan "Deploy aplikasi ke EC2" (Alkademi). Dashboard dan API dijalankan **satu proses di `0.0.0.0:3000`** (`app.serve`): API di `/api`, dashboard di alamat lainnya. Server memakai **IAM role** untuk Bedrock, jadi **tidak ada access key AWS** di kode maupun `.env`.
+Mengikuti panduan "Deploy aplikasi ke EC2" (Alkademi), dengan web app di **port 80** sesuai arahan mentor. Dashboard dan API dijalankan **satu proses** (`app.serve`: API di `/api`, dashboard di alamat lainnya) di `127.0.0.1:3000`, dan **nginx** menerimanya di port 80. Aplikasi tidak dijalankan sebagai root (port di bawah 1024 hanya boleh dibuka root). Server memakai **IAM role** untuk Bedrock, jadi **tidak ada access key AWS** di kode maupun `.env`.
 
 1. **Launch server** dari launch template mentor (tag `Owner` = username AWS persis, tanpa key pair), tunggu *Running* + *2/2 checks passed* ±3 menit, salin **Public IPv4**.
 2. **Connect** lewat *Session Manager*, lalu:
@@ -399,21 +399,22 @@ Mengikuti panduan "Deploy aplikasi ke EC2" (Alkademi). Dashboard dan API dijalan
    cloud-init status --wait
    git clone https://github.com/halvrenvaire/AMIGA-ADMIN-ROBOT-TIM11-.git
    cd AMIGA-ADMIN-ROBOT-TIM11-
-   bash scripts/deploy_ec2.sh            # atau: PORT=3001 bash scripts/deploy_ec2.sh
+   bash scripts/deploy_ec2.sh            # port 80 (nginx). Tanpa nginx: PORT=3000 bash scripts/deploy_ec2.sh
    ```
 
    Repo privat: saat diminta, isi username GitHub dan **Personal Access Token** (read-only), jangan password. Token tidak disimpan di kode.
 
-3. Buka `http://IP-PUBLIK:3000` dari laptop (**http**, bukan https). Password akun dummy dicetak di akhir skrip (acak, berbeda dengan laptop dev).
+3. Buka `http://IP-PUBLIK` dari laptop (**http**, bukan https; port 80 tidak perlu ditulis). Password akun dummy dicetak di akhir skrip (acak, berbeda dengan laptop dev).
 
-Skrip `scripts/deploy_ec2.sh` (aman dijalankan ulang) memasang swap 2 GB, Python 3.12/3.11, PostgreSQL 15 di `127.0.0.1` (port 5432 tidak dibuka), membuat `backend/.env` dengan rahasia acak, menjalankan migrasi + data dummy, mengecek akses Bedrock lewat role, mem-build frontend dengan Node 22, lalu menjalankan aplikasi dengan `nohup` (PID di `~/app.pid`, log di `~/app.log`). Bot Telegram ikut dijalankan bila `TELEGRAM_BOT_TOKEN` diisi di `backend/.env` server; **matikan dulu bot di laptop**, karena hanya satu bot boleh berjalan.
+Skrip `scripts/deploy_ec2.sh` (aman dijalankan ulang) memasang swap 2 GB, Python 3.12/3.11, PostgreSQL 15 di `127.0.0.1` (port 5432 tidak dibuka), membuat `backend/.env` dengan rahasia acak, menjalankan migrasi + data dummy, mengecek akses Bedrock lewat role, mem-build frontend dengan Node 22, menjalankan aplikasi dengan `nohup` (PID di `~/app.pid`, log di `~/app.log`), lalu memasang **nginx** di port 80 (aktif otomatis setelah server restart). Di belakang nginx, IP asli pengunjung dibaca dari `X-Forwarded-For` yang ditulis ulang nginx, supaya batas percobaan login tetap per pengunjung dan tidak bisa dipalsukan. Bot Telegram ikut dijalankan bila `TELEGRAM_BOT_TOKEN` diisi di `backend/.env` server; **matikan dulu bot di laptop**, karena hanya satu bot boleh berjalan.
 
 | Kebutuhan | Nilai di server |
 | --- | --- |
 | Region & model | `us-east-1`, `us.amazon.nova-lite-v1:0` (Nova **Micro** tidak bisa membaca PDF/foto invoice), `amazon.titan-embed-text-v2:0` |
 | Database | PostgreSQL 15 lokal, autentikasi `scram-sha-256` (bawaan Amazon Linux `ident` diganti oleh skrip) |
 | Update | `git pull && bash scripts/deploy_ec2.sh` |
-| Log / berhenti | `tail -f ~/app.log` / `kill $(cat ~/app.pid)` |
+| Port | Publik **80** (nginx, maks. unggahan 110 MB, timeout 180 dtk) → aplikasi `127.0.0.1:3000` |
+| Log / berhenti | `tail -f ~/app.log`, `sudo tail /var/log/nginx/error.log` / `kill $(cat ~/app.pid)` |
 
 **Keamanan untuk internet publik:** server menolak menyala bila `JWT_SECRET` lemah atau kosong; login dikunci 15 menit setelah 5 kali salah (per email dan IP); file di luar `frontend/dist` tidak bisa diakses. Gunakan **data dummy saja**. Simpan kode ke GitHub sebelum *terminate* server.
 

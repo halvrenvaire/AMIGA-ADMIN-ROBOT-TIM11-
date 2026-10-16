@@ -2,18 +2,23 @@
 # Deploy AMIGA Robot Admin ke EC2 (Amazon Linux 2023), sesuai panduan "Deploy aplikasi ke EC2".
 #
 # Jalankan dari terminal Session Manager, sebagai ec2-user, di root repo hasil git clone:
-#     bash scripts/deploy_ec2.sh            # port 3000
-#     PORT=3001 bash scripts/deploy_ec2.sh  # bila mentor memberi port lain
+#     bash scripts/deploy_ec2.sh            # web app di port 80 (nginx -> aplikasi di 127.0.0.1:3000)
+#     PORT=3000 bash scripts/deploy_ec2.sh  # tanpa nginx: aplikasi langsung di 0.0.0.0:3000
 # Aman dijalankan ulang (juga untuk update setelah `git pull`): langkah yang sudah selesai dilewati.
 #
 # Yang dilakukan:
 #   1. Swap 2 GB (server 1 GB RAM)          5. Backend: venv, pip install, migrasi, data dummy
 #   2. Paket: git, Python, PostgreSQL 15     6. Cek akses Bedrock lewat IAM role server
 #   3. PostgreSQL di 127.0.0.1 + database    7. Frontend: Node 22, npm run build
-#   4. backend/.env (tanpa access key AWS)   8. Jalankan di 0.0.0.0:$PORT, lalu tes
+#   4. backend/.env (tanpa access key AWS)   8. Jalankan aplikasi (+ nginx di port 80), lalu tes
 set -euo pipefail
 
-PORT="${PORT:-3000}"
+PORT="${PORT:-80}"
+# Port di bawah 1024 hanya boleh dibuka root. Aplikasi TIDAK dijalankan sebagai root: nginx yang
+# menerima pengunjung di port itu lalu meneruskan ke aplikasi di 127.0.0.1:$APP_PORT.
+APP_PORT="${APP_PORT:-3000}"
+if [ "$PORT" -lt 1024 ]; then USE_NGINX=1; else USE_NGINX=0; APP_PORT="$PORT"; fi
+if [ "$PORT" = 80 ]; then PUBLIC_SUFFIX=""; else PUBLIC_SUFFIX=":$PORT"; fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND="$ROOT/backend"
 ENV_FILE="$BACKEND/.env"
@@ -48,8 +53,9 @@ fi
 ok "Swap: $(free -h | awk '/Swap/ {print $2}')"
 
 # --- 2. Paket ----------------------------------------------------------------
-step "2/8 Paket: git, Python 3.12/3.11, PostgreSQL 15"
+step "2/8 Paket: git, Python 3.12/3.11, PostgreSQL 15, nginx"
 sudo dnf install -y -q git postgresql15-server postgresql15 >/dev/null
+if [ "$USE_NGINX" = 1 ]; then sudo dnf install -y -q nginx >/dev/null; fi
 if ! command -v python3.12 >/dev/null && ! command -v python3.11 >/dev/null; then
   sudo dnf install -y -q python3.12 python3.12-pip >/dev/null 2>&1 \
     || sudo dnf install -y -q python3.11 python3.11-pip >/dev/null
@@ -111,9 +117,9 @@ IMDS_TOKEN="$(curl -s -m 3 -X PUT http://169.254.169.254/latest/api/token -H 'X-
 PUBLIC_IP="$(curl -s -m 3 -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 || true)"
 [ -n "$PUBLIC_IP" ] || PUBLIC_IP="IP-PUBLIK"
 # IP publik berubah setiap server di-stop/start: tautan di pesan bot ikut diperbarui
-env_set FRONTEND_URL "http://$PUBLIC_IP:$PORT"
-env_set BOT_API_BASE_URL "http://127.0.0.1:$PORT/api"
-ok "Alamat aplikasi: http://$PUBLIC_IP:$PORT"
+env_set FRONTEND_URL "http://$PUBLIC_IP$PUBLIC_SUFFIX"
+env_set BOT_API_BASE_URL "http://127.0.0.1:$APP_PORT/api"
+ok "Alamat aplikasi: http://$PUBLIC_IP$PUBLIC_SUFFIX"
 
 DB_PASS="$(env_get DATABASE_URL | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|')"
 sudo -u postgres psql -q -v ON_ERROR_STOP=1 -v u="$DB_USER" -v p="$DB_PASS" -v d="$DB_NAME" <<'SQL'
@@ -162,21 +168,76 @@ NODE_OPTIONS=--max-old-space-size=1536 npm run build >/dev/null
 ok "Frontend di-build ke frontend/dist"
 
 # --- 8. Jalankan -------------------------------------------------------------
-step "8/8 Menjalankan aplikasi di 0.0.0.0:$PORT"
+if [ "$USE_NGINX" = 1 ]; then
+  step "8/8 Menjalankan aplikasi di 127.0.0.1:$APP_PORT, dibuka lewat nginx di port $PORT"
+  BIND=127.0.0.1
+  # Di belakang nginx semua pengunjung terlihat dari 127.0.0.1: baca IP asli dari X-Forwarded-For,
+  # supaya batas percobaan login tetap per pengunjung (bukan satu IP untuk semua orang)
+  PROXY_ARGS=(--proxy-headers --forwarded-allow-ips 127.0.0.1)
+else
+  step "8/8 Menjalankan aplikasi di 0.0.0.0:$APP_PORT"
+  BIND=0.0.0.0
+  PROXY_ARGS=()
+fi
 stop() { if [ -f "$1" ]; then kill "$(cat "$1")" 2>/dev/null || true; rm -f "$1"; fi; }
 stop ~/app.pid
 pkill -f "uvicorn app.serve:app" 2>/dev/null || true
 sleep 1
 cd "$BACKEND"
-nohup .venv/bin/uvicorn app.serve:app --host 0.0.0.0 --port "$PORT" > ~/app.log 2>&1 &
+nohup .venv/bin/uvicorn app.serve:app --host "$BIND" --port "$APP_PORT" "${PROXY_ARGS[@]}" > ~/app.log 2>&1 &
 echo $! > ~/app.pid
 for _ in $(seq 1 90); do
-  curl -s -o /dev/null "http://127.0.0.1:$PORT/api/health" && break
+  curl -s -o /dev/null "http://127.0.0.1:$APP_PORT/api/health" && break
   sleep 1
 done
-CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/")"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$APP_PORT/")"
 [ "$CODE" = 200 ] || fail "Aplikasi tidak merespons (HTTP $CODE). Lihat log: tail -n 50 ~/app.log"
-ok "curl -I http://localhost:$PORT → 200 OK"
+ok "Aplikasi berjalan (127.0.0.1:$APP_PORT → 200 OK)"
+
+if [ "$USE_NGINX" = 1 ]; then
+  # nginx.conf ditulis utuh: bawaan Amazon Linux sudah punya server default di port 80 (halaman sambutan)
+  [ -f /etc/nginx/nginx.conf.asli ] || sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.asli
+  sudo tee /etc/nginx/nginx.conf >/dev/null <<NGINX
+# Dibuat oleh scripts/deploy_ec2.sh (aslinya: /etc/nginx/nginx.conf.asli)
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /run/nginx.pid;
+events { worker_connections 1024; }
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log /var/log/nginx/access.log;
+    sendfile on;
+    server_tokens off;
+    server {
+        listen $PORT default_server;
+        server_name _;
+        # Unggah 1-10 invoice x maks. 10 MB
+        client_max_body_size 110m;
+        location / {
+            proxy_pass http://127.0.0.1:$APP_PORT;
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Forwarded-For \$remote_addr;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            # Ekstraksi AI dan Asisten bisa butuh puluhan detik
+            proxy_read_timeout 180s;
+            proxy_send_timeout 180s;
+        }
+    }
+}
+NGINX
+  if command -v getenforce >/dev/null && [ "$(getenforce)" = "Enforcing" ]; then
+    sudo setsebool -P httpd_can_network_connect 1   # izinkan nginx meneruskan ke aplikasi
+  fi
+  sudo nginx -t -q || fail "Konfigurasi nginx tidak valid: sudo nginx -t"
+  sudo systemctl enable nginx >/dev/null 2>&1
+  sudo systemctl restart nginx
+  CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/")"
+  [ "$CODE" = 200 ] || fail "nginx di port $PORT tidak meneruskan ke aplikasi (HTTP $CODE). Lihat: sudo tail /var/log/nginx/error.log"
+  ok "nginx: port $PORT → aplikasi (200 OK)"
+fi
 HEALTH="$(curl -s "http://127.0.0.1:$PORT/api/health")"
 ok "Health: $HEALTH"
 
@@ -191,8 +252,8 @@ fi
 cat <<EOF
 
 $(printf '\033[1;32m')Deploy selesai.$(printf '\033[0m')
-  Buka di browser laptop : http://$PUBLIC_IP:$PORT   (http, bukan https)
-  Dokumentasi API        : http://$PUBLIC_IP:$PORT/api/docs
+  Buka di browser laptop : http://$PUBLIC_IP$PUBLIC_SUFFIX   (http, bukan https)
+  Dokumentasi API        : http://$PUBLIC_IP$PUBLIC_SUFFIX/api/docs
   Login akun dummy       : pic.alpha@amiga.test, reviewer1@amiga.test, lead@amiga.test, admin@amiga.test, ...
   Password akun dummy    : $(env_get SEED_DEFAULT_PASSWORD)   (jangan dibagikan di grup)
   Log aplikasi           : tail -f ~/app.log
