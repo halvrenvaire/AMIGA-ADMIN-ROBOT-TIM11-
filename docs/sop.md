@@ -2,7 +2,7 @@
 
 **Sistem:** AMIGA Robot Admin (Intelligent Vendor Invoice-to-Voucher Processing)
 **Nomor SOP:** SOP-AMIGA-FIN-001
-**Versi:** 1.2 (Draft PoC — MAIN Hackathon 2026, selaras dengan BRD v1.1 dan PRD v2)
+**Versi:** 1.3 (Draft PoC — MAIN Hackathon 2026, selaras dengan BRD v1.1 dan PRD v2)
 **Tanggal berlaku:** [diisi saat disahkan]
 **Pemilik proses:** Tim AMIGA Intelligent Back Office
 **Disusun oleh:** TEAM 11 MAIN
@@ -76,7 +76,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 
 ## 6. Ketentuan Umum
 
-1. Invoice wajib berformat **PDF digital, maksimal 5 halaman**.
+1. Invoice berformat **PDF (maksimal 5 halaman)** atau **foto invoice JPG, PNG, atau WEBP**. Foto otomatis diubah menjadi PDF satu halaman, dan foto aslinya tetap disimpan. Format lain (Word, Excel, dan sebagainya) ditolak.
 2. Setiap invoice **wajib ditinjau** Finance Reviewer sebelum voucher terbit. Hasil AI tidak boleh dipakai tanpa peninjauan.
 3. Pengiriman invoice lewat WhatsApp atau Email **tidak diproses**. PIC diarahkan untuk mengunggah ke sistem, dan asal pengajuan dicatat di kolom **Saluran**.
 4. Invoice boleh diunggah lewat **dashboard** atau lewat **bot Telegram resmi** (@amiga_ro_bot) dari **chat pribadi** akun yang sudah terhubung. Keduanya masuk ke sistem yang sama dengan aturan yang sama. Mengirim invoice ke nomor/akun lain, atau ke grup chat, tetap tidak diproses.
@@ -90,15 +90,15 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 
 1. Masuk ke AMIGA Robot Admin dan buka menu **Unggah invoice**.
 2. Isi semua kolom wajib: **nama klien**, **jenis permintaan**, **saluran** (asal invoice, misalnya Email atau WhatsApp), dan **tanggal pengajuan**.
-3. Pilih file invoice PDF, lalu klik **Kirim ke antrean**.
+3. Pilih file invoice PDF atau foto invoice (JPG, PNG, WEBP), lalu klik **Kirim ke antrean**. Pastikan foto tegak, tidak buram, dan seluruh isi invoice terlihat.
 4. Pastikan sistem menampilkan **Request ID** dan status **QUEUED**. Catat Request ID untuk pelacakan.
-5. Jika file ditolak (bukan PDF atau lebih dari 5 halaman), sistem mengembalikan Anda ke formulir unggah. Perbaiki file lalu ulangi dari langkah 3.
+5. Jika file ditolak (bukan PDF/foto yang didukung, atau lebih dari 5 halaman), sistem mengembalikan Anda ke formulir unggah. Perbaiki file lalu ulangi dari langkah 3.
 6. Intake Support yang mengunggah atas nama klien hanya boleh melakukannya untuk klien yang didelegasikan. Sistem mencatat nama pengunggah sebenarnya.
 
 **Lewat bot Telegram (alternatif):**
 
 1. Hubungkan akun sekali saja: dashboard → **Pengaturan akun** → **Hubungkan Telegram**, lalu kirim kode ke @amiga_ro_bot. **Jangan pernah mengirim password di chat.**
-2. Kirim file invoice **PDF** (bukan foto) ke chat pribadi bot. Beberapa PDF untuk satu voucher boleh dikirim sekaligus.
+2. Kirim file invoice **PDF** atau **foto invoice** ke chat pribadi bot. Foto sebaiknya dikirim sebagai **File** (📎 → File) supaya tidak dikompres Telegram. Beberapa file untuk satu voucher boleh dikirim sekaligus.
 3. Pilih **perusahaan** dan **jenis permintaan** lewat tombol. Saluran terisi **Telegram** dan tanggal pengajuan terisi hari ini secara otomatis.
 4. Periksa ringkasan, lalu tekan **Kirim ke AMIGA**. Bot menampilkan **Request ID** dan status **QUEUED**, lalu mengabari hasil proses AI.
 5. Bila ada kendala, perbaiki datanya lewat dashboard (lihat 7.3).
@@ -222,3 +222,4 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 | 1.0 | 13 Oktober 2026 | Draf awal untuk PoC MAIN Hackathon 2026 | TEAM 11 MAIN |
 | 1.1 | 13 Oktober 2026 | Diselaraskan dengan BRD v1.1, PRD v2, dan BPMN revisi: field saluran, peran AI vs Sistem, perbaikan oleh PIC dengan ekstraksi ulang (Request ID sama), Kembalikan ke PIC, pengalihan otomatis saat penolakan SoD, Service Lead hanya mengatur beban, peran ganda | TEAM 11 MAIN |
 | 1.2 | 16 Oktober 2026 | Unggah invoice lewat bot Telegram resmi @amiga_ro_bot (6.4, 7.1); saluran Telegram | TEAM 11 MAIN |
+| 1.3 | 16 Oktober 2026 | Foto invoice (JPG, PNG, WEBP) diterima dan diubah otomatis menjadi PDF; foto asli disimpan (6.1, 7.1) | TEAM 11 MAIN |

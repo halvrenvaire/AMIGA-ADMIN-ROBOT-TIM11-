@@ -91,7 +91,8 @@ export interface DocumentDetail extends DocumentSummary {
   voucher: { voucher_no: string; generated_at: string } | null;
   vendor: ClientRef | null;
   signers: Signer[];
-  files: { position: number; original_filename: string; page_count: number; read_at: string | null }[];
+  /** source_format: "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF. */
+  files: { position: number; original_filename: string; page_count: number; read_at: string | null; source_format?: string | null }[];
   cancellation?: { by: string; at: string; reason: string } | null;
   classification?: Classification | null;
   account_check?: AccountCheck | null;

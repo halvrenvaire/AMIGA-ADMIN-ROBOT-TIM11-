@@ -231,6 +231,9 @@ class DocumentFile(Base):
     invoice_no_norm: Mapped[str | None] = mapped_column(String(500), index=True)
     # Kapan AI selesai membaca file ini pada proses terakhir (progres per file di layar detail)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # File asli bila diunggah sebagai foto (JPG/PNG/WEBP) lalu dikonversi ke PDF di file_key
+    source_file_key: Mapped[str | None] = mapped_column(String(500))
+    source_format: Mapped[str | None] = mapped_column(String(10))
 
     document: Mapped[Document] = relationship(back_populates="files")
 

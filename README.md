@@ -152,6 +152,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | Data referensi vendor | Owner | ✅ | PIC Klien/Intake mendaftarkan vendor (NPWP, alamat, kontak, rekening) per klien; nama dinormalisasi agar tidak dobel; dipakai sebagai dropdown di filter & formulir; dokumen tertaut otomatis |
 | Penanda tangan voucher | Owner | ✅ | "Diajukan oleh" = PIC Klien yang mengajukan (nama + perusahaan); PIC Klien mendaftarkan pemberi persetujuan "Disetujui oleh" (1 kotak default, bisa ditambah hingga 5 per dokumen); dicetak sebagai kotak tanda tangan di voucher (tanpa kotak AMIGA; persetujuan reviewer tercatat di jejak audit) |
 | Manajemen voucher | Owner | ✅ | Tabel voucher dengan filter perusahaan, vendor, status, tanggal; dikelompokkan dengan subtotal; unduh CSV |
+| Unggah foto invoice | Tambahan | ✅ | JPG, PNG, WEBP diterima di dashboard dan bot Telegram; dikenali dari isi file, diputar sesuai EXIF, diperkecil, lalu diubah menjadi PDF satu halaman. Foto asli disimpan (`GET /documents/{id}/files/{posisi}/original`, tombol "Lihat foto asli") |
 | Bot Telegram `@amiga_ro_bot` | Tambahan | ✅ | **Unggah invoice PDF** (saluran Telegram, diproses AI lalu hasilnya dikabarkan), cek progres (`/terakhir`, `/kendala`, `/status`), dan tanya Asisten AI dari Telegram. Akun dihubungkan dengan kode sekali pakai dari Pengaturan akun; hak akses sama dengan dashboard. Lihat [Bot Telegram](#bot-telegram) |
 
 ### Rencana tahap berikutnya
@@ -396,6 +397,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET | `/auth/me` | Profil, peran, dan klien yang ditugaskan |
 | PATCH | `/auth/me` | Ubah nama tampilan/email sendiri (ganti email wajib password saat ini) |
 | POST | `/auth/me/password` | Ganti password sendiri; semua sesi lain keluar, respons berisi token baru |
+| GET | `/documents/{id}/files/{posisi}/original` | Foto asli sebelum diubah ke PDF (404 bila file diunggah sebagai PDF) |
 | GET | `/auth/me/telegram` | Status hubungan akun dengan bot Telegram |
 | POST | `/auth/me/telegram/link-code` | Kode sekali pakai (6 digit, 10 menit) + tautan `t.me` untuk menghubungkan bot |
 | DELETE | `/auth/me/telegram` | Putuskan Telegram dari akun |
@@ -484,6 +486,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Sumber pengetahuan Asisten | `docs/sop.md` di repo adalah sumber kebenaran; file di S3 dengan nama sama dilewati | Mencegah salinan SOP lama ikut menjawab |
 | Asisten AI | Satu fitur di dalam aplikasi (tombol chat di semua layar), hanya untuk peran internal | Data yang dijawab dibatasi hak akses pengguna, sama seperti layar biasa |
 | Memori tanya-jawab `/ask-agent` | Dipakai **sebagai referensi** (SOP tetap acuan utama); kemiripan minimal **0,70**; jawaban 👎 tidak dipakai, 👍 didahulukan; memori dari index SOP lama diabaikan setelah `/reindex`; pertanyaan lanjutan dan jawaban "tidak ada di dokumen" tidak disimpan | Diukur dengan Titan Embed v2: pertanyaan berbeda maksud bisa mencapai ~0,36 (mis. target waktu *ekstraksi* vs *voucher*), parafrase berkata mirip ~0,80. Batas 0,70 mencegah jawaban yang salah topik ikut menjadi referensi |
+| Format foto invoice | Foto JPG/PNG/WEBP **dikonversi ke PDF di pintu masuk**; Word/Excel tetap ditolak (SOP 1.3) | Seluruh alur (batas 5 halaman, layar peninjauan, penggabungan voucher, ekstraksi AI) tetap memakai PDF, jadi tidak ada bagian lain yang berubah. PRD FR-1.1/1.5 menyebut PDF saja dan menaruh format lain di luar cakupan: **perlu dikonfirmasi ke mentor** |
 | Unggah invoice lewat Telegram | Diizinkan lewat **bot resmi** dari chat pribadi akun yang terhubung (saluran `Telegram`); kirim ke WhatsApp/Email/grup tetap tidak diproses (SOP 1.2) | Bot memakai endpoint unggah yang sama dengan dashboard, jadi validasi, hak akses, dan audit identik. Disetujui tim 16/10/2026; perlu dikonfirmasi ke mentor karena PRD menaruh penarikan otomatis dari WhatsApp/Email di luar cakupan |
 
 ---
@@ -506,5 +509,5 @@ Perlu dijawab klien / tim Keuangan AMIGA (PRD v2 §8):
 - Persetujuan dan pembayaran oleh klien, serta portal untuk Client Approver.
 - Integrasi ke ERP, akuntansi, internet banking, atau payment gateway.
 - Penarikan invoice otomatis dari WhatsApp/Email (saluran hanya dicatat sebagai metadata).
-- Format selain PDF dan invoice lebih dari 5 halaman.
+- Format selain PDF dan foto JPG/PNG/WEBP (mis. Word, Excel), serta invoice lebih dari 5 halaman.
 - Validasi Faktur Pajak ke sistem DJP.

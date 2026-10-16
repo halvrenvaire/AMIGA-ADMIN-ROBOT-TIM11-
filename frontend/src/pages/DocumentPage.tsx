@@ -125,7 +125,8 @@ export function DocumentPage() {
         <section className="card pdf-pane" aria-label="PDF asli">
           <div className="pdf-head">
             <b>PDF asli</b>
-            <span className="muted">{d.files.length > 1 ? `${d.files.length} invoice` : d.original_filename} · {d.page_count} hal.</span>
+            <span className="muted">{d.files.length > 1 ? `${d.files.length} invoice` : d.original_filename} · {d.page_count} hal.
+              {d.files.length === 1 && d.files[0].source_format && <> · dari foto <OriginalLink docId={d.id} position={1} /></>}</span>
           </div>
           <div className="pdf-body">
             <PdfFrame path={`/documents/${id}/file`} title={`Invoice ${d.request_id}`} />
@@ -140,7 +141,8 @@ export function DocumentPage() {
               {d.files.length > 1 && (
                 <><dt>File invoice</dt>
                   <dd><ol className="plain-list">{d.files.map((f) => (
-                    <li key={f.position}>{f.original_filename} <span className="muted">· {f.page_count} hal.</span></li>
+                    <li key={f.position}>{f.original_filename} <span className="muted">· {f.page_count} hal.</span>
+                      {f.source_format && <> <span className="muted">· dari foto</span> <OriginalLink docId={d.id} position={f.position} /></>}</li>
                   ))}</ol></dd></>
               )}
               <dt>Tanggal pengajuan</dt><dd>{tanggal(d.submitted_date)}</dd>
@@ -575,5 +577,27 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
         </dl>
       )}
     </section>
+  );
+}
+
+/** Buka foto asli (sebelum diubah ke PDF) di tab baru; file butuh token, jadi diunduh sebagai blob. */
+function OriginalLink({ docId, position }: { docId: string; position: number }) {
+  const [error, setError] = useState(false);
+  async function open() {
+    const win = window.open("", "_blank");  // dibuka langsung saat diklik supaya tidak diblokir browser
+    try {
+      const blob = await api.blob(`/documents/${docId}/files/${position}/original`);
+      const url = URL.createObjectURL(blob);
+      if (win) win.location.href = url; else window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      win?.close();
+      setError(true);
+    }
+  }
+  return (
+    <button type="button" className="btn ghost sm" onClick={open} title="Foto yang diunggah, sebelum diubah menjadi PDF">
+      {error ? "Foto asli tidak tersedia" : "Lihat foto asli"}
+    </button>
   );
 }

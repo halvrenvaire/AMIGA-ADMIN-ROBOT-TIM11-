@@ -4,7 +4,7 @@ import secrets
 import uuid
 from datetime import date, timedelta
 from decimal import InvalidOperation
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status,
@@ -24,7 +24,7 @@ from app.models import (
 from app.schemas.schemas import (
     CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ReasonRequest, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
 )
-from app.services import audit_service, signer_service, storage
+from app.services import audit_service, file_conversion, signer_service, storage
 from app.services.access_rules import accessible_client_ids
 from app.services.account_check import check_account
 from app.services.document_processing import (
@@ -106,6 +106,14 @@ def _get_document(db: Session, user: User, document_id: uuid.UUID) -> Document:
     return doc
 
 
+class _UploadPart(NamedTuple):
+    name: str
+    pdf: bytes
+    pages: int
+    source: bytes | None  # file asli bila dikonversi dari foto
+    source_format: str | None
+
+
 def _new_request_id(db: Session) -> str:
     while True:
         request_id = f"REQ-{date.today():%Y%m%d}-{secrets.token_hex(3).upper()}"
@@ -166,7 +174,7 @@ async def upload_document(
                             f"Unggah minimal 1 dan maksimal {settings.max_upload_files} file invoice.")
 
     limit = settings.max_upload_mb * 1024 * 1024
-    parts: list[tuple[str, bytes, int]] = []
+    parts: list[_UploadPart] = []
     for upload in files:
         name = (upload.filename or "invoice.pdf")[:300]
         data = await upload.read(limit + 1)
@@ -174,14 +182,20 @@ async def upload_document(
         if len(data) > limit:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
                                 f"{label}Ukuran file melebihi {settings.max_upload_mb} MB.")
+        # Foto (JPG/PNG/WEBP) diubah menjadi PDF; alur selanjutnya selalu memakai PDF
         try:
-            pages = _count_pdf_pages(data)
+            prepared = file_conversion.to_pdf(data)
+        except file_conversion.UnsupportedFile as e:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{label}{e}")
+        try:
+            pages = _count_pdf_pages(prepared.pdf)
         except HTTPException as e:
             raise HTTPException(e.status_code, f"{label}{e.detail}")
         if pages > settings.max_pdf_pages:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                                 f"{label}Invoice berisi {pages} halaman. Maksimal {settings.max_pdf_pages} halaman per file.")
-        parts.append((name, data, pages))
+        parts.append(_UploadPart(name, prepared.pdf, pages, data if prepared.converted else None,
+                                 prepared.source_format))
 
     # Intake Support mengunggah atas nama PIC yang mendelegasikan (FR-1.4)
     on_behalf_of = None
@@ -194,31 +208,39 @@ async def upload_document(
     signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids), submitter)
 
     request_id = _new_request_id(db)
-    total_pages = sum(p for _, _, p in parts)
+    total_pages = sum(p.pages for p in parts)
+    # File asli foto disimpan sebagai bukti di samping PDF hasil konversi
+    source_keys = [f"invoices/{request_id}-asli-{i:02d}.{p.source_format}" if p.source_format else None
+                   for i, p in enumerate(parts, start=1)]
     try:
         if len(parts) == 1:
             file_keys = [f"invoices/{request_id}.pdf"]
-            storage.save(file_keys[0], parts[0][1])
+            storage.save(file_keys[0], parts[0].pdf)
             main_key = file_keys[0]
         else:
             file_keys = [f"invoices/{request_id}/{i:02d}.pdf" for i in range(1, len(parts) + 1)]
-            for key, (_, data, _) in zip(file_keys, parts):
-                storage.save(key, data)
+            for key, part in zip(file_keys, parts):
+                storage.save(key, part.pdf)
             main_key = f"invoices/{request_id}.pdf"
-            storage.save(main_key, _merge_pdfs([data for _, data, _ in parts]))
+            storage.save(main_key, _merge_pdfs([p.pdf for p in parts]))
+        for key, part in zip(source_keys, parts):
+            if key:
+                storage.save(key, part.source)
     except storage.StorageError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "File gagal disimpan. Coba lagi beberapa saat lagi.")
 
-    names = [name for name, _, _ in parts]
-    summary_name = names[0] if len(names) == 1 else f"{len(names)} invoice: {', '.join(names)}"
+    names = [p.name + (f" (foto {p.source_format.upper()} → PDF)" if p.source_format else "") for p in parts]
+    plain_names = [p.name for p in parts]
+    summary_name = plain_names[0] if len(parts) == 1 else f"{len(parts)} invoice: {', '.join(plain_names)}"
     doc = Document(
         request_id=request_id, client_id=client_id, uploaded_by=user.id, on_behalf_of=on_behalf_of,
         request_type=request_type.strip(), channel=channel, submitted_date=submitted_date, due_date=due_date,
         status=DocStatus.QUEUED, file_key=main_key,
         original_filename=summary_name[:300], page_count=total_pages, pic_overrides={},
         signers=signers,
-        files=[DocumentFile(position=i, file_key=key, original_filename=name, page_count=pages)
-               for i, (key, (name, _, pages)) in enumerate(zip(file_keys, parts), start=1)],
+        files=[DocumentFile(position=i, file_key=key, original_filename=part.name, page_count=part.pages,
+                            source_file_key=source_key, source_format=part.source_format)
+               for i, (key, source_key, part) in enumerate(zip(file_keys, source_keys, parts), start=1)],
     )
     db.add(doc)
     db.flush()
@@ -291,6 +313,23 @@ def get_document_file(document_id: uuid.UUID, user: User = Depends(get_current_u
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File PDF tidak ditemukan di penyimpanan.")
     return Response(data, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{doc.request_id}.pdf"'})
+
+
+@router.get("/{document_id}/files/{position}/original", response_class=Response)
+def get_original_file(document_id: uuid.UUID, position: int, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """File asli (foto) sebelum dikonversi ke PDF, untuk dicek bila hasil konversi meragukan."""
+    doc = _get_document(db, user, document_id)
+    part = next((f for f in doc.files if f.position == position), None)
+    if part is None or not part.source_file_key:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File ini diunggah sebagai PDF; tidak ada file asli lain.")
+    try:
+        data = storage.load(part.source_file_key)
+    except storage.StorageError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File asli tidak ditemukan di penyimpanan.")
+    filename = f"{doc.request_id}-{position:02d}.{part.source_format}"
+    return Response(data, media_type=file_conversion.IMAGE_TYPES[part.source_format],
+                    headers={"Content-Disposition": f'inline; filename="{filename}"'})
 
 
 @router.post("/{document_id}/fix", response_model=DocumentDetail)

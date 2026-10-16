@@ -311,6 +311,7 @@ class DocumentFileOut(BaseModel):
     original_filename: str
     page_count: int
     read_at: datetime | None = None  # selesai dibaca AI pada proses terakhir
+    source_format: str | None = None  # "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF
 
 
 class CancellationOut(BaseModel):

@@ -27,7 +27,10 @@ from app.auth import create_access_token
 from app.config import settings
 from app.db import SessionLocal
 from app.models import Role, User
-from app.services import telegram_service
+from app.services import file_conversion, telegram_service
+
+ACCEPTED_MIME = {"application/pdf", *file_conversion.IMAGE_TYPES.values()}
+ACCEPTED_EXT = (".pdf", ".jpg", ".jpeg", ".png", ".webp")
 
 log = logging.getLogger("amiga.telegram")
 
@@ -75,8 +78,8 @@ IN_PROGRESS = {"QUEUED", "PROCESSING"}
 HELP_TEXT = (
     "Perintah yang tersedia:\n"
     + "\n".join(f"/{c} - {d}" for c, d in COMMANDS)
-    + "\n\nUnggah invoice (PIC Klien / Intake Support): kirim file PDF invoice ke chat ini, "
-    "boleh beberapa file untuk satu voucher.\n"
+    + "\n\nUnggah invoice (PIC Klien / Intake Support): kirim file PDF atau foto invoice "
+    "(JPG, PNG, WEBP) ke chat ini, boleh beberapa file untuk satu voucher.\n"
     "\nAtau tanya langsung dengan kalimat biasa, misalnya:\n"
     "• Apa yang harus dilakukan kalau kena MISSING_EVIDENCE?\n"
     "• Berapa target waktu pembuatan voucher?\n"
@@ -345,7 +348,8 @@ class LoginGuard:
 class UploadDraft:
     """Pengajuan invoice yang sedang disusun di chat. Disimpan di memori bot (hilang bila bot restart)."""
     user_id: object
-    files: list[tuple[str, bytes, int]] = field(default_factory=list)  # (nama, isi, halaman)
+    files: list[tuple[str, bytes, int, str]] = field(default_factory=list)  # (nama, isi, halaman, media type)
+    compressed_photo: bool = False  # ada foto yang dikompres Telegram (dikirim sebagai "Foto")
     client_options: list[dict] = field(default_factory=list)
     client: dict | None = None
     request_type: str | None = None
@@ -532,11 +536,20 @@ class AmigaBot:
         if not user.roles & SUBMITTER_ROLES:
             return "Hanya PIC Klien dan Intake Support yang bisa mengunggah invoice."
         document = message.get("document")
-        name = (document or {}).get("file_name") or "invoice.pdf"
-        if not document or not (document.get("mime_type") == "application/pdf" or name.lower().endswith(".pdf")):
-            return "Kirim invoice sebagai file PDF (lampiran 📎 → File), bukan foto atau format lain."
+        photo = (message.get("photo") or [None])[-1]  # ukuran terbesar ada di akhir daftar
+        if document:
+            name = document.get("file_name") or "invoice.pdf"
+            file_id, size = document["file_id"], document.get("file_size") or 0
+            mime = document.get("mime_type") or ""
+            if not (mime in ACCEPTED_MIME or name.lower().endswith(ACCEPTED_EXT)):
+                return f"{name}: kirim invoice sebagai {file_conversion.ACCEPTED_TEXT}."
+        elif photo:
+            name = f"foto-invoice-{int(time.time())}.jpg"
+            file_id, size = photo["file_id"], photo.get("file_size") or 0
+        else:
+            return f"Kirim invoice sebagai {file_conversion.ACCEPTED_TEXT}."
         limit_mb = min(settings.max_upload_mb, TELEGRAM_DOWNLOAD_MB)
-        if (document.get("file_size") or 0) > limit_mb * 1024 * 1024:
+        if size > limit_mb * 1024 * 1024:
             return f"{name}: ukuran file melebihi {limit_mb} MB."
 
         draft = self._draft(chat_id, user)
@@ -545,13 +558,21 @@ class AmigaBot:
         if len(draft.files) >= settings.max_upload_files:
             return f"Maksimal {settings.max_upload_files} file invoice per pengajuan."
 
-        data = self.tg.download(document["file_id"])
-        pages = count_pdf_pages(data)
+        data = self.tg.download(file_id)
+        # Diperiksa dengan aturan yang sama dengan server: foto diubah menjadi PDF untuk menghitung halaman
+        try:
+            prepared = file_conversion.to_pdf(data)
+        except file_conversion.UnsupportedFile as e:
+            return f"{name}: {e}"
+        pages = count_pdf_pages(prepared.pdf)
         if pages is None:
-            return f"{name}: file bukan PDF yang bisa dibaca."
+            return f"{name}: file PDF rusak atau tidak bisa dibaca."
         if pages > settings.max_pdf_pages:
             return f"{name}: berisi {pages} halaman. Maksimal {settings.max_pdf_pages} halaman per file."
-        draft.files.append((name[:300], data, pages))
+        media_type = file_conversion.IMAGE_TYPES[prepared.source_format] if prepared.converted else "application/pdf"
+        if photo and not document:
+            draft.compressed_photo = True
+        draft.files.append((name[:300], data, pages, media_type))
         draft.updated = time.time()
 
         # Beberapa file yang dikirim sekaligus datang sebagai pesan terpisah: balas sekali saja,
@@ -596,14 +617,16 @@ class AmigaBot:
             f"• Perusahaan: {draft.client['name']}\n"
             f"• Jenis permintaan: {draft.request_type}\n"
             f"• Saluran: Telegram · Tanggal pengajuan: {date.today().isoformat()}\n\n"
-            "Mau menambah invoice lain ke voucher yang sama? Kirim PDF-nya sekarang.",
+            "Mau menambah invoice lain ke voucher yang sama? Kirim file atau fotonya sekarang.",
             [[("✅ Kirim ke AMIGA", "up:send")], [("❌ Batal", "up:cancel")]],
         )
 
     @staticmethod
     def _file_list(draft: UploadDraft) -> str:
-        files = "\n".join(f"  {i}. {name} ({pages} hal.)" for i, (name, _, pages) in enumerate(draft.files, 1))
-        return f"📎 {len(draft.files)} file invoice:\n{files}"
+        files = "\n".join(f"  {i}. {name} ({pages} hal.)" for i, (name, _, pages, _) in enumerate(draft.files, 1))
+        tip = ("\n💡 Foto yang dikirim sebagai \"Foto\" dikompres Telegram. Untuk hasil baca AI terbaik, "
+               "kirim sebagai File (📎 → File).") if draft.compressed_photo else ""
+        return f"📎 {len(draft.files)} file invoice:\n{files}{tip}"
 
     def _handle_callback(self, callback: dict) -> str | Reply | None:
         self.tg.answer_callback(callback["id"])
@@ -648,7 +671,7 @@ class AmigaBot:
             user, "POST", "/documents",
             data={"client_id": draft.client["id"], "request_type": draft.request_type,
                   "channel": "Telegram", "submitted_date": date.today().isoformat()},
-            files=[("files", (name, content, "application/pdf")) for name, content, _ in draft.files],
+            files=[("files", (name, content, media_type)) for name, content, _, media_type in draft.files],
         )
         self.tg.send_message(chat_id, (
             f"✅ Terkirim ke AMIGA!\nRequest ID: {doc['request_id']}\nStatus: {STATUS_LABEL['QUEUED']}\n\n"

@@ -11,6 +11,12 @@ import type { DocumentSummary, Signatory } from "../types";
 const MAX_MB = 10;
 const MAX_FILES = 10;
 
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ACCEPT = "application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
+const isImage = (f: File) => IMAGE_TYPES.includes(f.type) || /\.(jpe?g|png|webp)$/i.test(f.name);
+/** PDF atau foto invoice; foto diubah menjadi PDF oleh server (isi file diperiksa lagi di server). */
+const isAccepted = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name) || isImage(f);
+
 /** Layar 02 — Unggah Dokumen (PIC Klien, Intake Support). FR-1.1–1.5.
  *  1–10 invoice PDF digabung dalam satu voucher; PIC meninjau dulu di halaman Preview sebelum mengirim. */
 export function Upload() {
@@ -41,8 +47,8 @@ export function Upload() {
     if (!list?.length) return;
     const next = [...files];
     for (const f of Array.from(list)) {
-      if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
-        setError(`${f.name}: file harus berformat PDF. Simpan atau ekspor invoice sebagai PDF, lalu pilih ulang.`);
+      if (!isAccepted(f)) {
+        setError(`${f.name}: file harus berformat PDF atau foto (JPG, PNG, WEBP). Simpan atau ekspor invoice ke salah satu format itu, lalu pilih ulang.`);
         continue;
       }
       if (f.size > MAX_MB * 1024 * 1024) { setError(`${f.name}: ukuran file melebihi ${MAX_MB} MB.`); continue; }
@@ -59,7 +65,7 @@ export function Upload() {
   function preview(e: FormEvent) {
     e.preventDefault();
     if (!clientId) { setError("Pilih perusahaan yang mengajukan."); return; }
-    if (!files.length) { setError("Pilih minimal 1 file invoice PDF."); return; }
+    if (!files.length) { setError("Pilih minimal 1 file invoice (PDF atau foto)."); return; }
     setError(null);
     setResult(null);
     setStep("preview");
@@ -103,7 +109,7 @@ export function Upload() {
       <div className="page-head">
         <div>
           <h1>Unggah invoice</h1>
-          <p>1–{MAX_FILES} file PDF untuk satu voucher, tiap file maksimal 5 halaman. Tinjau dulu di Preview sebelum dikirim.</p>
+          <p>1–{MAX_FILES} file PDF atau foto invoice (JPG, PNG, WEBP) untuk satu voucher, tiap file maksimal 5 halaman. Foto otomatis diubah menjadi PDF. Tinjau dulu di Preview sebelum dikirim.</p>
         </div>
       </div>
 
@@ -180,12 +186,12 @@ export function Upload() {
                role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}>
             <UploadCloud />
             <div style={{ marginTop: 6 }}>
-              Seret file PDF ke sini atau <b>klik untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
+              Seret file PDF atau foto invoice ke sini atau <b>klik untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
             </div>
-            <small className="muted">Bisa beberapa file sekaligus. PDF, maks. 5 halaman dan {MAX_MB} MB per file</small>
+            <small className="muted">Bisa beberapa file sekaligus. PDF (maks. 5 halaman) atau foto JPG/PNG/WEBP, maks. {MAX_MB} MB per file</small>
           </div>
         )}
-        <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => add(e.target.files)} />
+        <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(e) => add(e.target.files)} />
 
         <div className="actions" style={{ justifyContent: "flex-end" }}>
           <button className="btn primary" disabled={!clients.length || !files.length || !clientId}><Eye /> Preview</button>
@@ -205,7 +211,7 @@ function UploadAside({ company, requestType, dueDate, files, approvers }: {
   const checks: [boolean, string][] = [
     [Boolean(company), company ? `Perusahaan: ${company}` : "Pilih perusahaan"],
     [requestType.trim().length > 0, "Jenis permintaan diisi"],
-    [files.length > 0, files.length ? `${files.length} file invoice (${sizeKb < 1024 ? `${sizeKb.toFixed(0)} KB` : `${(sizeKb / 1024).toFixed(1)} MB`})` : "Tambahkan minimal 1 file PDF"],
+    [files.length > 0, files.length ? `${files.length} file invoice (${sizeKb < 1024 ? `${sizeKb.toFixed(0)} KB` : `${(sizeKb / 1024).toFixed(1)} MB`})` : "Tambahkan minimal 1 file invoice"],
   ];
   const ready = checks.every(([ok]) => ok);
   return (
@@ -309,7 +315,9 @@ function Preview({ companyName, submitter, requestType, channel, submittedDate, 
               </div>
             )}
           </div>
-          {urls[active] && <iframe key={urls[active]} title={`Preview ${files[active].name}`} src={urls[active]} />}
+          {urls[active] && (isImage(files[active])
+            ? <img key={urls[active]} className="photo-preview" alt={`Preview ${files[active].name}`} src={urls[active]} />
+            : <iframe key={urls[active]} title={`Preview ${files[active].name}`} src={urls[active]} />)}
         </section>
       </div>
     </>

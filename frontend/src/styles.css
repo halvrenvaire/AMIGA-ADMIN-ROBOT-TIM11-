@@ -754,3 +754,6 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .account-check.gray { background: var(--gray-50); border-color: var(--line); color: var(--fg-2); }
 .account-check span { color: var(--fg-2); }
 .account-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px dashed var(--amber-100); border-radius: var(--radius-sm); }
+
+/* Pratinjau foto invoice di halaman unggah (foto diubah menjadi PDF oleh server) */
+.pdf-preview .photo-preview { display: block; width: 100%; max-height: 72vh; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: var(--gray-50); }

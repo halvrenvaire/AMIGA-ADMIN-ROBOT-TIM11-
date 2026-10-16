@@ -15,6 +15,7 @@ from app.models import AuditLog, Document
 from app.services import telegram_service
 from bot.telegram_bot import AmigaAPI, AmigaBot
 from tests.test_documents import DrainingClient, extractor, invoice, make_pdf, tx  # noqa: F401  (fixture)
+from tests.test_image_upload import image_bytes
 from tests.test_telegram import FakeTelegram, _user
 from app.main import app
 
@@ -146,10 +147,28 @@ def test_only_submitters_can_upload(bot):
 def test_invalid_files_are_rejected(bot):
     chat = _link(bot, "pic.alpha@amiga.test")
     assert "maksimal" in _send_pdf(bot, chat, pdf=make_pdf(pages=settings.max_pdf_pages + 1)).lower()
-    assert "bukan PDF" in _send_pdf(bot, chat, pdf=b"bukan pdf sama sekali")
-    bot[0].handle_update({"update_id": 5, "message": {"chat": {"id": chat, "type": "private"},
-                                                      "photo": [{"file_id": "x"}]}})
-    assert "sebagai file PDF" in bot[1].last
+    assert "PDF atau foto" in _send_pdf(bot, chat, pdf=b"bukan pdf sama sekali")
+    assert "PDF atau foto" in _send_pdf(bot, chat, pdf=b"PK\x03\x04", name="invoice.docx")
+
+
+def test_photo_is_accepted_and_uploaded_with_original(bot):
+    chat = _link(bot, "pic.alpha@amiga.test")
+    bot_, tg = bot
+    tg.files["foto1"] = image_bytes("JPEG")
+    bot_.handle_update({"update_id": 6, "message": {"chat": {"id": chat, "type": "private"},
+                                                    "photo": [{"file_id": "kecil"}, {"file_id": "foto1"}]}})
+    assert "foto-invoice-" in tg.last and "dikompres Telegram" in tg.last
+    _click(bot, chat, "up:t:default")
+    _click(bot, chat, "up:send")
+    assert "Siap ditinjau" in tg.last
+    [doc] = _documents()
+    assert doc.files[0].source_format == "jpg" and doc.files[0].source_file_key
+
+
+def test_image_sent_as_file_has_no_compression_tip(bot):
+    chat = _link(bot, "pic.alpha@amiga.test")
+    reply = _send_pdf(bot, chat, pdf=image_bytes("PNG"), name="scan.png")
+    assert "scan.png (1 hal.)" in reply and "dikompres" not in reply
 
 
 def test_unlinked_chat_cannot_upload(bot):
