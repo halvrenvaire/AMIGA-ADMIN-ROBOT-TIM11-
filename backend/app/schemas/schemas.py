@@ -328,7 +328,7 @@ class DocumentDetail(DocumentSummary):
     pic_overrides: dict[str, str]
     voucher: VoucherOut | None
     vendor: ClientRef | None = None  # vendor di data referensi (id, name) bila cocok
-    signers: list[Signer] = []
+    signers: list["Signer"] = []
     files: list[DocumentFileOut] = []  # file invoice yang digabung dalam voucher ini
     cancellation: CancellationOut | None = None  # siapa, kapan, dan alasan bila dibatalkan
     # Klasifikasi AI (invoice / struk / tidak relevan / meragukan) dan pemeriksaan rekening
