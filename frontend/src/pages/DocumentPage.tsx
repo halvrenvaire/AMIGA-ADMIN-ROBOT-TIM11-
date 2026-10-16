@@ -275,7 +275,12 @@ function ReviewForm({ doc, onChange, onNotice }: {
   const [accountNote, setAccountNote] = useState("");
   const account = doc.account_check;
   const needsConfirm = account?.state === "UNVERIFIED";
-  useEffect(() => { setFields(initial.fields); setLines(initial.lines); setAccountConfirmed(false); }, [initial]);
+  // Reset hanya bila isi data berubah, bukan setiap kali dokumen dimuat ulang dengan isi yang sama
+  // (bila tidak, centang konfirmasi rekening bisa hilang sesaat setelah dicentang)
+  const initialKey = JSON.stringify(initial);
+  const accountKey = JSON.stringify(account ?? null);
+  useEffect(() => { setFields(initial.fields); setLines(initial.lines); }, [initialKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setAccountConfirmed(false); }, [initialKey, accountKey]);
 
   const dirty = JSON.stringify({ fields, lines }) !== JSON.stringify(initial);
   const flags = flagged(doc.issues);

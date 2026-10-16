@@ -60,3 +60,12 @@ def make_user():
         db.execute(delete(UserClientAssignment).where(UserClientAssignment.user_id.in_(created)))
         db.execute(delete(User).where(User.id.in_(created)))
         db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_guard():
+    """Batas percobaan login disimpan di memori proses: kosongkan supaya test tidak saling memengaruhi."""
+    from app.services import login_guard
+    login_guard.reset()
+    yield
+    login_guard.reset()

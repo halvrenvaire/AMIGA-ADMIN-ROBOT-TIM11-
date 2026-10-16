@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
@@ -47,8 +47,9 @@ app.add_middleware(
 )
 
 @app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse("/docs")
+def root(request: Request):
+    # root_path = "/api" saat dijalankan lewat app.serve (mode produksi)
+    return RedirectResponse(f"{request.scope.get('root_path', '')}/docs")
 
 
 app.include_router(health.router)

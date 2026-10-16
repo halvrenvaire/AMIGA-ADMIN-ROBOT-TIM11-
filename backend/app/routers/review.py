@@ -120,15 +120,8 @@ def approve(document_id: uuid.UUID, body: ApproveRequest | None = None, user: Us
         codes = ", ".join(sorted({i.code.value for i in open_issues}))
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Masih ada kendala ({codes}). Koreksi datanya atau kembalikan ke PIC.")
-    # Rekening dicek ulang saat menyetujui: data vendor bisa diverifikasi/diubah setelah verifikasi sistem
-    account = check_account(db, doc)
-    if account.state == MISMATCH:
-        raise HTTPException(status.HTTP_409_CONFLICT, account.message)
-    if account.state == UNVERIFIED and not body.account_confirmed:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            f"Rekening belum terverifikasi: {account.message} Cocokkan rekening dengan sumber tepercaya "
-                            "(mis. konfirmasi langsung ke vendor), lalu centang konfirmasi pengecekan rekening.")
-
+    # Cek SoD lebih dulu (BPMN: sistem mengecek SoD saat Setujui diklik): pihak pengaju selalu ditolak,
+    # jadi tidak perlu diminta mengonfirmasi rekening dulu
     submitters = submitter_ids(db, doc)
     if user.id in submitters:
         old_reviewer = doc.assigned_reviewer_id
@@ -145,6 +138,15 @@ def approve(document_id: uuid.UUID, body: ApproveRequest | None = None, user: Us
                             "Persetujuan ditolak: Anda adalah pihak pengaju dokumen ini (mengunggah atau memperbaiki "
                             "datanya), sesuai Segregation of Duties. "
                             f"Dokumen otomatis dialihkan ke {_name(db, doc.assigned_reviewer_id)}.")
+
+    # Rekening dicek ulang saat menyetujui: data vendor bisa diverifikasi/diubah setelah verifikasi sistem
+    account = check_account(db, doc)
+    if account.state == MISMATCH:
+        raise HTTPException(status.HTTP_409_CONFLICT, account.message)
+    if account.state == UNVERIFIED and not body.account_confirmed:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"Rekening belum terverifikasi: {account.message} Cocokkan rekening dengan sumber tepercaya "
+                            "(mis. konfirmasi langsung ke vendor), lalu centang konfirmasi pengecekan rekening.")
 
     if account.state == UNVERIFIED:
         audit_service.record(db, user, "ACCOUNT_CONFIRMED_BY_REVIEWER", document_id=doc.id, client_id=doc.client_id,

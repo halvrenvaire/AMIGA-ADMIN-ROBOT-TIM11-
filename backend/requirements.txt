@@ -14,4 +14,6 @@ bcrypt==5.0.0
 pytest==8.4.2
 httpx==0.28.1
 faiss-cpu==1.15.1
-numpy==2.5.4
+numpy==2.5.4; python_version >= "3.12"
+numpy==2.4.6; python_version < "3.12"  # server Amazon Linux 2023 dengan Python 3.11
+pillow==12.3.0  # konversi foto invoice (JPG/PNG/WEBP) ke PDF

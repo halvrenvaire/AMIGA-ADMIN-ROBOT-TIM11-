@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -9,7 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
     database_url: str
-    jwt_secret: str = "dev-secret-ganti"
+    # Wajib diisi di .env (minimal 32 karakter acak): kunci ini menandatangani token login
+    jwt_secret: str = ""
     jwt_expire_minutes: int = 480
 
     storage_backend: str = "local"  # "local" atau "s3" (memakai AWS_BUCKET)
@@ -71,5 +73,16 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     telegram_link_code_minutes: int = 10
 
+    @field_validator("jwt_secret")
+    @classmethod
+    def _strong_jwt_secret(cls, value: str) -> str:
+        # Server menolak menyala dengan kunci lemah: siapa pun yang tahu kuncinya bisa memalsukan login
+        if len(value) < 32 or value in WEAK_JWT_SECRETS:
+            raise ValueError("JWT_SECRET di .env wajib diisi minimal 32 karakter acak, mis. hasil "
+                             "`python3 -c \"import secrets; print(secrets.token_urlsafe(48))\"`")
+        return value
+
+
+WEAK_JWT_SECRETS = {"dev-secret-ganti", "ganti-dengan-string-acak-panjang"}
 
 settings = Settings()

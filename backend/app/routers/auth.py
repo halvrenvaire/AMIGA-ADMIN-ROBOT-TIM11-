@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from app.schemas.schemas import (
     ClientRef, LoginResponse, MeResponse, PasswordChange, ProfileUpdate, SignatureIn, TokenResponse,
 )
 from app.security import hash_password, password_problem, verify_password
-from app.services import audit_service, signature_service
+from app.services import audit_service, login_guard, signature_service
 from app.services.access_rules import accessible_client_ids, assigned_client_ids
 
 router = APIRouter(prefix="/auth", tags=["Login"])
@@ -32,11 +32,20 @@ def user_profile(db: Session, user: User) -> MeResponse:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """Login dengan email (isi di kolom `username`) dan password."""
-    user = db.scalar(select(User).where(func.lower(User.email) == form.username.strip().lower()))
+def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Login dengan email (isi di kolom `username`) dan password. Terlalu banyak salah -> dikunci sementara."""
+    email = form.username.strip().lower()
+    ip = request.client.host if request.client else "-"
+    wait = login_guard.retry_after(ip, email)
+    if wait:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                            f"Terlalu banyak percobaan login yang salah. Coba lagi dalam {(wait + 59) // 60} menit.",
+                            headers={"Retry-After": str(wait)})
+    user = db.scalar(select(User).where(func.lower(User.email) == email))
     if user is None or not verify_password(form.password, user.password_hash):
+        login_guard.record_failure(ip, email)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Email atau password salah.")
+    login_guard.record_success(email)
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Akun Anda dinonaktifkan. Hubungi System Admin.")
     return LoginResponse(access_token=create_access_token(user), user=user_profile(db, user))

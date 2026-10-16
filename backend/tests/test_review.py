@@ -115,6 +115,14 @@ def test_cannot_approve_exception_document(extractor):
 
 # --- UAT 5: Segregation of Duties ---
 
+def test_sod_is_checked_before_account_confirmation(extractor):
+    """Pihak pengaju langsung ditolak SoD (403), tidak diminta mengonfirmasi rekening dulu (422)."""
+    doc = ready_doc(email="multi@amiga.test")
+    assert detail(doc["id"])["account_check"]["state"] == "UNVERIFIED"
+    r = api("multi@amiga.test").post(f"/documents/{doc['id']}/approve")  # tanpa konfirmasi rekening
+    assert r.status_code == 403 and "Segregation of Duties" in r.json()["detail"]
+
+
 def test_uat5_uploader_cannot_approve_and_document_is_reassigned(extractor):
     doc = ready_doc(email="multi@amiga.test")  # Intake Support + Finance Reviewer
     r = api("multi@amiga.test").post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
