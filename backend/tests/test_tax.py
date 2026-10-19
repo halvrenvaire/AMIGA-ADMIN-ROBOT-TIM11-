@@ -11,7 +11,7 @@ from app.models import AuditLog, User, Vendor
 from app.services import tax_service
 from app.services.extraction_service import ExtractedLine
 from app.services.verification import normalize
-from tests.test_documents import api, client_id, detail, extractor, invoice, tx, upload  # noqa: F401
+from tests.test_documents import api, client_id, detail, extractor, invoice, send, tx, upload  # noqa: F401
 from tests.test_reference import approve
 from tests.test_review import edit_file
 
@@ -39,16 +39,22 @@ def add_vendor(name, npwp):
         db.commit()
 
 
-def test_goods_invoice_is_prefilled_without_deduction(extractor):
+def test_ai_only_suggests_and_pic_must_choose_before_sending(extractor):
     doc = draft()
     data = doc["files"][0]["data"]
-    assert data["tax"]["code"] == "NONE" and data["tax_suggestion"]["source"] == "aturan"
+    assert "tax" not in data and data["tax_suggestion"]["code"] == "NONE" and data["tax_suggestion"]["source"] == "aturan"
     assert doc["tax_summary"]["tax_total"] == "0" and doc["tax_summary"]["net"] == doc["tax_summary"]["gross"]
+    r = api(PIC).post(f"/documents/{doc['id']}/submit")
+    assert r.status_code == 409 and "Pilih pajak dulu untuk bukti 1" in r.json()["detail"]
+    assert set_tax(doc["id"], code="NONE").status_code == 200
+    assert api(PIC).post(f"/documents/{doc['id']}/submit").json()["status"] == "READY_FOR_REVIEW"
 
 
 def test_service_invoice_is_suggested_pph23_and_net_is_paid(extractor):
     extractor.result = invoice(line_items=JASA)
     doc = draft()
+    assert doc["files"][0]["data"]["tax_suggestion"]["code"] == "PPH23"
+    doc = set_tax(doc["id"], code="PPH23").json()
     tax = doc["files"][0]["data"]["tax"]
     assert (tax["code"], tax["rate"], tax["base"], tax["amount"], tax["npwp"]) == ("PPH23", "2", "900000", "18000", True)
     assert Decimal(doc["tax_summary"]["net"]) == Decimal(882000)
@@ -57,8 +63,11 @@ def test_service_invoice_is_suggested_pph23_and_net_is_paid(extractor):
 def test_rate_follows_vendor_npwp_from_reference_data(extractor):
     add_vendor("PT Vendor Jaya", npwp=None)
     extractor.result = invoice(line_items=JASA)
-    data = draft()["files"][0]["data"]
-    assert data["npwp_known"] is False and data["tax"]["rate"] == "4" and data["tax"]["amount"] == "36000"
+    doc = draft()
+    assert doc["files"][0]["data"]["npwp_known"] is False
+    # Layar PIC memilih "Tidak punya NPWP" sesuai data referensi; tarif tanpa NPWP dipakai
+    tax = set_tax(doc["id"], code="PPH23", npwp=False).json()["files"][0]["data"]["tax"]
+    assert tax["rate"] == "4" and tax["amount"] == "36000"
 
 
 def test_pic_chooses_tax_and_change_is_audited(extractor):
@@ -70,7 +79,7 @@ def test_pic_chooses_tax_and_change_is_audited(extractor):
     assert Decimal(r.json()["tax_summary"]["net"]) == Decimal(850000)
     with db_module.SessionLocal() as db:
         log = db.scalars(select(AuditLog).where(AuditLog.document_id == doc["id"], AuditLog.field.like("%.pajak"))).all()
-    assert len(log) == 1 and log[0].old_value == "Tanpa potongan" and "PPh 4 ayat 2" in log[0].new_value
+    assert len(log) == 1 and log[0].old_value is None and "PPh 4 ayat 2" in log[0].new_value
     # Tanpa NPWP memakai tarif tanpa NPWP
     tax = set_tax(doc["id"], code="PPH23", npwp=False).json()["files"][0]["data"]["tax"]
     assert (tax["rate"], tax["amount"]) == ("4", "36000")
@@ -78,7 +87,7 @@ def test_pic_chooses_tax_and_change_is_audited(extractor):
 
 def test_editing_invoice_data_keeps_tax_and_recomputes_it(extractor):
     extractor.result = invoice(line_items=JASA)
-    doc = draft()
+    doc = set_tax(draft()["id"], code="PPH23").json()
     lines = doc["files"][0]["data"]["line_items"]
     lines[0]["subtotal"] = "1000000"
     r = edit_file(doc["id"], line_items=lines, total="1000000")
@@ -90,19 +99,22 @@ def test_editing_invoice_data_keeps_tax_and_recomputes_it(extractor):
 def test_vat_line_is_not_part_of_the_tax_base(extractor):
     extractor.result = invoice(line_items=JASA + [ExtractedLine("PPN 11%", None, None, Decimal(99000))],
                                total=Decimal(999000))
-    tax = draft()["files"][0]["data"]["tax"]
+    tax = set_tax(draft()["id"], code="PPH23").json()["files"][0]["data"]["tax"]
     assert tax["base"] == "900000" and tax["amount"] == "18000"
 
 
 def test_reimburse_is_not_deducted(extractor):
     extractor.result = invoice(line_items=JASA)
-    tax = draft(request_type="Voucher Pengeluaran Reimburse")["files"][0]["data"]["tax"]
-    assert tax["code"] == "NONE" and tax["amount"] == "0"
+    suggestion = draft(request_type="Voucher Pengeluaran Reimburse")["files"][0]["data"]["tax_suggestion"]
+    assert suggestion["code"] == "NONE"
 
 
 def test_voucher_shows_deduction_and_pays_net(extractor):
     extractor.result = invoice(line_items=JASA)
-    doc = detail(upload().json()["id"])
+    doc_id = upload(submit=False).json()["id"]
+    set_tax(doc_id, code="PPH23")
+    send(doc_id)
+    doc = detail(doc_id)
     approve(doc)
     text = pdf_text(api(PIC).get(f"/documents/{doc['id']}/voucher").content)
     assert "JUMLAH TAGIHAN" in text and "Potongan PPh 23 2% x DPP" in text
@@ -114,7 +126,7 @@ def test_voucher_shows_deduction_and_pays_net(extractor):
 def test_tax_only_editable_in_draft_and_unknown_code_rejected(extractor):
     doc = draft()
     assert set_tax(doc["id"], code="PPN99").status_code == 422
-    api(PIC).post(f"/documents/{doc['id']}/submit")
+    send(doc["id"])
     r = set_tax(doc["id"], code="PPH23")
     assert r.status_code == 409
 
@@ -126,6 +138,7 @@ def test_tax_rate_table_is_editable_by_service_lead_only(extractor):
     assert api(PIC).put("/tax-rates/PPH23", json={"rate_npwp": "3"}).status_code == 403
     extractor.result = invoice(line_items=JASA)
     doc = draft()
+    set_tax(doc["id"], code="PPH23")
     r = api("lead@amiga.test").put("/tax-rates/PPH23", json={"rate_npwp": "3", "needs_confirmation": False})
     assert r.status_code == 200 and Decimal(r.json()["rate_npwp"]) == 3 and not r.json()["needs_confirmation"]
     # Draf lama tetap memakai tarif saat dipilih

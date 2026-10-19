@@ -203,14 +203,27 @@ def format_processing_result(doc: dict) -> str:
         names = ", ".join(sorted({t["name"] for t in taxes["lines"]}))
         lines.append(f"Potongan pajak ({names}): {rupiah(taxes['tax_total'])} · Dibayarkan: {rupiah(taxes['net'])}")
     if status == "DRAFT":
-        lines.append("Draf siap. Periksa data dan pajak per invoice serta simulasi voucher di dashboard, lalu kirim ke "
-                     "Finance Reviewer (bisa juga lewat tombol di bawah).")
+        lines.append("Draf siap. Periksa data per invoice dan simulasi voucher di dashboard, pilih pajak tiap bukti, "
+                     "lalu kirim ke Finance Reviewer (bisa juga lewat tombol di bawah).")
+        pending = [f for f in doc.get("files") or [] if not (f.get("data") or {}).get("tax")]
+        if pending:
+            lines.append("\nSaran pajak (AI hanya menyarankan; Anda yang memilih):")
+            lines += [f"• Bukti {f['position']}: {s['name']} — {s['reason']}"
+                      for f in pending if (s := (f.get("data") or {}).get("tax_suggestion"))]
     issues = format_issues(doc)
     if issues:
         lines += ["\nKendala yang perlu Anda tindak lanjuti:", *issues,
                   "\nPerbaiki datanya lewat dashboard."]
     lines.append(f"Buka di dashboard: {doc_url(doc['id'])}")
     return "\n".join(lines)
+
+
+def draft_buttons(doc: dict) -> list:
+    """Draf yang pajaknya belum dipilih: pakai saran AI atau tanpa potongan, lalu kirim. Selebihnya: kirim saja."""
+    if all((f.get("data") or {}).get("tax") for f in doc.get("files") or []):
+        return [[("📤 Kirim ke reviewer", f"sub:{doc['id']}")]]
+    return [[("✅ Pakai saran pajak & kirim", f"tx:a:{doc['id']}")],
+            [("Tanpa potongan & kirim", f"tx:n:{doc['id']}")]]
 
 
 def format_assistant(body: dict) -> str:
@@ -537,6 +550,23 @@ class AmigaBot:
 
     # -- unggah invoice --
 
+    def _choose_tax_and_submit(self, user, mode: str, document_id: str) -> str:
+        """Tombol Telegram: PIC memilih pajak setiap bukti yang belum dipilih (saran AI atau tanpa potongan),
+        lalu draf dikirim ke reviewer. Pilihan tercatat sebagai pilihan PIC di jejak audit."""
+        doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
+        for f in doc.get("files") or []:
+            data = f.get("data") or {}
+            if data.get("tax"):
+                continue
+            code = (data.get("tax_suggestion") or {}).get("code", "NONE") if mode == "a" else "NONE"
+            self.amiga.request(user, "PUT", f"/documents/{document_id}/files/{f['position']}/tax",
+                               json={"code": code, "npwp": data.get("npwp_known") is not False})
+        sent = self.amiga.request(user, "POST", f"/documents/{document_id}/submit")
+        taxes = sent.get("tax_summary") or {}
+        paid = f"\nDibayarkan: {rupiah(taxes['net'])}" if taxes.get("net") is not None else ""
+        return (f"📤 {sent['request_id']} dikirim ke Finance Reviewer ({sent.get('assigned_reviewer') or '-'}).{paid}\n"
+                f"Status: {STATUS_LABEL.get(sent['status'], sent['status'])}")
+
     def _draft(self, chat_id: int, user: User) -> UploadDraft | None:
         draft = self.drafts.get(chat_id)
         if draft and (draft.expired() or draft.user_id != user.id):
@@ -656,6 +686,8 @@ class AmigaBot:
             if link is None:
                 return login_instructions()
             user = link.user
+        if data.startswith("tx:"):
+            return self._choose_tax_and_submit(user, data[3:4], data[5:])
         if data.startswith("sub:"):
             sent = self.amiga.request(user, "POST", f"/documents/{data[4:]}/submit")
             return (f"📤 {sent['request_id']} dikirim ke Finance Reviewer ({sent.get('assigned_reviewer') or '-'}).\n"
@@ -729,7 +761,7 @@ class AmigaBot:
             else:
                 text = format_processing_result(detail)
                 if detail["status"] == "DRAFT":
-                    buttons = [[("📤 Kirim ke reviewer", f"sub:{detail['id']}")]]
+                    buttons = draft_buttons(detail)
             self.tg.send_message(chat_id, text, buttons)
         except Exception:
             log.exception("Gagal memantau hasil proses dokumen")

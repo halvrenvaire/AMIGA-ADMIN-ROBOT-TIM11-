@@ -35,6 +35,14 @@ const meta = (label: string) => cy.contains(".meta dt", label).next("dd");
 /** Draf hasil AI dikirim PIC ke Finance Reviewer (alur draf, feedback owner). */
 function submitDraft() {
   waitStatus("Draf");
+  // PIC wajib memilih pajak sendiri (AI hanya menyarankan): pilih "Tanpa potongan" bila belum dipilih
+  cy.get(".tax-panel").then(($p) => {
+    if ($p.text().includes("belum dipilih")) {
+      cy.get("#tax-code").select("Tanpa potongan");
+      cy.contains("button", "Terapkan pajak").click();
+      cy.contains(".alert", "diterapkan");
+    }
+  });
   cy.contains(".decision button", "Kirim ke reviewer").click();
   cy.contains(".alert", "Terkirim ke Finance Reviewer");
 }
@@ -432,7 +440,7 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.contains("section", "Penanda tangan voucher").within(() => {
         cy.contains("button", "Ubah").click();
         cy.contains("button", "Tambah kotak tanda tangan").click();
-        cy.get(".approver-row select").last().select("Dian Pratama · Bendahara");
+        cy.get(".approver-row select").last().should("be.enabled").select("Dian Pratama · Bendahara");
         cy.contains("button", "Simpan").click();
       });
       cy.contains(".alert", "Penanda tangan voucher diperbarui");

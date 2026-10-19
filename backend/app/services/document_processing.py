@@ -142,7 +142,8 @@ def vendor_npwp(db, client_id, vendor_name: str | None) -> bool | None:
 
 
 def prefill_tax(db, doc: Document, bedrock) -> None:
-    """Isian awal pajak per invoice dari saran AI (cadangan: aturan). PIC tetap memeriksa dan bisa mengubahnya."""
+    """Saran pajak per invoice dari AI (cadangan: aturan) dan NPWP vendor dari data referensi.
+    Pajak TIDAK dipilih otomatis: PIC wajib memilihnya sendiri sebelum draf dikirim (keputusan owner)."""
     files = doc.files or []
     table = tax_service.rates(db)
     if not files or not table:
@@ -152,9 +153,8 @@ def prefill_tax(db, doc: Document, bedrock) -> None:
     for f, data, sug in zip(files, items, suggestions):
         known = vendor_npwp(db, doc.client_id, data.get("vendor_name"))
         rate = table.get(sug.code) or table[tax_service.NONE]
-        f.data = {**data, "npwp_known": known,
-                  "tax_suggestion": {"code": rate.code, "name": rate.name, "reason": sug.reason, "source": sug.source},
-                  "tax": tax_service.build(rate, known is not False, None, True, data, source=sug.source)}
+        f.data = {**{k: v for k, v in data.items() if k != "tax"}, "npwp_known": known,
+                  "tax_suggestion": {"code": rate.code, "name": rate.name, "reason": sug.reason, "source": sug.source}}
 
 
 def rebuild_from_files(db, doc: Document) -> Extraction:

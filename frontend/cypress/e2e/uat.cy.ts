@@ -35,6 +35,14 @@ const meta = (label: string) => cy.contains(".meta dt", label).next("dd");
 /** Draf hasil AI dikirim PIC ke Finance Reviewer (alur draf, feedback owner). */
 function submitDraft() {
   waitStatus("Draf");
+  // PIC wajib memilih pajak sendiri (AI hanya menyarankan): pilih "Tanpa potongan" bila belum dipilih
+  cy.get(".tax-panel").then(($p) => {
+    if ($p.text().includes("belum dipilih")) {
+      cy.get("#tax-code").select("Tanpa potongan");
+      cy.contains("button", "Terapkan pajak").click();
+      cy.contains(".alert", "diterapkan");
+    }
+  });
   cy.contains(".decision button", "Kirim ke reviewer").click();
   cy.contains(".alert", "Terkirim ke Finance Reviewer");
 }
@@ -145,7 +153,9 @@ describe("UAT AMIGA Robot Admin", () => {
       cy.contains(".decision button", "Kirim ke reviewer").should("be.disabled");
 
       cy.visitAs("multi@amiga.test", `/dokumen/${docs.sod.id}/riwayat`);
-      cy.contains(".timeline li", "Diperbaiki PIC").within(() => {
+      // Entri perubahan nominal (entri "Diperbaiki PIC" lain: pilihan pajak saat draf dikirim)
+      cy.contains(".timeline li", "Diperbaiki PIC").should("exist");
+      cy.get(".timeline li").filter(':contains("Diperbaiki PIC")').filter(':contains("11050000")').within(() => {
         cy.get("del").should("contain.text", "11050000");
         cy.get("ins").should("have.text", "11000000");
         cy.contains("Yoga");

@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app import db as db_module
 from app.models import AuditLog
-from tests.test_documents import ALPHA_REVIEWERS, api, detail, extractor, invoice, tx, upload  # noqa: F401
+from tests.test_documents import ALPHA_REVIEWERS, api, detail, extractor, invoice, send, tx, upload  # noqa: F401
 
 NAMES = {"Dewi (Finance Reviewer)": "reviewer1@amiga.test", "Agus (Finance Reviewer)": "reviewer2@amiga.test",
          "Yoga (Intake + Reviewer)": "multi@amiga.test"}
@@ -174,7 +174,7 @@ def test_uat7_pic_edit_per_invoice_is_audited_and_reverified(extractor):
     r = edit_file(doc["id"], line_items=lines)
     assert r.json()["issues"] == [] and r.json()["status"] == "DRAFT"
     assert Decimal(r.json()["extraction"]["total"]) == Decimal(950000)
-    sent = api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/submit")
+    sent = send(doc["id"])
     assert sent.status_code == 200 and sent.json()["status"] == "READY_FOR_REVIEW"
     assert reviewer_of(sent.json()).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 200
 
@@ -184,7 +184,7 @@ def test_edit_rejects_invalid_values_and_only_in_draft(extractor):
     assert edit_file(doc_id, total="9.500.000").status_code == 422
     assert edit_file(doc_id, invoice_date="31-02-2026").status_code == 422
     assert api("reviewer1@amiga.test").put(f"/documents/{doc_id}/files/1/data", json={}).status_code == 403
-    api("pic.alpha@amiga.test").post(f"/documents/{doc_id}/submit")
+    send(doc_id)
     assert edit_file(doc_id, total="1").status_code == 409  # sudah dikirim ke reviewer
 
 
@@ -208,7 +208,7 @@ def test_return_to_pic_requires_reason_then_pic_resubmits(extractor):
     assert "Lampirkan invoice revisi" in issue["message"]
 
     # PIC menindaklanjuti lalu mengirim ulang dengan Request ID yang sama
-    again = api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/submit")
+    again = send(doc["id"])
     assert again.status_code == 200
     final = detail(doc["id"])
     assert final["status"] == "READY_FOR_REVIEW" and final["issues"] == []

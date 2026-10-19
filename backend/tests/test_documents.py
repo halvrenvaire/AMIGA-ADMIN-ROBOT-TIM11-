@@ -143,9 +143,18 @@ def upload(email="pic.alpha@amiga.test", client="PT Klien Alpha", pdf=None, file
     return r
 
 
-def submit_draft(response, email="pic.alpha@amiga.test"):
-    if response.status_code == 201 and detail(response.json()["id"], email=email)["status"] == "DRAFT":
-        api(email).post(f"/documents/{response.json()['id']}/submit")
+def send(doc_id, email="pic.alpha@amiga.test", tax="NONE"):
+    """PIC memilih pajak untuk bukti yang belum dipilih, lalu mengirim draf ke reviewer."""
+    for f in detail(doc_id, email=email)["files"]:
+        if not (f.get("data") or {}).get("tax"):
+            api(email).put(f"/documents/{doc_id}/files/{f['position']}/tax", json={"code": tax})
+    return api(email).post(f"/documents/{doc_id}/submit")
+
+
+def submit_draft(response, email="pic.alpha@amiga.test", tax="NONE"):
+    """Seperti PIC: pilih pajak tiap bukti (default Tanpa potongan) lalu kirim draf ke reviewer."""
+    if response.status_code == 201 and (doc := detail(response.json()["id"], email=email))["status"] == "DRAFT":
+        send(doc["id"], email, tax)
 
 
 def detail(doc_id, email="pic.alpha@amiga.test"):
@@ -370,6 +379,6 @@ def test_status_changes_are_audited(extractor):
                           .where(AuditLog.document_id == doc_id).order_by(AuditLog.id)).all()
     assert [tuple(r) for r in rows] == [
         ("DOCUMENT_UPLOADED", "QUEUED"), ("STATUS_CHANGED", "PROCESSING"),
-        ("EXTRACTED", None), ("STATUS_CHANGED", "DRAFT"),
+        ("EXTRACTED", None), ("STATUS_CHANGED", "DRAFT"), ("FIXED_BY_PIC", None),  # PIC memilih pajak
         ("SUBMITTED_TO_REVIEW", "READY_FOR_REVIEW"), ("STATUS_CHANGED", "READY_FOR_REVIEW"),
     ]

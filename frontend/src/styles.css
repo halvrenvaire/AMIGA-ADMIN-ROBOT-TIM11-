@@ -888,3 +888,4 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .client-logo.compact .client-logo-preview { min-height: 34px; width: 120px; padding: 4px; }
 .client-logo.compact .client-logo-preview .sig-img { max-height: 30px; }
 .client-logo.compact .muted { font-size: 12px; }
+.tab-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); margin-left: 6px; vertical-align: middle; }

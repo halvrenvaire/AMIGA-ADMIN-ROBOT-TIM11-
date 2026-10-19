@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from pypdf import PdfReader
 
-from tests.test_documents import api, detail, extractor, invoice, make_pdf, tx  # noqa: F401
+from tests.test_documents import api, detail, extractor, invoice, make_pdf, send, tx  # noqa: F401
 from tests.test_multi_invoice import second_invoice
 from tests.test_review import edit_file
 
@@ -52,7 +52,7 @@ def test_blocking_issue_moves_to_exception_and_back_to_draft(extractor):
     assert r.status_code == 409 and "MISSING_EVIDENCE" in r.json()["detail"]
     r = edit_file(doc["id"], account_no="1234567890")
     assert r.json()["status"] == "DRAFT" and r.json()["issues"] == []
-    assert api(PIC).post(f"/documents/{doc['id']}/submit").json()["status"] == "READY_FOR_REVIEW"
+    assert send(doc["id"]).json()["status"] == "READY_FOR_REVIEW"
 
 
 def test_simulation_voucher_is_marked_and_has_attachments(extractor):
@@ -77,6 +77,6 @@ def test_submitting_a_draft_counts_as_submitter_for_sod(extractor):
     for n in range(4):
         extractor.result = [invoice(invoice_no=f"INV-SOD-{n}")]
         doc = upload_draft([make_pdf()])
-        sent = api("multi@amiga.test").post(f"/documents/{doc['id']}/submit").json()
+        sent = send(doc["id"], "multi@amiga.test").json()
         assert sent["status"] == "READY_FOR_REVIEW"
         assert "Yoga" not in (sent["assigned_reviewer"] or "")

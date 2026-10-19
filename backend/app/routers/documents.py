@@ -450,6 +450,11 @@ def submit_to_review(document_id: uuid.UUID, user: User = Depends(uploader_roles
     if blocking:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Masih ada kendala yang harus dilengkapi dulu: {', '.join(blocking)}.")
+    # PIC wajib memilih pajak sendiri untuk setiap bukti (termasuk "Tanpa potongan"); AI hanya menyarankan
+    no_tax = [str(f.position) for f in doc.files if not file_data(doc, f).get("tax")]
+    if no_tax:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Pilih pajak dulu untuk bukti {', '.join(no_tax)} (boleh \"Tanpa potongan\").")
     for issue in open_issues:
         if issue.code == IssueCode.RETURNED_BY_REVIEWER:
             issue.resolved = True  # catatan pengembalian sudah ditindaklanjuti PIC

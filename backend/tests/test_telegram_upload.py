@@ -90,10 +90,13 @@ def test_pic_uploads_invoice_and_gets_processing_result(bot):
     sent = [text for _, text in bot[1].sent]
     assert "Terkirim ke AMIGA" in sent[-2] and "REQ-" in sent[-2]
     assert "selesai diproses: Draf" in sent[-1] and "PT Vendor Jaya" in sent[-1]
+    assert "Saran pajak" in sent[-1] and "Bukti 1: Tanpa potongan" in sent[-1]
     [doc] = _documents()
     assert doc.status.value == "DRAFT"
-    # PIC mengirim draf ke reviewer langsung dari chat
-    assert "dikirim ke Finance Reviewer" in _click(bot, chat, f"sub:{doc.id}")
+    # Pajak belum dipilih: bot hanya menawarkan pilihan pajak (lalu kirim), bukan tombol kirim langsung
+    assert [label for row in bot[1].buttons for label, _ in row] == ["✅ Pakai saran pajak & kirim", "Tanpa potongan & kirim"]
+    reply = _click(bot, chat, f"tx:a:{doc.id}")
+    assert "dikirim ke Finance Reviewer" in reply and "Dibayarkan" in reply
 
     [doc] = _documents()
     assert doc.status.value == "READY_FOR_REVIEW" and doc.original_filename == "inv-maret.pdf"

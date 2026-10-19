@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.services.extraction_service import ExtractedLine, parse_response
-from tests.test_documents import api, codes, detail, extractor, invoice, tx, upload  # noqa: F401
+from tests.test_documents import api, codes, detail, extractor, invoice, send, tx, upload  # noqa: F401
 from tests.test_reference import add_vendor
 from tests.test_review import NAMES, audit, edit_file
 
@@ -103,7 +103,7 @@ def test_receipt_cannot_be_turned_into_invoice_or_accepted_while_incomplete(extr
     assert rev.post(url, json={"decision": "RECEIPT_ACCEPTED", "reason": "Struk sah"}).status_code == 409
     # PIC melengkapi lalu mengirim; struk tetap tidak bisa dijadikan invoice resmi
     edit_file(doc["id"], invoice_no="STRUK-1", bank_name="BCA", account_no="777", account_name="PT Vendor Jaya")
-    assert api(PIC).post(f"/documents/{doc['id']}/submit").status_code == 200
+    assert send(doc["id"]).status_code == 200
     assert rev.post(url, json={"decision": "INVOICE", "reason": "Kelihatan seperti invoice"}).status_code == 422
 
 

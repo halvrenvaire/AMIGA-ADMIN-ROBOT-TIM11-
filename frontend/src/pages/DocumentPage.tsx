@@ -292,6 +292,8 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
   const dirty = dataDirty || taxDirty;
   const reimburse = doc.request_type === "Voucher Pengeluaran Reimburse";
   const blocking = doc.issues.filter((i) => BLOCKING.has(i.code));
+  // PIC wajib memilih pajak sendiri untuk setiap bukti sebelum dikirim (AI hanya menyarankan)
+  const noTax = doc.files.filter((f) => !f.data?.tax).map((f) => f.position);
   const flags = flagged(blocking);
   const setLine = (i: number, k: keyof Line, v: string) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, [k]: v } : l)));
 
@@ -353,7 +355,7 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
             <button key={f.position} role="tab" aria-selected={f.position === file.position} className={f.position === file.position ? "active" : ""}
                     disabled={busy} title={f.original_filename}
                     onClick={() => { if (!dirty || confirm("Perubahan pada bukti ini belum disimpan. Pindah bukti?")) onPos(f.position); }}>
-              Bukti {f.position}
+              Bukti {f.position}{!f.data?.tax && <span className="tab-dot" title="Pajak belum dipilih" />}
             </button>
           ))}
         </div>
@@ -397,14 +399,17 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
 
       <TaxPanel key={`${file.position}-${JSON.stringify(file.data?.tax ?? null)}`} doc={doc} file={file} lines={lines}
                 total={fields.total} disabled={busy || dataDirty} onDirty={setTaxDirty} onChange={onChange} onNotice={onNotice} />
-      {doc.tax_summary && <TaxSummaryBox summary={doc.tax_summary} multi={doc.files.length > 1} />}
+      {noTax.length > 0
+        ? <p className="muted" style={{ margin: 0 }}>Pajak belum dipilih untuk bukti {noTax.join(", ")}; total dibayarkan dihitung setelah dipilih.</p>
+        : doc.tax_summary && <TaxSummaryBox summary={doc.tax_summary} multi={doc.files.length > 1} />}
 
       <div className="decision">
         {dataDirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
         <button className="btn" disabled={busy || !dataDirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
         <SimulationButton docId={doc.id} disabled={busy || dirty} />
-        <button className="btn primary" onClick={submit} disabled={busy || dirty || blocking.length > 0}
-                title={dirty ? "Simpan perubahan (data atau pajak) dulu" : blocking.length ? "Bereskan kendala dulu" : undefined}>
+        <button className="btn primary" onClick={submit} disabled={busy || dirty || blocking.length > 0 || noTax.length > 0}
+                title={dirty ? "Simpan perubahan (data atau pajak) dulu" : blocking.length ? "Bereskan kendala dulu"
+                  : noTax.length ? `Pilih pajak untuk bukti ${noTax.join(", ")}` : undefined}>
           <Send /> Kirim ke reviewer
         </button>
       </div>
@@ -432,14 +437,15 @@ function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange, onNoti
   const current = file.data?.tax ?? null;
   const suggestion = file.data?.tax_suggestion ?? null;
   const known = file.data?.npwp_known;
-  const [code, setCode] = useState(current?.code ?? "NONE");
+  // Belum dipilih: saran AI menjadi pilihan awal di formulir, tetapi baru berlaku setelah PIC menerapkannya
+  const [code, setCode] = useState(current?.code ?? suggestion?.code ?? "NONE");
   const [npwp, setNpwp] = useState(current?.npwp ?? known !== false);
   const [manual, setManual] = useState(current ? !current.base_auto : false);
   const [base, setBase] = useState(current && !current.base_auto ? plainNumber(current.base) : "");
   const [busy, setBusy] = useState(false);
 
-  const dirty = code !== (current?.code ?? "NONE") || npwp !== (current?.npwp ?? known !== false)
-    || manual !== (current ? !current.base_auto : false) || (manual && base !== plainNumber(current?.base ?? null));
+  const dirty = Boolean(current) && (code !== current!.code || npwp !== current!.npwp
+    || manual !== !current!.base_auto || (manual && base !== plainNumber(current!.base)));
   useEffect(() => { onDirty(dirty); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onDirty(false), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -466,6 +472,10 @@ function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange, onNoti
   return (
     <div className="tax-panel">
       <div className="section-title">Pajak (potongan PPh)</div>
+      {!current && (
+        <Alert kind="warn">Pajak bukti {file.position} <b>belum dipilih</b>. Periksa pilihan di bawah, lalu klik
+          &quot;Terapkan pajak&quot; (termasuk bila tanpa potongan).</Alert>
+      )}
       {suggestion && (
         <p className="tax-hint">
           <span className="chip gray">{suggestion.source === "ai" ? "Saran AI" : "Saran sistem"}</span>{" "}
@@ -513,12 +523,12 @@ function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange, onNoti
           </div>
         </div>
       )}
-      {dirty && (
+      {(dirty || !current) && (
         <div className="actions" style={{ justifyContent: "flex-end" }}>
-          <button className="btn" disabled={busy} onClick={() => {
-            setCode(current?.code ?? "NONE"); setNpwp(current?.npwp ?? known !== false);
-            setManual(current ? !current.base_auto : false); setBase(current && !current.base_auto ? plainNumber(current.base) : "");
-          }}><Undo2 /> Batalkan</button>
+          {dirty && current && <button className="btn" disabled={busy} onClick={() => {
+            setCode(current.code); setNpwp(current.npwp);
+            setManual(!current.base_auto); setBase(!current.base_auto ? plainNumber(current.base) : "");
+          }}><Undo2 /> Batalkan</button>}
           <button className="btn primary" disabled={busy || disabled || (manual && base === "")} onClick={apply}>Terapkan pajak</button>
         </div>
       )}
