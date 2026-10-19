@@ -107,7 +107,7 @@ export function AiResultCard({ doc, onClose }: { doc: DocumentDetail; onClose?: 
             </li>
           );
         })}
-        {account && !notInvoice && (
+        {account && account.state !== "NOT_APPLICABLE" && !notInvoice && (
           <li className={account.state === "VERIFIED" ? "pass" : account.state === "MISMATCH" ? "fail" : "skip"}>
             <span>{account.state === "VERIFIED" ? <Check /> : account.state === "MISMATCH" ? <X /> : "?"}</span>
             Rekening cocok dengan data vendor terverifikasi

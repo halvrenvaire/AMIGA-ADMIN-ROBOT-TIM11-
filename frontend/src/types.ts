@@ -19,7 +19,7 @@ export interface Classification {
 }
 /** Pemeriksaan rekening terhadap data vendor yang diverifikasi Finance Reviewer. */
 export interface AccountCheck {
-  state: "VERIFIED" | "MISMATCH" | "UNVERIFIED" | "MISSING";
+  state: "VERIFIED" | "MISMATCH" | "UNVERIFIED" | "MISSING" | "NOT_APPLICABLE";
   message: string; source: "AI" | "PIC"; vendor: string | null; verified_by: string | null;
 }
 

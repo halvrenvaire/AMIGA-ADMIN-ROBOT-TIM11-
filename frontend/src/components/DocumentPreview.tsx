@@ -22,7 +22,9 @@ export function AccountCheckBox({ check }: { check: AccountCheck }) {
     MISMATCH: { icon: ShieldAlert, tone: "bad", title: "Rekening tidak cocok dengan data terverifikasi" },
     UNVERIFIED: { icon: ShieldQuestion, tone: "warn", title: "Rekening belum terverifikasi" },
     MISSING: { icon: ShieldQuestion, tone: "gray", title: "Rekening belum ada" },
-  }[check.state];
+  }[check.state as string];
+  // Reimburse (NOT_APPLICABLE) tidak dicek rekeningnya; status yang tidak dikenal juga tidak ditampilkan
+  if (!meta) return null;
   const Icon = meta.icon;
   return (
     <div className={`account-check ${meta.tone}`}>

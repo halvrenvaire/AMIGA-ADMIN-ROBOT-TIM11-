@@ -561,6 +561,21 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains("tr", "PPh 23").should("contain.text", "sudah dikonfirmasi");
   });
 
+  it("TS-046 Voucher reimburse yang sudah dikirim tetap tampil (tanpa cek rekening)", () => {
+    cy.visitAs("pic.alpha@amiga.test", "/unggah");
+    cy.get("#type").select("Voucher Pengeluaran Reimburse");
+    cy.get("main input[type=file]").selectFile("cypress/fixtures/sys_normal_b.pdf", { force: true });
+    cy.contains("button", "Preview").click();
+    cy.contains("button", "Kirim ke antrean").click();
+    cy.contains("a", "Buka draf").click();
+    submitDraft();
+    waitStatus("Siap ditinjau");
+    cy.reload();
+    cy.contains(".section-title", "Data invoice");
+    cy.contains(".tax-summary, p", /Dibayarkan|Voucher membayar/);
+    cy.get(".account-check").should("not.exist");
+  });
+
   it("TS-041 Service Lead membuat dan mengunduh rekap voucher PDF", () => {
     cy.visitAs("lead@amiga.test", "/rekap-voucher");
     cy.contains("h1", "Rekap voucher");
