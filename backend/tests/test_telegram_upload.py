@@ -192,3 +192,14 @@ def test_image_sent_as_file_has_no_compression_tip(bot):
 def test_unlinked_chat_cannot_upload(bot):
     chat = random.randint(10 ** 9, 10 ** 10)
     assert "belum terhubung" in _send_pdf(bot, chat)
+
+
+def test_many_missing_fields_are_summarized_in_one_line():
+    from bot.telegram_bot import format_issues
+    fields = ["vendor_name", "invoice_no", "invoice_date", "total", "account_no"]
+    doc = {"issues": [{"code": "MISSING_EVIDENCE", "field": f, "message": "x"} for f in fields]
+           + [{"code": "NEEDS_MANUAL_REVIEW", "field": None, "message": "Foto buram."}]}
+    lines = format_issues(doc)
+    assert len(lines) == 2
+    assert "5 data (nama vendor, nomor invoice, tanggal, total, nomor rekening)" in lines[0]
+    assert "Foto buram." in lines[1]

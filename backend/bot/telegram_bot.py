@@ -145,8 +145,23 @@ def format_doc_line(doc: dict) -> str:
     return line
 
 
+MISSING_FIELD = {
+    "vendor_name": "nama vendor", "invoice_no": "nomor invoice", "invoice_date": "tanggal", "total": "total",
+    "bank_name": "nama bank", "account_no": "nomor rekening", "account_name": "nama penerima", "line_items": "rincian",
+}
+
+
 def format_issues(doc: dict) -> list[str]:
-    return [f"• {ISSUE_LABEL.get(i['code'], i['code'])}: {i['message']}" for i in doc.get("issues") or []]
+    issues = doc.get("issues") or []
+    missing = [i for i in issues if i["code"] == "MISSING_EVIDENCE"]
+    if len(missing) < 4:
+        return [f"• {ISSUE_LABEL.get(i['code'], i['code'])}: {i['message']}" for i in issues]
+    # Banyak data kosong sekaligus biasanya berarti fotonya tidak terbaca: cukup satu baris ringkas
+    fields = ", ".join(MISSING_FIELD.get(i.get("field"), i.get("field") or "-") for i in missing)
+    lines = [f"• {ISSUE_LABEL['MISSING_EVIDENCE']}: AI tidak menemukan {len(missing)} data ({fields}). "
+             "Biasanya karena foto buram, terpotong, atau terkompres. Kirim ulang sebagai File (📎 → File), "
+             "atau lengkapi datanya di dashboard."]
+    return lines + [f"• {ISSUE_LABEL.get(i['code'], i['code'])}: {i['message']}" for i in issues if i not in missing]
 
 
 def format_doc_detail(doc: dict) -> str:

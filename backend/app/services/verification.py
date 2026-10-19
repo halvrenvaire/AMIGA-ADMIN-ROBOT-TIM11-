@@ -79,8 +79,8 @@ def verify(data: InvoiceData, duplicate_request_id: str | None = None,
     for name, label in required.items():
         if getattr(data, name) in (None, ""):
             issues.append(Issue(IssueCode.MISSING_EVIDENCE, name,
-                                f"{label} tidak ditemukan di invoice. Lengkapi {label.lower()}, "
-                                "lalu kirim perbaikan."))
+                                f"{label} tidak ditemukan di invoice. Lengkapi {label.lower()} di draf, "
+                                "lalu simpan."))
     if not data.subtotals:
         issues.append(Issue(IssueCode.MISSING_EVIDENCE, "line_items",
                             "Rincian barang/jasa tidak ditemukan di invoice. "
