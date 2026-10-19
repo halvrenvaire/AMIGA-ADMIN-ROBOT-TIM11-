@@ -17,15 +17,17 @@ export function Loading({ label = "Memuat…" }: { label?: string }) {
   return <div className="empty"><Loader2 className="spin" size={18} style={{ verticalAlign: "-4px" }} /> {label}</div>;
 }
 
-export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide = false, full = false }: {
+  title: string; onClose: () => void; children: ReactNode; wide?: boolean; full?: boolean;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+    <div className={`backdrop${full ? " full" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`modal${wide ? " wide" : ""}${full ? " full" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="panel-head">
           <h2>{title}</h2>
           <button className="btn ghost sm" onClick={onClose} aria-label="Tutup"><X /></button>

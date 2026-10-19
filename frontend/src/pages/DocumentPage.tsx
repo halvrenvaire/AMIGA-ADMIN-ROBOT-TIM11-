@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Ban, CheckCircle2, Eye, FileClock, Plus, Receipt, RotateCcw, Save, Send, Trash2, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, Download, ExternalLink, Eye, FileClock, Maximize2, Minimize2, Plus, Receipt, RotateCcw, Save, Send, Trash2, Undo2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { AiProcessingCard, AiResultCard, AiScanOverlay } from "../components/AiProcessing";
@@ -545,16 +545,47 @@ function TaxSummaryBox({ summary, multi }: { summary: TaxSummary; multi: boolean
   );
 }
 
-/** Simulasi Voucher Pengeluaran (bertanda SIMULASI, lengkap dengan lampiran) sebelum disetujui. */
+/** Simulasi Voucher Pengeluaran (bertanda SIMULASI, lengkap dengan lampiran) sebelum disetujui.
+ *  Bisa dibesarkan ke layar penuh, dibuka di tab baru, atau diunduh. */
 function SimulationButton({ docId, disabled }: { docId: string; disabled?: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
+  const [full, setFull] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const path = `/documents/${docId}/voucher-preview?t=${open}`;
+
+  async function openInTab(download: boolean) {
+    const win = download ? null : window.open("", "_blank");  // dibuka saat diklik supaya tidak diblokir browser
+    setBusy(true);
+    try {
+      const url = URL.createObjectURL(await api.blob(path));
+      if (download) {
+        Object.assign(document.createElement("a"), { href: url, download: "simulasi-voucher.pdf" }).click();
+      } else if (win) win.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      win?.close();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
-      <button className="btn" disabled={disabled} onClick={() => setOpen(Date.now())}><Eye /> Lihat simulasi voucher</button>
+      <button className="btn" disabled={disabled} onClick={() => { setFull(false); setOpen(Date.now()); }}><Eye /> Lihat simulasi voucher</button>
       {open && (
-        <Modal title="Simulasi voucher" onClose={() => setOpen(null)} wide>
-          <div className="pdf-body" style={{ height: "75vh" }}>
-            <PdfFrame path={`/documents/${docId}/voucher-preview?t=${open}`} title="Simulasi voucher" />
+        <Modal title="Simulasi voucher" onClose={() => setOpen(null)} wide full={full}>
+          <div className="sim-toolbar">
+            <span className="muted">Bertanda SIMULASI · nomor voucher dan tanda tangan elektronik muncul setelah disetujui</span>
+            <div className="actions">
+              <button className="btn sm" onClick={() => setFull(!full)}>
+                {full ? <><Minimize2 /> Perkecil</> : <><Maximize2 /> Layar penuh</>}
+              </button>
+              <button className="btn sm" disabled={busy} onClick={() => openInTab(false)}><ExternalLink /> Buka di tab baru</button>
+              <button className="btn sm" disabled={busy} onClick={() => openInTab(true)}><Download /> Unduh PDF</button>
+            </div>
+          </div>
+          <div className="sim-body">
+            <PdfFrame path={path} title="Simulasi voucher" />
           </div>
         </Modal>
       )}

@@ -865,8 +865,13 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 }
 .tabs button:hover { color: var(--fg); }
 .tabs button.active { color: var(--primary); border-bottom-color: var(--pink); font-weight: 600; }
-.modal.wide { width: min(1000px, calc(100vw - 32px)); max-width: none; }
-.modal.wide .pdf-body iframe { width: 100%; height: 100%; border: 0; }
+/* Modal lebar untuk PDF (simulasi voucher): tinggi hampir satu layar, bisa layar penuh */
+.modal.wide { width: min(1200px, calc(100vw - 32px)); height: calc(100vh - 32px); max-width: none; overflow: hidden; }
+.modal.full { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; padding: 12px 16px; }
+.backdrop.full { padding: 0; }
+.sim-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.sim-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; background: #525659; }
+.sim-body iframe { flex: 1; width: 100%; min-height: 0; border: 0; }
 
 /* Pajak per invoice (Tahap 4) */
 .tax-panel { display: flex; flex-direction: column; gap: 10px; }
