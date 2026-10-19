@@ -98,7 +98,7 @@ def test_mixed_pdf_and_photo_in_one_voucher(extractor):  # noqa: F811
     from tests.test_documents import api as client_for, client_id
     r = client_for("pic.alpha@amiga.test").post(
         "/documents",
-        data={"client_id": client_id("PT Klien Alpha"), "request_type": "Pembayaran vendor",
+        data={"client_id": client_id("PT Klien Alpha"), "request_type": "Voucher Pengeluaran Vendor",
               "channel": "Email", "submitted_date": "2026-10-16"},
         files=[("files", ("a.pdf", make_pdf(), "application/pdf")),
                ("files", ("b.png", image_bytes("PNG"), "image/png"))])

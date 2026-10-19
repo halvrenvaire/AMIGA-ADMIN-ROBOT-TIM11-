@@ -19,7 +19,7 @@ const NAV: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: BarChart3, roles: ["SERVICE_LEAD", "FINANCE_REVIEWER", "PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/antrean", label: "Dashboard Antrean", icon: LayoutDashboard, roles: ["SERVICE_LEAD", "FINANCE_REVIEWER"] },
   { to: "/peninjauan", label: "Peninjauan Saya", icon: ClipboardCheck, roles: ["FINANCE_REVIEWER"] },
-  { to: "/unggah", label: "Unggah Dokumen", icon: Upload, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
+  { to: "/unggah", label: "Pembuatan Voucher", icon: Upload, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/pengajuan", label: "Pengajuan Saya", icon: FileText, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
   { to: "/voucher", label: "Voucher", icon: Receipt, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
   { to: "/rekap-voucher", label: "Rekap Voucher", icon: FileBarChart, roles: ["SERVICE_LEAD"] },
@@ -40,7 +40,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/dokumen\/[^/]+\/voucher$/, "Pratinjau Voucher"], [/^\/dokumen\/[^/]+\/riwayat$/, "Riwayat Dokumen"],
   [/^\/dokumen/, "Detail Dokumen"], [/^\/dashboard/, "Dashboard"], [/^\/antrean/, "Dashboard Antrean"],
   [/^\/referensi\/vendor/, "Data Referensi / Vendor"], [/^\/referensi\/penanda-tangan/, "Data Referensi / Penanda tangan"], [/^\/peninjauan/, "Peninjauan Saya"],
-  [/^\/unggah/, "Unggah Dokumen"], [/^\/pengajuan/, "Pengajuan Saya"], [/^\/voucher/, "Voucher"],
+  [/^\/unggah/, "Pembuatan Voucher"], [/^\/pengajuan/, "Pengajuan Saya"], [/^\/voucher/, "Voucher"],
   [/^\/riwayat/, "Riwayat & Audit"], [/^\/cari/, "Hasil Pencarian"],
   [/^\/akun/, "Pengaturan Akun"], [/^\/asisten/, "Asisten AI"], [/^\/rekap-voucher/, "Rekap Voucher"], [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],
 ];

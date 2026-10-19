@@ -23,7 +23,7 @@ WIB = ZoneInfo("Asia/Jakarta")
 
 
 def _rows(db: Session, ids: set[uuid.UUID], *, vendor_id=None, vendor=None, status_filter=None,
-          date_from: date | None = None, date_to: date | None = None, q=None) -> list[VoucherRow]:
+          date_from: date | None = None, date_to: date | None = None, q=None, request_type=None) -> list[VoucherRow]:
     approver, pic = aliased(User), aliased(User)
     query = (
         select(Voucher, Document, Client, Extraction, approver.full_name, pic.full_name)
@@ -37,6 +37,8 @@ def _rows(db: Session, ids: set[uuid.UUID], *, vendor_id=None, vendor=None, stat
     )
     if vendor_id is not None:
         query = query.where(Document.vendor_id == vendor_id)
+    if request_type:
+        query = query.where(Document.request_type == request_type)
     if vendor and vendor.strip():
         query = query.where(Extraction.vendor_name.ilike(f"%{vendor.strip()}%"))
     if status_filter:
@@ -55,7 +57,7 @@ def _rows(db: Session, ids: set[uuid.UUID], *, vendor_id=None, vendor=None, stat
             client=ClientRef(id=client.id, name=client.name), vendor_id=doc.vendor_id,
             vendor_name=ex.vendor_name if ex else None, invoice_no=ex.invoice_no if ex else None,
             invoice_date=ex.invoice_date if ex else None, total=ex.total if ex else None,
-            status=doc.status, approved_by=approved_by, pic_name=pic_name,
+            status=doc.status, approved_by=approved_by, pic_name=pic_name, request_type=doc.request_type,
         )
         for v, doc, client, ex, approved_by, pic_name in db.execute(query).all()
     ]
@@ -70,6 +72,7 @@ def list_vouchers(
     date_from: date | None = None,
     date_to: date | None = None,
     q: Annotated[str | None, Query(max_length=100, description="Nomor voucher, Request ID, atau nomor invoice")] = None,
+    request_type: Annotated[str | None, Query(max_length=100, description="Kategori pengajuan")] = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -78,7 +81,7 @@ def list_vouchers(
     if client_id is not None:
         ids &= {client_id}
     return _rows(db, ids, vendor_id=vendor_id, vendor=vendor, status_filter=status_filter,
-                 date_from=date_from, date_to=date_to, q=q)
+                 date_from=date_from, date_to=date_to, q=q, request_type=request_type)
 
 
 PERIOD_DAYS = {"1": 1, "7": 7, "30": 30}

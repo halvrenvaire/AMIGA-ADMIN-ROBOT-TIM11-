@@ -535,6 +535,8 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
   const [ids, setIds] = useState<string[]>([]);
   const [initial, setInitial] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const currentSubmitter = doc.signers.find((s) => s.kind === "PENGAJU")?.name ?? doc.on_behalf_of ?? doc.uploaded_by;
+  const [submitterName, setSubmitterName] = useState(currentSubmitter);
   const locked = doc.status === "AMIGA_REVIEWED" || doc.status === "SENT_TO_CLIENT" || doc.status === "CANCELLED";
   const canEdit = has("PIC_KLIEN", "INTAKE_SUPPORT") && !locked;
 
@@ -545,13 +547,17 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
     setInitial(doc.signers.filter((x) => x.kind === "PENYETUJU")
       .map((x) => list.find((s) => s.full_name === x.name && s.position === x.position)?.id)
       .filter((id): id is string => Boolean(id)));
+    setSubmitterName(currentSubmitter);
     setEditing(true);
   }
 
   async function save() {
     setError(null);
     try {
-      onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/signers`, { signatory_ids: ids }));
+      onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/signers`, {
+        signatory_ids: ids,
+        ...(submitterName.trim() !== currentSubmitter ? { submitter_name: submitterName.trim() } : {}),
+      }));
       setEditing(false);
     } catch (e) { setError((e as Error).message); }
   }
@@ -565,8 +571,14 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
       {editing && initial ? (
         <>
           {error && <Alert>{error}</Alert>}
+          <div className="field" style={{ maxWidth: 420 }}>
+            <label htmlFor="edit-submitter">Nama &quot;Diajukan oleh&quot;</label>
+            <input id="edit-submitter" className="input" maxLength={200} value={submitterName}
+                   onChange={(e) => setSubmitterName(e.target.value)} />
+            <small>Boleh nama karyawan lain. Kosongkan untuk kembali ke PIC pengaju.</small>
+          </div>
           <SignerPicker clientId={doc.client.id} clientName={doc.client.name} initial={initial} onChange={setIds}
-                        submitter={doc.signers.find((s) => s.kind === "PENGAJU")?.name ?? doc.on_behalf_of ?? doc.uploaded_by} />
+                        submitter={submitterName.trim() || currentSubmitter} />
           <div className="actions" style={{ justifyContent: "flex-end" }}>
             <button className="btn" onClick={() => setEditing(false)}>Batal</button>
             <button className="btn primary" onClick={save}>Simpan</button>

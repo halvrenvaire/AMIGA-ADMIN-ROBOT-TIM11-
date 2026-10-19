@@ -60,6 +60,14 @@ def _click(bot_and_tg, chat, data):
     return tg.last
 
 
+def _choose(bot_and_tg, chat, category=0):
+    """Pilih perusahaan (selalu ditanyakan) lalu kategori lewat tombol."""
+    _, tg = bot_and_tg
+    company = next(d for row in tg.buttons for _, d in row if d.startswith("up:c:"))
+    _click(bot_and_tg, chat, company)
+    return _click(bot_and_tg, chat, f"up:t:{category}")
+
+
 def _documents():
     with db_module.SessionLocal() as db:
         return list(db.scalars(select(Document).options(selectinload(Document.files))
@@ -68,10 +76,15 @@ def _documents():
 
 def test_pic_uploads_invoice_and_gets_processing_result(bot):
     chat = _link(bot, "pic.alpha@amiga.test")
-    # PIC Alpha hanya ditugaskan ke satu perusahaan: langsung ditanya jenis permintaan
-    assert "Jenis permintaan?" in _send_pdf(bot, chat, name="inv-maret.pdf")
-    summary = _click(bot, chat, "up:t:default")
-    assert "PT Klien Alpha" in summary and "Pembayaran vendor" in summary and "Telegram" in summary
+    # Pilihan perusahaan selalu ditampilkan, walau PIC Alpha hanya memegang satu perusahaan
+    assert "Untuk perusahaan mana?" in _send_pdf(bot, chat, name="inv-maret.pdf")
+    assert [label for row in bot[1].buttons for label, _ in row] == ["PT Klien Alpha"]
+    _click(bot, chat, bot[1].buttons[0][0][1])
+    assert "Kategori voucher?" in bot[1].last
+    assert [label for row in bot[1].buttons for label, _ in row] == [
+        "Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya"]
+    summary = _click(bot, chat, "up:t:0")
+    assert "PT Klien Alpha" in summary and "Kategori: Voucher Pengeluaran Vendor" in summary and "Telegram" in summary
 
     _click(bot, chat, "up:send")
     sent = [text for _, text in bot[1].sent]
@@ -91,7 +104,7 @@ def test_exception_result_lists_issues(bot, extractor):  # noqa: F811
     extractor.result = invoice(account_no=None)
     chat = _link(bot, "pic.alpha@amiga.test")
     _send_pdf(bot, chat)
-    _click(bot, chat, "up:t:default")
+    _choose(bot, chat)
     _click(bot, chat, "up:send")
     result = bot[1].last
     assert "Ada kendala" in result and "Data belum lengkap" in result
@@ -104,25 +117,25 @@ def test_several_pdfs_sent_at_once_become_one_voucher(bot, extractor):  # noqa: 
     assert _send_pdf(bot, chat, name="b.pdf", group="album1") is None
     bot[0].flush_prompts()
     assert "2 file invoice" in bot[1].last and "a.pdf" in bot[1].last and "b.pdf" in bot[1].last
-    _click(bot, chat, "up:t:default")
+    _choose(bot, chat)
     _click(bot, chat, "up:send")
     [doc] = _documents()
     assert len(doc.files) == 2
 
 
-def test_custom_request_type(bot):
+def test_reimburse_category_is_sent(bot):
     chat = _link(bot, "pic.alpha@amiga.test")
     _send_pdf(bot, chat)
-    assert "Ketik jenis permintaan" in _click(bot, chat, "up:t:custom")
-    bot[0].handle_update({"update_id": 4, "message": {"chat": {"id": chat, "type": "private"},
-                                                      "text": "Reimburse perjalanan dinas"}})
-    assert "Jenis permintaan: Reimburse perjalanan dinas" in bot[1].last
+    assert "Kategori: Voucher Pengeluaran Reimburse" in _choose(bot, chat, 1)
+    _click(bot, chat, "up:send")
+    [doc] = _documents()
+    assert doc.request_type == "Voucher Pengeluaran Reimburse"
 
 
 def test_cancel_sends_nothing(bot):
     chat = _link(bot, "pic.alpha@amiga.test")
     _send_pdf(bot, chat)
-    _click(bot, chat, "up:t:default")
+    _choose(bot, chat)
     assert "dibatalkan" in _click(bot, chat, "up:cancel")
     assert _documents() == []
 
@@ -130,7 +143,7 @@ def test_cancel_sends_nothing(bot):
 def test_double_click_send_uploads_once(bot):
     chat = _link(bot, "pic.alpha@amiga.test")
     _send_pdf(bot, chat)
-    _click(bot, chat, "up:t:default")
+    _choose(bot, chat)
     bot_, tg = bot
     tg.buttons_before = tg.buttons
     _click(bot, chat, "up:send")
@@ -158,7 +171,8 @@ def test_photo_is_accepted_and_uploaded_with_original(bot):
     bot_.handle_update({"update_id": 6, "message": {"chat": {"id": chat, "type": "private"},
                                                     "photo": [{"file_id": "kecil"}, {"file_id": "foto1"}]}})
     assert "foto-invoice-" in tg.last and "dikompres Telegram" in tg.last
-    _click(bot, chat, "up:t:default")
+    assert "Untuk perusahaan mana?" in tg.last  # foto juga menampilkan pilihan perusahaan
+    _choose(bot, chat)
     _click(bot, chat, "up:send")
     assert "Siap ditinjau" in tg.last
     [doc] = _documents()

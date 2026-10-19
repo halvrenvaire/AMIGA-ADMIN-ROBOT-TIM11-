@@ -131,7 +131,7 @@ def client_id(name):
 
 
 def upload(email="pic.alpha@amiga.test", client="PT Klien Alpha", pdf=None, filename="invoice.pdf", **form):
-    data = {"client_id": client_id(client), "request_type": "Pembayaran vendor", "channel": "Email",
+    data = {"client_id": client_id(client), "request_type": "Voucher Pengeluaran Vendor", "channel": "Email",
             "submitted_date": "2026-10-14", **form}
     return api(email).post("/documents", data=data,
                            files={"files": (filename, pdf if pdf is not None else make_pdf(), "application/pdf")})

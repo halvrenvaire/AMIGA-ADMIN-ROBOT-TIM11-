@@ -4,7 +4,7 @@ import { Download, Receipt } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Alert, Loading, StatusBadge, useApi } from "../components/ui";
-import { STATUS_LABEL, rupiah, tanggal, waktu } from "../format";
+import { STATUS_LABEL, rupiah, tanggal, waktu, REQUEST_CATEGORIES } from "../format";
 import type { Vendor, VoucherRow } from "../types";
 
 type GroupBy = "none" | "client" | "vendor" | "status";
@@ -23,13 +23,14 @@ export function VoucherTable() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
+  const [category, setCategory] = useState("");
   const [groupBy, setGroupBy] = useState<GroupBy>("client");
   const canOpenPdf = has("PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER");
 
   const vendors = useApi(() => api.get<Vendor[]>("/vendors", { client_id: clientId, include_inactive: true }), [clientId]);
   const rows = useApi(() => api.get<VoucherRow[]>("/vouchers", {
-    client_id: clientId, vendor_id: vendorId, status, date_from: from, date_to: to, q,
-  }), [clientId, vendorId, status, from, to, q]);
+    client_id: clientId, vendor_id: vendorId, status, date_from: from, date_to: to, q, request_type: category,
+  }), [clientId, vendorId, status, from, to, q, category]);
 
   const groups = useMemo(() => {
     const data = rows.data ?? [];
@@ -51,7 +52,7 @@ export function VoucherTable() {
   }
 
   const total = sum(rows.data ?? []);
-  const filtered = Boolean(clientId || vendorId || status || from || to || q);
+  const filtered = Boolean(clientId || vendorId || status || from || to || q || category);
   const colSpan = 8;
 
   return (
@@ -76,6 +77,10 @@ export function VoucherTable() {
             <option value="">Semua vendor</option>
             {vendors.data?.map((v) => <option key={v.id} value={v.id}>{v.name}{clientId ? "" : ` · ${v.client.name}`}</option>)}
           </select>
+<select className="input" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Kategori">
+            <option value="">Semua kategori</option>
+            {REQUEST_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
           <select className="input" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
             <option value="">Semua status</option>
             <option value="AMIGA_REVIEWED">{STATUS_LABEL.AMIGA_REVIEWED} (belum diunduh klien)</option>
@@ -89,7 +94,7 @@ export function VoucherTable() {
               {(Object.keys(GROUP_LABEL) as GroupBy[]).map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
             </select>
           </label>
-          {filtered && <button className="btn ghost sm" onClick={() => { setClientId(""); setVendorId(""); setStatus(""); setFrom(""); setTo(""); setQ(""); }}>Hapus filter</button>}
+          {filtered && <button className="btn ghost sm" onClick={() => { setClientId(""); setVendorId(""); setStatus(""); setFrom(""); setTo(""); setQ(""); setCategory(""); }}>Hapus filter</button>}
         </div>
 
         {rows.error && <Alert>{rows.error}</Alert>}

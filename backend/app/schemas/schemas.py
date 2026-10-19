@@ -488,6 +488,8 @@ class Signer(BaseModel):
 
 class SignersUpdate(BaseModel):
     signatory_ids: list[uuid.UUID]
+    # Nama di kotak "Diajukan oleh"; None = tidak diubah, "" = kembali ke PIC pengaju
+    submitter_name: str | None = Field(None, max_length=200)
 
 
 class VoucherRow(BaseModel):
@@ -504,6 +506,7 @@ class VoucherRow(BaseModel):
     status: DocStatus
     approved_by: str
     pic_name: str | None = None  # PIC Klien pengaju: pengunggah, atau PIC yang diwakili Intake Support
+    request_type: str | None = None  # kategori pengajuan
 
 
 class TrendPoint(BaseModel):

@@ -6,7 +6,7 @@ import { useAuth } from "../auth";
 import { DocumentTable } from "../components/DocumentTable";
 import { ReassignModal } from "../components/ReassignModal";
 import { Alert, Loading, useApi } from "../components/ui";
-import { STATUS_LABEL, STATUS_ORDER } from "../format";
+import { STATUS_LABEL, STATUS_ORDER, REQUEST_CATEGORIES } from "../format";
 import type { DashboardSummary, DocStatus, DocumentSummary } from "../types";
 
 /** Layar 01 — Dashboard Antrean (Service Lead, Finance Reviewer). */
@@ -19,15 +19,16 @@ export function Queue() {
   const [problem, setProblem] = useState(false);
   const [dueSoon, setDueSoon] = useState(false);
   const [q, setQ] = useState("");
+  const [category, setCategory] = useState("");
   const [reassign, setReassign] = useState<DocumentSummary | null>(null);
 
   const summary = useApi(() => api.get<DashboardSummary>("/dashboard/summary"), []);
   const docs = useApi(
     () => api.get<DocumentSummary[]>("/documents", {
-      status, client_id: clientId, reviewer_id: reviewerId, problem, q,
+      status, client_id: clientId, reviewer_id: reviewerId, problem, q, request_type: category,
       due_within_days: dueSoon ? summary.data?.due_soon_days ?? 2 : undefined, sort: "tenggat",
     }),
-    [status, clientId, reviewerId, problem, dueSoon, q],
+    [status, clientId, reviewerId, problem, dueSoon, q, category],
   );
   const isLead = has("SERVICE_LEAD");
   const s = summary.data;
@@ -75,6 +76,10 @@ export function Queue() {
             <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)} aria-label="Klien">
               <option value="">Semua klien</option>
               {user?.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+<select className="input" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Kategori">
+              <option value="">Semua kategori</option>
+              {REQUEST_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
             </select>
             <select className="input" value={reviewerId} onChange={(e) => setReviewerId(e.target.value)} aria-label="Reviewer">
               <option value="">Semua reviewer</option>

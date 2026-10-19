@@ -94,7 +94,7 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    brand_header(pdf, 297, "Rekap Voucher Pembayaran Vendor")
+    brand_header(pdf, 297, "Rekap Voucher Pengeluaran")
     pdf.set_y(31)
 
     pdf.set_font("Helvetica", "B", 14)

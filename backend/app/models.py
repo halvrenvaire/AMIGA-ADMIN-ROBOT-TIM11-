@@ -22,6 +22,11 @@ class Role(str, enum.Enum):
     SYSTEM_ADMIN = "SYSTEM_ADMIN"
 
 
+# Kategori pengajuan (feedback owner 19 Okt 2026): hanya untuk filter dashboard, tidak dicetak di voucher
+REQUEST_CATEGORIES = ("Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya")
+CATEGORY_VENDOR, CATEGORY_REIMBURSE, CATEGORY_OTHER = REQUEST_CATEGORIES
+
+
 class DocStatus(str, enum.Enum):
     QUEUED = "QUEUED"
     PROCESSING = "PROCESSING"

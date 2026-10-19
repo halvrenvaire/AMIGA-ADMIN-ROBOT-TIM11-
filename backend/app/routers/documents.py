@@ -19,7 +19,8 @@ from app.auth import ensure_client_access, ensure_submit_access, get_current_use
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User, UserClientAssignment, ValidationIssue,
+    REQUEST_CATEGORIES, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User,
+    UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
     CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ReasonRequest, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
@@ -154,7 +155,8 @@ async def upload_document(
     request: Request,
     background: BackgroundTasks,
     client_id: Annotated[uuid.UUID, Form(description="Perusahaan klien yang mengajukan (\"Diajukan oleh\")")],
-    request_type: Annotated[str, Form(min_length=1, max_length=100, description="Jenis permintaan")],
+    request_type: Annotated[str, Form(min_length=1, max_length=100,
+                                      description="Kategori: " + " / ".join(REQUEST_CATEGORIES))],
     channel: Annotated[Channel, Form(description="Asal pengajuan invoice")],
     submitted_date: Annotated[date, Form(description="Tanggal pengajuan")],
     files: Annotated[list[UploadFile], File(description="1–10 invoice PDF untuk satu voucher, masing-masing maks. 5 halaman")],
@@ -162,12 +164,17 @@ async def upload_document(
     signatory_ids: Annotated[str | None, Form(
         description="ID pemberi persetujuan (\"Disetujui oleh\") dipisah koma, berurutan. "
                     "Tidak dikirim = 1 kotak default klien; kosong = tanpa pemberi persetujuan")] = None,
+    submitter_name: Annotated[str | None, Form(max_length=200, description=(
+        "Nama di kotak \"Diajukan oleh\" (boleh karyawan lain). Kosong = PIC pengaju"))] = None,
     user: User = Depends(uploader_roles),
     db: Session = Depends(get_db),
 ):
     """Unggah 1–10 invoice PDF yang digabung dalam satu voucher (FR-1.1–1.5). Sistem menerbitkan
     satu Request ID dengan status QUEUED, lalu AI membaca setiap invoice dan sistem memverifikasinya
     di background."""
+    if request_type.strip() not in REQUEST_CATEGORIES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            "Kategori tidak dikenal. Pilih salah satu: " + ", ".join(REQUEST_CATEGORIES) + ".")
     ensure_submit_access(db, user, client_id)
     if not 1 <= len(files) <= settings.max_upload_files:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -205,7 +212,7 @@ async def upload_document(
 
     # "Diajukan oleh" di voucher = PIC Klien: pengunggah, atau PIC yang diwakili Intake Support
     submitter = db.get(User, on_behalf_of) if on_behalf_of else user
-    signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids), submitter)
+    signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids), submitter, submitter_name)
 
     request_id = _new_request_id(db)
     total_pages = sum(p.pages for p in parts)
@@ -262,6 +269,7 @@ def list_documents(
     problem: Annotated[bool, Query(description="Hanya dokumen bermasalah (EXCEPTION)")] = False,
     due_within_days: Annotated[int | None, Query(ge=0, le=365, description="Tenggat <= N hari lagi, belum selesai")] = None,
     q: Annotated[str | None, Query(max_length=100, description="Cari Request ID atau vendor")] = None,
+    request_type: Annotated[str | None, Query(max_length=100, description="Kategori pengajuan")] = None,
     sort: Literal["terbaru", "tenggat"] = "terbaru",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -274,6 +282,8 @@ def list_documents(
     query = select(Document).where(Document.client_id.in_(client_ids))
     if status_filter is not None:
         query = query.where(Document.status == status_filter)
+    if request_type:
+        query = query.where(Document.request_type == request_type)
     if problem:
         query = query.where(Document.status == DocStatus.EXCEPTION)
     if reviewer_id is not None:
@@ -412,8 +422,11 @@ def set_signers(document_id: uuid.UUID, body: SignersUpdate, user: User = Depend
     if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Voucher sudah terbit atau pengajuan dibatalkan; penanda tangan tidak bisa diubah.")
-    # Kotak "Diajukan oleh" (PIC) tetap; hanya kotak "Disetujui oleh" yang diganti
+    # Kotak "Diajukan oleh" tetap kecuali namanya diganti; kotak "Disetujui oleh" diganti sesuai pilihan
     pengaju = [s for s in doc.signers or [] if s["kind"] == "PENGAJU"]
+    if body.submitter_name is not None:
+        pic = db.get(User, doc.on_behalf_of or doc.uploaded_by)
+        pengaju = [signer_service.pengaju(pic, doc.client, body.submitter_name or None)]
     new = pengaju + signer_service.resolve(db, doc.client_id, body.signatory_ids, None)
     describe = lambda items: "; ".join(f"{s['name']} ({s['position']})" for s in items) or "-"  # noqa: E731
     audit_service.record(db, user, "SIGNERS_CHANGED", document_id=doc.id, client_id=doc.client_id,

@@ -18,7 +18,12 @@ MAX_PENYETUJU = 5
 COMPANY_POSITION = "Perusahaan klien"
 
 
-def pengaju(submitter: User, client: Client) -> dict:
+def pengaju(submitter: User, client: Client, name: str | None = None) -> dict:
+    """Kotak "Diajukan oleh": default PIC pengaju. Nama boleh diganti karyawan lain (feedback owner); bila diganti,
+    tautan ke akun PIC dilepas supaya spesimen tanda tangan PIC tidak tercetak atas nama orang lain."""
+    name = (name or "").strip()
+    if name and name != submitter.full_name:
+        return {"kind": SignatoryKind.PENGAJU.value, "name": name[:200], "position": client.name}
     return {"kind": SignatoryKind.PENGAJU.value, "name": submitter.full_name, "position": f"PIC Klien, {client.name}",
             "user_id": str(submitter.id)}
 
@@ -30,11 +35,11 @@ def _approver(s: Signatory) -> dict:
 
 
 def resolve(db: Session, client_id: uuid.UUID, ids: list[uuid.UUID] | None,
-            submitter: User | None) -> list[dict]:
+            submitter: User | None, submitter_name: str | None = None) -> list[dict]:
     """[PIC pengaju, penyetuju...] sesuai urutan pilihan PIC (urutan = urutan kotak di voucher).
     `submitter` None = hanya kotak "Disetujui oleh" (dipakai saat mengganti penanda tangan)."""
     client = db.get(Client, client_id)
-    head = [pengaju(submitter, client)] if submitter else []
+    head = [pengaju(submitter, client, submitter_name)] if submitter else []
     if ids is None:
         default = db.scalars(select(Signatory).where(
             Signatory.client_id == client_id, Signatory.kind == SignatoryKind.PENYETUJU,

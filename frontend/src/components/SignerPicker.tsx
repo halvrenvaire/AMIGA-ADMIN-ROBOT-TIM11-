@@ -41,7 +41,7 @@ export function SignerPicker({ clientId, clientName, submitter, initial, onChang
         <legend>Diajukan oleh</legend>
         <div className="company-box">
           <UserRound />
-          <div><b>{submitter}</b><small className="muted">PIC Klien, {clientName}</small></div>
+          <div><b>{submitter}</b><small className="muted">{clientName}</small></div>
         </div>
       </fieldset>
       <fieldset>

@@ -11,7 +11,7 @@ PIC = "pic.alpha@amiga.test"
 
 
 def upload_many(pdfs, **form):
-    data = {"client_id": client_id("PT Klien Alpha"), "request_type": "Pembayaran vendor", "channel": "Email",
+    data = {"client_id": client_id("PT Klien Alpha"), "request_type": "Voucher Pengeluaran Vendor", "channel": "Email",
             "submitted_date": "2026-10-15", **form}
     files = [("files", (f"inv{i}.pdf", pdf, "application/pdf")) for i, pdf in enumerate(pdfs, start=1)]
     return api(PIC).post("/documents", data=data, files=files)

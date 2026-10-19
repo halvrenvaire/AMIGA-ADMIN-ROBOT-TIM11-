@@ -441,8 +441,8 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
 | POST | `/admin/users/{id}/password` | System Admin: reset password pengguna lain (sesi pengguna itu keluar) |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
-| POST | `/documents` | PIC Klien / Intake Support: unggah invoice PDF (form: `client_id`, `request_type`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 PDF untuk satu voucher, `signatory_ids` opsional = pemberi persetujuan berurutan). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice lalu hasilnya digabung |
-| GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `sort=terbaru` atau `tenggat` |
+| POST | `/documents` | PIC Klien / Intake Support: buat Voucher Pengeluaran (form: `client_id`, `request_type` = kategori `Voucher Pengeluaran Vendor` / `Voucher Pengeluaran Reimburse` / `Lainnya`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 PDF untuk satu voucher, `signatory_ids` opsional = pemberi persetujuan berurutan, `submitter_name` opsional = nama di kotak "Diajukan oleh" bila bukan PIC pengaju). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice lalu hasilnya digabung |
+| GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `request_type` (kategori), `sort=terbaru` atau `tenggat` |
 | GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
 | GET | `/documents/{id}/file` | PDF asli |
 | POST | `/documents/{id}/fix` | PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}` |
@@ -456,7 +456,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET | `/dashboard/summary` | Service Lead / Finance Reviewer: jumlah per status, bermasalah, tenggat dekat & lewat, beban per reviewer |
 | POST | `/documents/{id}/reassign` | Service Lead: alihkan ke reviewer lain (status tetap). Body: `{"reviewer_id": "...", "reason": "..."}` |
 | GET | `/dashboard/metrics` | Metrik dashboard (`days`=7–365, `client_id`) untuk Service Lead, Finance Reviewer, PIC Klien, Intake |
-| GET | `/vouchers` | Daftar voucher; filter `client_id`, `vendor_id`, `vendor`, `status`, `date_from`, `date_to`, `q` |
+| GET | `/vouchers` | Daftar voucher; filter `client_id`, `vendor_id`, `vendor`, `status`, `request_type` (kategori), `date_from`, `date_to`, `q` |
 | GET | `/vouchers/report` | Service Lead: rekap voucher PDF (`period` = 1 / 7 / 30 hari terakhir, atau `custom` + `date_from` & `date_to`, maks. 366 hari, tanggal WIB). Berisi ringkasan, rekap per perusahaan dan per reviewer, serta daftar voucher; unduhan tercatat di jejak audit |
 | GET/POST | `/vendors` | Data referensi vendor (POST oleh PIC Klien/Intake; 409 bila nama sudah terdaftar) |
 | GET | `/vendors/check` | Cek nama vendor sudah terdaftar (`client_id`, `name`) |

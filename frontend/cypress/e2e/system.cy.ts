@@ -74,7 +74,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-005 Menu sesuai peran dan URL terlarang dialihkan", () => {
     cy.visitAs("pic.alpha@amiga.test", "/antrean");
     cy.location("pathname").should("eq", "/dashboard");
-    cy.get(".nav").should("not.contain.text", "Dashboard Antrean").and("contain.text", "Unggah Dokumen");
+    cy.get(".nav").should("not.contain.text", "Dashboard Antrean").and("contain.text", "Pembuatan Voucher");
     cy.get(".nav").should("contain.text", "Asisten AI"); // Asisten untuk semua peran, data sesuai klien
     cy.get(".fab").should("exist");
   });
@@ -101,13 +101,25 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains(".alert", "6 halaman").and("contain.text", "Maksimal 5 halaman");
   });
 
-  it("TS-009 Field wajib jenis permintaan divalidasi", () => {
+  it("TS-009 Kategori voucher dan nama Diajukan oleh bisa dipilih", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
-    cy.get("#type").clear();
+    cy.contains("h1", "Pembuatan voucher");
+    cy.get("#type option").then((opts) => {
+      expect([...opts].map((o) => o.textContent)).to.deep.eq(
+        ["Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya"]);
+    });
+    cy.get("#type").select("Voucher Pengeluaran Reimburse");
+    cy.get("#submitter-name").should("have.value", "Rina (PIC Alpha)").clear().type("Andi Wijaya");
+    cy.get(".company-box").should("contain.text", "Andi Wijaya");
     cy.get("main input[type=file]").selectFile("cypress/fixtures/sys_normal_b.pdf", { force: true });
     cy.contains("button", "Preview").click();
-    cy.get("#type:invalid").should("exist");
-    cy.contains("h1", "Preview pengajuan").should("not.exist");
+    cy.contains(".meta dt", "Kategori").next("dd").should("have.text", "Voucher Pengeluaran Reimburse");
+    cy.contains(".meta dt", "Diajukan oleh").next("dd").should("contain.text", "Andi Wijaya");
+    cy.contains("button", "Kembali ubah").click();
+    // Filter kategori di Pengajuan Saya
+    cy.visitAs("pic.alpha@amiga.test", "/pengajuan");
+    cy.get("select[aria-label=Kategori]").select("Lainnya");
+    cy.contains(".empty", "Belum ada dokumen yang cocok");
   });
 
   // --- Dashboard antrean ---

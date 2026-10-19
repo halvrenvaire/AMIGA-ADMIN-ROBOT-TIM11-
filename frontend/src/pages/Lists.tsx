@@ -5,7 +5,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { DocumentTable } from "../components/DocumentTable";
 import { Alert, Loading, useApi } from "../components/ui";
-import { STATUS_LABEL, STATUS_ORDER } from "../format";
+import { STATUS_LABEL, STATUS_ORDER, REQUEST_CATEGORIES } from "../format";
 import type { DocStatus, DocumentSummary } from "../types";
 
 function useDocs(params: Record<string, string | boolean | undefined>, deps: unknown[]) {
@@ -30,14 +30,15 @@ function ListCard({ title, note, state, children, showReviewer, action }: {
 export function Submissions() {
   const [params] = useSearchParams();
   const [status, setStatus] = useState<DocStatus | "">((params.get("status") as DocStatus | null) ?? "");
-  const docs = useDocs({ status }, [status]);
+  const [category, setCategory] = useState("");
+  const docs = useDocs({ status, request_type: category }, [status, category]);
   const all = useDocs({}, []);
   const exceptions = all.data?.filter((d) => d.status === "EXCEPTION").length ?? 0;
   return (
     <>
       <div className="page-head">
         <div><h1>Pengajuan saya</h1><p>Semua invoice klien Anda beserta statusnya.</p></div>
-        <Link className="btn primary" to="/unggah"><UploadIcon /> Unggah invoice</Link>
+        <Link className="btn primary" to="/unggah"><UploadIcon /> Buat voucher</Link>
       </div>
       {exceptions > 0 && (
         <Alert kind="warn">
@@ -51,6 +52,10 @@ export function Submissions() {
           {STATUS_ORDER.map((s) => (
             <button key={s} className={`btn sm ${status === s ? "primary" : ""}`} onClick={() => setStatus(s)}>{STATUS_LABEL[s]}</button>
           ))}
+          <select className="input" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Kategori">
+            <option value="">Semua kategori</option>
+            {REQUEST_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
         </div>
       </ListCard>
     </>

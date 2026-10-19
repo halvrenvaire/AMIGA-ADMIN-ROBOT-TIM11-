@@ -18,6 +18,9 @@ export const STATUS_LABEL: Record<DocStatus, string> = {
   CANCELLED: "Dibatalkan",
 };
 
+/** Kategori pengajuan (feedback owner): untuk filter dashboard, tidak dicetak di voucher. */
+export const REQUEST_CATEGORIES = ["Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya"] as const;
+
 export const STATUS_ORDER: DocStatus[] = [
   "QUEUED", "PROCESSING", "READY_FOR_REVIEW", "EXCEPTION", "AMIGA_REVIEWED", "SENT_TO_CLIENT", "CANCELLED",
 ];

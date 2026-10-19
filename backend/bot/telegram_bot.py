@@ -26,7 +26,7 @@ from pypdf import PdfReader
 from app.auth import create_access_token
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Role, User
+from app.models import REQUEST_CATEGORIES, Role, User
 from app.services import file_conversion, telegram_service
 
 ACCEPTED_MIME = {"application/pdf", *file_conversion.IMAGE_TYPES.values()}
@@ -43,7 +43,8 @@ TELEGRAM_DOWNLOAD_MB = 20  # batas unduh file oleh bot di Telegram
 DRAFT_TTL_SECONDS = 30 * 60
 WATCH_SECONDS = 120  # lama bot memantau hasil proses AI setelah unggah
 WATCH_INTERVAL = 3
-DEFAULT_REQUEST_TYPE = "Pembayaran vendor"
+# Kategori pengajuan sama dengan dashboard (feedback owner): tombol berurutan
+CATEGORIES = REQUEST_CATEGORIES
 
 COMMANDS = [
     ("login", "Masuk ke aplikasi AMIGA Robot Admin"),
@@ -352,8 +353,7 @@ class UploadDraft:
     compressed_photo: bool = False  # ada foto yang dikompres Telegram (dikirim sebagai "Foto")
     client_options: list[dict] = field(default_factory=list)
     client: dict | None = None
-    request_type: str | None = None
-    awaiting_request_type: bool = False
+    request_type: str | None = None  # kategori pengajuan
     # File dari satu kiriman sekaligus (album) belum dibalas; ringkasan dikirim oleh flush_prompts()
     prompt_pending: bool = False
     updated: float = field(default_factory=time.time)
@@ -439,11 +439,6 @@ class AmigaBot:
                 return login_instructions()
 
             user = link.user
-            draft = self._draft(chat_id, user)
-            if draft and draft.awaiting_request_type and command is None:
-                draft.request_type = text[:100]
-                draft.awaiting_request_type = False
-                return self._draft_prompt(user, draft)
             if command == "/logout":
                 self.drafts.pop(chat_id, None)
                 telegram_service.unlink(db, link, via="bot Telegram")
@@ -603,19 +598,18 @@ class AmigaBot:
                 draft.client_options = me.get("upload_clients") or []
             if not draft.client_options:
                 raise BackendError("Akun Anda belum ditugaskan ke perusahaan mana pun. Hubungi System Admin.")
-            if len(draft.client_options) == 1:
-                draft.client = draft.client_options[0]
-            else:
-                return Reply(f"{self._file_list(draft)}\n\nUntuk perusahaan mana?",
-                             [[(c["name"], f"up:c:{c['id']}")] for c in draft.client_options])
+            # Pilihan perusahaan selalu ditampilkan, juga bila PIC hanya memegang satu perusahaan,
+            # supaya PIC sadar voucher ini atas nama perusahaan mana (feedback owner)
+            return Reply(f"{self._file_list(draft)}\n\nUntuk perusahaan mana?",
+                         [[(c["name"], f"up:c:{c['id']}")] for c in draft.client_options])
         if draft.request_type is None:
-            return Reply(f"{self._file_list(draft)}\n\nJenis permintaan?",
-                         [[(DEFAULT_REQUEST_TYPE, "up:t:default")], [("✏️ Ketik sendiri", "up:t:custom")]])
+            return Reply(f"{self._file_list(draft)}\n\nKategori voucher?",
+                         [[(name, f"up:t:{i}")] for i, name in enumerate(CATEGORIES)])
         return Reply(
             "Ringkasan pengajuan:\n"
             f"{self._file_list(draft)}\n"
             f"• Perusahaan: {draft.client['name']}\n"
-            f"• Jenis permintaan: {draft.request_type}\n"
+            f"• Kategori: {draft.request_type}\n"
             f"• Saluran: Telegram · Tanggal pengajuan: {date.today().isoformat()}\n\n"
             "Mau menambah invoice lain ke voucher yang sama? Kirim file atau fotonya sekarang.",
             [[("✅ Kirim ke AMIGA", "up:send")], [("❌ Batal", "up:cancel")]],
@@ -651,11 +645,11 @@ class AmigaBot:
             if chosen is None:
                 return "Perusahaan tidak valid. Pilih dari tombol yang tersedia."
             draft.client = chosen
-        elif data == "up:t:default":
-            draft.request_type = DEFAULT_REQUEST_TYPE
-        elif data == "up:t:custom":
-            draft.awaiting_request_type = True
-            return "Ketik jenis permintaannya (maks. 100 karakter):"
+        elif data.startswith("up:t:"):
+            index = data[5:]
+            if not index.isdigit() or int(index) >= len(CATEGORIES):
+                return "Kategori tidak valid. Pilih dari tombol yang tersedia."
+            draft.request_type = CATEGORIES[int(index)]
         elif data == "up:send":
             if draft.client is None or draft.request_type is None:
                 return self._draft_prompt(user, draft)

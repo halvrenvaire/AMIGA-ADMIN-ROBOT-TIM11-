@@ -5,7 +5,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignerPicker } from "../components/SignerPicker";
 import { Alert } from "../components/ui";
-import { tanggal, todayIso } from "../format";
+import { tanggal, todayIso, REQUEST_CATEGORIES } from "../format";
 import type { DocumentSummary, Signatory } from "../types";
 
 const MAX_MB = 10;
@@ -17,17 +17,20 @@ const isImage = (f: File) => IMAGE_TYPES.includes(f.type) || /\.(jpe?g|png|webp)
 /** PDF atau foto invoice; foto diubah menjadi PDF oleh server (isi file diperiksa lagi di server). */
 const isAccepted = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name) || isImage(f);
 
-/** Layar 02 — Unggah Dokumen (PIC Klien, Intake Support). FR-1.1–1.5.
+/** Layar 02 — Pembuatan Voucher (PIC Klien, Intake Support). FR-1.1–1.5.
  *  1–10 invoice PDF digabung dalam satu voucher; PIC meninjau dulu di halaman Preview sebelum mengirim. */
 export function Upload() {
   const { user, has } = useAuth();
   // Hanya perusahaan yang ditugaskan System Admin untuk diajukan (bukan semua yang bisa dilihat reviewer)
   const clients = user?.upload_clients ?? [];
   // Intake Support mengajukan atas nama PIC yang mendelegasikan; nama PIC dicetak oleh sistem
-  const submitter = has("PIC_KLIEN") ? user?.full_name ?? "-" : "PIC Klien yang mendelegasikan";
+  const defaultSubmitter = has("PIC_KLIEN") ? user?.full_name ?? "" : "";
+  // Nama di kotak "Diajukan oleh" boleh diganti karyawan lain (feedback owner)
+  const [submitterName, setSubmitterName] = useState(defaultSubmitter);
+  const submitter = submitterName.trim() || (has("PIC_KLIEN") ? user?.full_name ?? "-" : "PIC Klien yang mendelegasikan");
   // Satu perusahaan per pengajuan; bila PIC memegang beberapa perusahaan, harus dipilih dulu
   const [clientId, setClientId] = useState(clients.length === 1 ? clients[0].id : "");
-  const [requestType, setRequestType] = useState("Pembayaran vendor");
+  const [requestType, setRequestType] = useState<string>(REQUEST_CATEGORIES[0]);
   const [channel, setChannel] = useState("Email");
   const [submittedDate, setSubmittedDate] = useState(todayIso());
   const [dueDate, setDueDate] = useState("");
@@ -80,6 +83,7 @@ export function Upload() {
     form.set("submitted_date", submittedDate);
     if (dueDate) form.set("due_date", dueDate);
     form.set("signatory_ids", signers.join(","));
+    if (submitterName.trim() && submitterName.trim() !== defaultSubmitter) form.set("submitter_name", submitterName.trim());
     files.forEach((f) => form.append("files", f));
     setBusy(true);
     setError(null);
@@ -108,8 +112,8 @@ export function Upload() {
     <>
       <div className="page-head">
         <div>
-          <h1>Unggah invoice</h1>
-          <p>1–{MAX_FILES} file PDF atau foto invoice (JPG, PNG, WEBP) untuk satu voucher, tiap file maksimal 5 halaman. Foto otomatis diubah menjadi PDF. Tinjau dulu di Preview sebelum dikirim.</p>
+          <h1>Pembuatan voucher</h1>
+          <p>1–{MAX_FILES} file PDF atau foto bukti (invoice, bon) (JPG, PNG, WEBP) untuk satu voucher, tiap file maksimal 5 halaman. Foto otomatis diubah menjadi PDF. Tinjau dulu di Preview sebelum dikirim.</p>
         </div>
       </div>
 
@@ -136,9 +140,11 @@ export function Upload() {
             <small>Hanya perusahaan yang ditugaskan System Admin kepada Anda.</small>
           </div>
           <div className="field">
-            <label htmlFor="type">Jenis permintaan</label>
-            <input id="type" className="input" required maxLength={100} value={requestType}
-                   onChange={(e) => setRequestType(e.target.value)} />
+            <label htmlFor="type">Kategori</label>
+            <select id="type" className="input" required value={requestType} onChange={(e) => setRequestType(e.target.value)}>
+              {REQUEST_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <small>Untuk filter di dashboard; tidak dicetak di voucher.</small>
           </div>
           <div className="field">
             <label htmlFor="channel">Saluran</label>
@@ -161,6 +167,13 @@ export function Upload() {
         {company && (
           <>
             <div className="section-title">Kotak tanda tangan voucher</div>
+            <div className="field" style={{ maxWidth: 420 }}>
+              <label htmlFor="submitter-name">Nama &quot;Diajukan oleh&quot;</label>
+              <input id="submitter-name" className="input" maxLength={200} value={submitterName}
+                     placeholder={has("PIC_KLIEN") ? user?.full_name : "Kosongkan = PIC yang mendelegasikan"}
+                     onChange={(e) => setSubmitterName(e.target.value)} />
+              <small>Boleh diganti dengan nama karyawan lain yang mengajukan.</small>
+            </div>
             <SignerPicker key={clientId} clientId={clientId} clientName={company.name} submitter={submitter}
                           onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
           </>
@@ -210,7 +223,7 @@ function UploadAside({ company, requestType, dueDate, files, approvers }: {
   const sizeKb = files.reduce((n, f) => n + f.size, 0) / 1024;
   const checks: [boolean, string][] = [
     [Boolean(company), company ? `Perusahaan: ${company}` : "Pilih perusahaan"],
-    [requestType.trim().length > 0, "Jenis permintaan diisi"],
+    [requestType.trim().length > 0, `Kategori: ${requestType}`],
     [files.length > 0, files.length ? `${files.length} file invoice (${sizeKb < 1024 ? `${sizeKb.toFixed(0)} KB` : `${(sizeKb / 1024).toFixed(1)} MB`})` : "Tambahkan minimal 1 file invoice"],
   ];
   const ready = checks.every(([ok]) => ok);
@@ -282,12 +295,12 @@ function Preview({ companyName, submitter, requestType, channel, submittedDate, 
           <div className="section-title">Data pengajuan</div>
           <dl className="meta">
             <dt>Perusahaan</dt><dd><b>{companyName}</b></dd>
-            <dt>Diajukan oleh</dt><dd>{submitter} <span className="muted">· PIC Klien</span></dd>
+            <dt>Diajukan oleh</dt><dd>{submitter}</dd>
             <dt>Disetujui oleh</dt>
             <dd>{approvers.length ? (
               <ol className="plain-list">{approvers.map((a) => <li key={a.id}>{a.full_name} <span className="muted">· {a.position}</span></li>)}</ol>
             ) : <span className="muted">1 kotak kosong (diisi manual)</span>}</dd>
-            <dt>Jenis permintaan</dt><dd>{requestType}</dd>
+            <dt>Kategori</dt><dd>{requestType}</dd>
             <dt>Saluran</dt><dd>{channel}</dd>
             <dt>Tanggal pengajuan</dt><dd>{tanggal(submittedDate)}</dd>
             <dt>Tenggat</dt><dd>{dueDate ? tanggal(dueDate) : "-"}</dd>

@@ -86,7 +86,7 @@ export function Metrics() {
             ))}
           </div>
           {has("PIC_KLIEN", "INTAKE_SUPPORT")
-            ? <Link className="btn on-dark" to="/unggah"><Upload /> Unggah invoice</Link>
+            ? <Link className="btn on-dark" to="/unggah"><Upload /> Buat voucher</Link>
             : <Link className="btn on-dark" to={has("FINANCE_REVIEWER") ? "/peninjauan" : "/antrean"}><ClipboardCheck /> Buka antrean</Link>}
         </div>
       </section>

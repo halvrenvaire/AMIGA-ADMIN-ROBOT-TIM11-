@@ -70,11 +70,11 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.set_auto_page_break(True, margin=18)
     pdf.add_page()
 
-    brand_header(pdf, 210, "Voucher Pembayaran Vendor")
+    brand_header(pdf, 210, "Voucher Pengeluaran")
     pdf.set_y(32)
 
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 7, f"VOUCHER {voucher_no}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"VOUCHER PENGELUARAN {voucher_no}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
     n_files = len(getattr(doc, "files", None) or [])
@@ -120,13 +120,8 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         total.cell(_money(ex.total))
     pdf.ln(12)
 
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, "Rekening tujuan", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10)
-    for label, value in [("Bank", ex.bank_name), ("No. Rekening", ex.account_no), ("Atas Nama", ex.account_name)]:
-        pdf.cell(32, 6, label)
-        pdf.cell(0, 6, f": {_t(value)}", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(6)
+    # Rekening tujuan tidak dicetak (feedback owner): pengecekan rekening tetap berjalan di sistem
+    pdf.ln(2)
 
     signed = _signature_blocks(pdf, doc, signatures or [], approved_at)
     if signed:

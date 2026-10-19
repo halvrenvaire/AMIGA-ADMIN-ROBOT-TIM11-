@@ -59,7 +59,9 @@ def test_uat1_normal_flow_ends_sent_to_client(extractor):
     text = pdf_text(preview.content)
     assert body["voucher"]["voucher_no"] in text
     assert "BATAS OTORISASI" in text and "BUKAN persetujuan pembayaran" in text
-    assert "1234567890" in text and "Rp 900.000" in text
+    # Rekening tujuan tidak dicetak di Voucher Pengeluaran (feedback owner); kategori juga tidak
+    assert "1234567890" not in text and "Rekening tujuan" not in text and "Rp 900.000" in text
+    assert "VOUCHER PENGELUARAN" in text and "Voucher Pengeluaran Vendor" not in text
 
     download = pic.get(f"/documents/{doc['id']}/voucher", params={"download": True})
     assert download.headers["content-disposition"].startswith("attachment")
