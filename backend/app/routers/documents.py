@@ -19,7 +19,7 @@ from app.auth import ensure_client_access, ensure_submit_access, get_current_use
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    REQUEST_CATEGORIES, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User,
+    CATEGORY_REIMBURSE, REQUEST_CATEGORIES, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User,
     UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
@@ -176,9 +176,10 @@ async def upload_document(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             "Kategori tidak dikenal. Pilih salah satu: " + ", ".join(REQUEST_CATEGORIES) + ".")
     ensure_submit_access(db, user, client_id)
-    if not 1 <= len(files) <= settings.max_upload_files:
+    max_files = settings.max_reimburse_files if request_type.strip() == CATEGORY_REIMBURSE else settings.max_upload_files
+    if not 1 <= len(files) <= max_files:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            f"Unggah minimal 1 dan maksimal {settings.max_upload_files} file invoice.")
+                            f"Unggah minimal 1 dan maksimal {max_files} file bukti untuk kategori ini.")
 
     limit = settings.max_upload_mb * 1024 * 1024
     parts: list[_UploadPart] = []

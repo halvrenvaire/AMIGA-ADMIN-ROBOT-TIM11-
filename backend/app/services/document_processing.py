@@ -14,7 +14,10 @@ from decimal import Decimal
 from sqlalchemy import select, update
 
 from app import db as db_module
-from app.models import AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue, Vendor
+from app.models import (
+    CATEGORY_REIMBURSE, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue,
+    Vendor,
+)
 from app.services import audit_service, storage
 from app.services.account_check import MISMATCH, check_account
 from app.services.extraction_service import (
@@ -107,7 +110,7 @@ def classification(extraction: Extraction | None) -> dict | None:
             "decision": raw.get("classification_decision")}
 
 
-def _classification_issues(extraction: Extraction) -> tuple[list[Issue], bool]:
+def _classification_issues(extraction: Extraction, reimburse: bool = False) -> tuple[list[Issue], bool]:
     """(kendala klasifikasi, tolak?) Tidak relevan → NOT_AN_INVOICE dan verifikasi lain dilewati.
     Struk/nota → RECEIPT_NOT_INVOICE; meragukan → NEEDS_MANUAL_REVIEW; datanya tetap diverifikasi sebagai
     draft supaya kekurangan terlihat. Keputusan Finance Reviewer (classification_decision) menutup keduanya."""
@@ -126,6 +129,8 @@ def _classification_issues(extraction: Extraction) -> tuple[list[Issue], bool]:
                                   "hanya dengan file invoice/tagihan dari vendor."))
         elif decision in ("INVOICE", "RECEIPT_ACCEPTED"):
             continue
+        elif c["doc_class"] == RECEIPT and reimburse:
+            continue  # struk/nota adalah bukti sah untuk reimburse
         elif c["doc_class"] == RECEIPT:
             issues.append(Issue(IssueCode.RECEIPT_NOT_INVOICE, None,
                                 f"File {name} adalah struk/nota pembelian{kind}, bukan invoice resmi vendor.{reason} Datanya "
@@ -226,7 +231,8 @@ def run_verification(db, doc: Document) -> list:
         account_name=extraction.account_name,
         subtotals=[line.subtotal for line in extraction.line_items],
     )
-    class_issues, rejected = _classification_issues(extraction)
+    reimburse = doc.request_type == CATEGORY_REIMBURSE
+    class_issues, rejected = _classification_issues(extraction, reimburse)
     if rejected:
         # Pemeriksaan data tidak relevan bila ada file yang bukan dokumen tagihan
         _resolve_open_issues(db, doc)
@@ -234,7 +240,7 @@ def run_verification(db, doc: Document) -> list:
             db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field, message=issue.message))
         db.flush()
         return class_issues
-    issues = class_issues + verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction))
+    issues = class_issues + verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction), reimburse)
     db.flush()  # vendor_id baru dipakai pemeriksaan rekening
     db.refresh(doc, ["vendor"])
     account = check_account(db, doc)

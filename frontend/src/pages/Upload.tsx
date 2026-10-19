@@ -9,7 +9,8 @@ import { tanggal, todayIso, REQUEST_CATEGORIES } from "../format";
 import type { DocumentSummary, Signatory } from "../types";
 
 const MAX_MB = 10;
-const MAX_FILES = 10;
+// Batas bukti per voucher: Reimburse (bon tol, parkir) bisa sampai 20, kategori lain 10
+const maxFilesFor = (category: string) => (category === "Voucher Pengeluaran Reimburse" ? 20 : 10);
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ACCEPT = "application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
@@ -31,6 +32,7 @@ export function Upload() {
   // Satu perusahaan per pengajuan; bila PIC memegang beberapa perusahaan, harus dipilih dulu
   const [clientId, setClientId] = useState(clients.length === 1 ? clients[0].id : "");
   const [requestType, setRequestType] = useState<string>(REQUEST_CATEGORIES[0]);
+  const MAX_FILES = maxFilesFor(requestType);
   const [channel, setChannel] = useState("Email");
   const [submittedDate, setSubmittedDate] = useState(todayIso());
   const [dueDate, setDueDate] = useState("");
@@ -56,7 +58,7 @@ export function Upload() {
       }
       if (f.size > MAX_MB * 1024 * 1024) { setError(`${f.name}: ukuran file melebihi ${MAX_MB} MB.`); continue; }
       if (next.some((x) => x.name === f.name && x.size === f.size)) continue;
-      if (next.length >= MAX_FILES) { setError(`Maksimal ${MAX_FILES} file invoice per voucher.`); break; }
+      if (next.length >= MAX_FILES) { setError(`Maksimal ${MAX_FILES} file bukti per voucher untuk kategori ini.`); break; }
       next.push(f);
     }
     setFiles(next);
@@ -69,6 +71,7 @@ export function Upload() {
     e.preventDefault();
     if (!clientId) { setError("Pilih perusahaan yang mengajukan."); return; }
     if (!files.length) { setError("Pilih minimal 1 file invoice (PDF atau foto)."); return; }
+    if (files.length > MAX_FILES) { setError(`Kategori ini maksimal ${MAX_FILES} file bukti. Hapus sebagian file atau pilih kategori lain.`); return; }
     setError(null);
     setResult(null);
     setStep("preview");
@@ -113,7 +116,7 @@ export function Upload() {
       <div className="page-head">
         <div>
           <h1>Pembuatan voucher</h1>
-          <p>1–{MAX_FILES} file PDF atau foto bukti (invoice, bon) (JPG, PNG, WEBP) untuk satu voucher, tiap file maksimal 5 halaman. Foto otomatis diubah menjadi PDF. Tinjau dulu di Preview sebelum dikirim.</p>
+          <p>1–{MAX_FILES} file bukti (invoice, bon) berupa PDF atau foto JPG, PNG, WEBP untuk satu voucher, tiap file maksimal 5 halaman. Semua bukti ikut dilampirkan di voucher. Tinjau dulu di Preview sebelum dikirim.</p>
         </div>
       </div>
 
@@ -179,7 +182,7 @@ export function Upload() {
           </>
         )}
 
-        <div className="section-title">File invoice <span className="muted">({files.length}/{MAX_FILES})</span></div>
+        <div className="section-title">File bukti <span className="muted">({files.length}/{MAX_FILES})</span></div>
         {files.length > 0 && (
           <ul className="file-list">
             {files.map((f, i) => (

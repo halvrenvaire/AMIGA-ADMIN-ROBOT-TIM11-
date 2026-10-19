@@ -550,8 +550,9 @@ class AmigaBot:
         draft = self._draft(chat_id, user)
         if draft is None:
             draft = self.drafts[chat_id] = UploadDraft(user_id=user.id)
-        if len(draft.files) >= settings.max_upload_files:
-            return f"Maksimal {settings.max_upload_files} file invoice per pengajuan."
+        # Batas akhir per kategori dicek server saat dikirim (Reimburse 20, lainnya 10)
+        if len(draft.files) >= settings.max_reimburse_files:
+            return f"Maksimal {settings.max_reimburse_files} file bukti per pengajuan."
 
         data = self.tg.download(file_id)
         # Diperiksa dengan aturan yang sama dengan server: foto diubah menjadi PDF untuk menghitung halaman

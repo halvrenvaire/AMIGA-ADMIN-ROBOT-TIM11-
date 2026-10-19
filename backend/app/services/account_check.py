@@ -10,9 +10,11 @@ vendor di Data Referensi yang sudah DIVERIFIKASI Finance Reviewer (bukan oleh pe
 import re
 from dataclasses import dataclass
 
-from app.models import Document, User
+from app.models import CATEGORY_REIMBURSE, Document, User
 
 VERIFIED, MISMATCH, UNVERIFIED, MISSING = "VERIFIED", "MISMATCH", "UNVERIFIED", "MISSING"
+# Reimburse dibayarkan ke karyawan, bukan ke vendor di bon: rekening vendor tidak dicek
+NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 def digits(value: str | None) -> str:
@@ -29,6 +31,8 @@ class AccountCheck:
 
 
 def check_account(db, doc: Document) -> AccountCheck:
+    if doc.request_type == CATEGORY_REIMBURSE:
+        return AccountCheck(NOT_APPLICABLE, "Reimburse dibayarkan ke karyawan; rekening vendor tidak dicek.", "AI")
     ex = doc.extraction
     account = digits(ex.account_no if ex else None)
     source = "PIC" if "account_no" in (doc.pic_overrides or {}) else "AI"

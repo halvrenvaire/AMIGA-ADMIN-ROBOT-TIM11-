@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     max_pdf_pages: int = 5
     max_upload_mb: int = 10  # per file
     max_upload_files: int = 10  # file invoice per voucher
+    max_reimburse_files: int = 20  # bukti per Voucher Pengeluaran Reimburse (bon tol, parkir, dll.)
 
     # Dashboard antrean: reviewer dengan dokumen READY_FOR_REVIEW lebih dari ini ditandai
     # "beban berlebih" (batas resmi masih pertanyaan terbuka PRD); tenggat "dekat" = <= N hari

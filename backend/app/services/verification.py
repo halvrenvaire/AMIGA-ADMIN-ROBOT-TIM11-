@@ -65,12 +65,18 @@ def _tax_hint(line_sum: Decimal, total: Decimal) -> str:
     return ""
 
 
+# Reimburse (bon tol, parkir, makan): bon biasanya tanpa nomor invoice dan rekening, dan uangnya ke karyawan
+REIMBURSE_REQUIRED = ("invoice_date", "total")
+
+
 def verify(data: InvoiceData, duplicate_request_id: str | None = None,
-           payees: list[tuple[str | None, str | None]] | None = None) -> list[Issue]:
-    """`payees`: (vendor, rekening) ternormalisasi per invoice bila satu voucher berisi beberapa invoice."""
+           payees: list[tuple[str | None, str | None]] | None = None, reimburse: bool = False) -> list[Issue]:
+    """`payees`: (vendor, rekening) ternormalisasi per invoice bila satu voucher berisi beberapa invoice.
+    `reimburse`: Voucher Pengeluaran Reimburse; hanya tanggal dan total wajib, boleh banyak vendor."""
     issues: list[Issue] = []
 
-    for name, label in REQUIRED_FIELDS.items():
+    required = {k: v for k, v in REQUIRED_FIELDS.items() if not reimburse or k in REIMBURSE_REQUIRED}
+    for name, label in required.items():
         if getattr(data, name) in (None, ""):
             issues.append(Issue(IssueCode.MISSING_EVIDENCE, name,
                                 f"{label} tidak ditemukan di invoice. Lengkapi {label.lower()}, "
@@ -92,7 +98,7 @@ def verify(data: InvoiceData, duplicate_request_id: str | None = None,
 
     vendors = {v for v, _ in payees or [] if v}
     accounts = {a for _, a in payees or [] if a}
-    if len(vendors) > 1 or len(accounts) > 1:
+    if not reimburse and (len(vendors) > 1 or len(accounts) > 1):
         what = "vendor" if len(vendors) > 1 else "nomor rekening tujuan"
         issues.append(Issue(IssueCode.VENDOR_MISMATCH, "vendor_name" if len(vendors) > 1 else "account_no",
                             f"Invoice dalam pengajuan ini memiliki {what} yang berbeda. Satu voucher hanya untuk "

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import BACKEND_DIR, settings
 from app.models import Document, User, Voucher
-from app.services import audit_service, signature_service, storage
+from app.services import audit_service, signature_service, storage, voucher_attachments
 from app.services.signer_service import COMPANY_POSITION
 from app.services.verification import rupiah
 
@@ -235,7 +235,8 @@ def create_voucher(db: Session, doc: Document, approver: User) -> Voucher:
     file_key = f"vouchers/{voucher_no.replace('/', '-')}.pdf"
     signers = getattr(doc, "signers", None) or []
     signatures = signature_service.for_signers(db, signers)
-    storage.save(file_key, render_voucher(doc, voucher_no, approver, now, signatures))
+    pdf = render_voucher(doc, voucher_no, approver, now, signatures)
+    storage.save(file_key, voucher_attachments.append_attachments(pdf, doc, voucher_no))
     names = [s["name"] for s, img in zip(signers, signatures) if img]
     if names:
         audit_service.record(db, approver, "E_SIGNATURE_APPLIED", document_id=doc.id, client_id=doc.client_id,

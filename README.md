@@ -102,6 +102,8 @@ Catatan alur:
 | Bukan invoice | `NOT_AN_INVOICE` | AI (berperan sebagai Invoice Verification Officer) menilai PDF bukan invoice/tagihan, mis. surat, PO, atau bukti transfer. Kendala data lain tidak ditampilkan | EXCEPTION |
 | Vendor/rekening berbeda | `VENDOR_MISMATCH` | Beberapa invoice dalam satu pengajuan punya vendor atau rekening tujuan berbeda | EXCEPTION |
 
+> **Voucher Pengeluaran Reimburse** (bon tol, parkir, dll.): struk/nota adalah bukti sah, boleh banyak vendor, data wajib hanya tanggal dan total, dan rekening vendor tidak dicek karena uang dibayarkan ke karyawan.
+
 Nomor invoice dan nama vendor **dinormalisasi** sebelum dibandingkan (huruf kecil, tanpa spasi dan tanda baca), sehingga `INV-001` dan `inv 001` tetap terdeteksi sebagai duplikat.
 
 ---
@@ -441,7 +443,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
 | POST | `/admin/users/{id}/password` | System Admin: reset password pengguna lain (sesi pengguna itu keluar) |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
-| POST | `/documents` | PIC Klien / Intake Support: buat Voucher Pengeluaran (form: `client_id`, `request_type` = kategori `Voucher Pengeluaran Vendor` / `Voucher Pengeluaran Reimburse` / `Lainnya`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 PDF untuk satu voucher, `signatory_ids` opsional = pemberi persetujuan berurutan, `submitter_name` opsional = nama di kotak "Diajukan oleh" bila bukan PIC pengaju). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice lalu hasilnya digabung |
+| POST | `/documents` | PIC Klien / Intake Support: buat Voucher Pengeluaran (form: `client_id`, `request_type` = kategori `Voucher Pengeluaran Vendor` / `Voucher Pengeluaran Reimburse` / `Lainnya`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 file bukti untuk satu voucher (Reimburse: sampai 20), `signatory_ids` opsional = pemberi persetujuan berurutan, `submitter_name` opsional = nama di kotak "Diajukan oleh" bila bukan PIC pengaju). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice lalu hasilnya digabung |
 | GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `request_type` (kategori), `sort=terbaru` atau `tenggat` |
 | GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
 | GET | `/documents/{id}/file` | PDF asli |
