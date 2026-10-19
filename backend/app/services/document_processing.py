@@ -18,7 +18,7 @@ from app.models import (
     CATEGORY_REIMBURSE, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue,
     Vendor,
 )
-from app.services import audit_service, storage
+from app.services import audit_service, storage, tax_service
 from app.services.account_check import MISMATCH, check_account
 from app.services.extraction_service import (
     INVOICE, IRRELEVANT, RECEIPT, UNCERTAIN, ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor,
@@ -130,6 +130,31 @@ def file_data(doc: Document, f: DocumentFile) -> dict:
             **{k: getattr(ex, k) for k in DATA_FIELDS},
             line_items=[ExtractedLine(li.description, li.qty, li.unit_price, li.subtotal) for li in ex.line_items]))
     return part_to_data(ExtractedInvoice())
+
+
+def vendor_npwp(db, client_id, vendor_name: str | None) -> bool | None:
+    """NPWP vendor dari data referensi klien: True/False, atau None bila vendor belum terdaftar."""
+    norm = normalize(vendor_name)
+    if not norm:
+        return None
+    npwp = db.execute(select(Vendor.npwp).where(Vendor.client_id == client_id, Vendor.name_norm == norm)).first()
+    return None if npwp is None else bool((npwp[0] or "").strip())
+
+
+def prefill_tax(db, doc: Document, bedrock) -> None:
+    """Isian awal pajak per invoice dari saran AI (cadangan: aturan). PIC tetap memeriksa dan bisa mengubahnya."""
+    files = doc.files or []
+    table = tax_service.rates(db)
+    if not files or not table:
+        return
+    items = [f.data or {} for f in files]
+    suggestions = tax_service.suggest(bedrock, items, doc.request_type == CATEGORY_REIMBURSE, set(table))
+    for f, data, sug in zip(files, items, suggestions):
+        known = vendor_npwp(db, doc.client_id, data.get("vendor_name"))
+        rate = table.get(sug.code) or table[tax_service.NONE]
+        f.data = {**data, "npwp_known": known,
+                  "tax_suggestion": {"code": rate.code, "name": rate.name, "reason": sug.reason, "source": sug.source},
+                  "tax": tax_service.build(rate, known is not False, None, True, data, source=sug.source)}
 
 
 def rebuild_from_files(db, doc: Document) -> Extraction:
@@ -390,6 +415,7 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
             data.raw = {**data.raw, "document_checks": document_checks(names, parts)}
             for f, p in zip(files, parts):
                 f.data = part_to_data(p)
+            prefill_tax(db, doc, getattr(extractor, "bedrock", None))
         except (ExtractionError, storage.StorageError) as e:
             log.warning("Ekstraksi %s gagal: %s", doc.request_id, e)
             _resolve_open_issues(db, doc)

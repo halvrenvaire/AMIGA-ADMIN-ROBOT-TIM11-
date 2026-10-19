@@ -19,15 +19,15 @@ from app.auth import ensure_client_access, ensure_submit_access, get_current_use
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    CATEGORY_REIMBURSE, REQUEST_CATEGORIES, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role, User,
-    UserClientAssignment, ValidationIssue,
+    CATEGORY_REIMBURSE, REQUEST_CATEGORIES, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, Role,
+    TaxRate, User, UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
     CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ExtractionOut, FileDataUpdate,
-    FixRequest, IssueItem, ReasonRequest, SignersUpdate, VoucherOut,
+    FixRequest, IssueItem, ReasonRequest, SignersUpdate, TaxChoice, TaxSummaryOut, VoucherOut,
 )
 from app.services import (
-    audit_service, file_conversion, signer_service, storage, voucher_attachments, voucher_service,
+    audit_service, file_conversion, signer_service, storage, tax_service, voucher_attachments, voucher_service,
 )
 from app.services.access_rules import accessible_client_ids
 from app.services.account_check import check_account
@@ -92,7 +92,13 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         cancellation=_cancellation(db, doc),
         classification=classification(doc.extraction),
         account_check=vars(check_account(db, doc)) if doc.extraction else None,
+        tax_summary=_tax_summary(doc) if doc.extraction else None,
     )
+
+
+def _tax_summary(doc: Document) -> TaxSummaryOut:
+    t = tax_service.summary(doc)
+    return TaxSummaryOut(gross=t.gross, tax_total=t.tax_total, net=t.net, lines=[vars(line) for line in t.lines])
 
 
 def _cancellation(db: Session, doc: Document) -> CancellationOut | None:
@@ -387,12 +393,42 @@ def update_file_data(document_id: uuid.UUID, position: int, body: FileDataUpdate
     for field, before, after in changes:
         audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
                              field=f"{label}.{field}", old_value=before, new_value=after)
+    # Pilihan pajak dan saran AI ikut disimpan; potongan dihitung ulang dari data baru
+    extras = {k: v for k, v in old.items() if k not in new}
+    new = {**extras, **new, "tax": tax_service.recompute(old.get("tax"), new)}
     part.data = new
     if any(f == "account_no" for f, _, _ in changes):
         doc.pic_overrides = {**(doc.pic_overrides or {}), "account_no": new["account_no"] or ""}
     rebuild_from_files(db, doc)
     issues = run_verification(db, doc)
     settle_status(db, doc, issues, "Data diperbarui PIC")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.put("/{document_id}/files/{position}/tax", response_model=DocumentDetail)
+def set_file_tax(document_id: uuid.UUID, position: int, body: TaxChoice,
+                 user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """PIC memilih potongan pajak untuk SATU invoice (Tahap 4). Tarif diambil dari tabel tarif sesuai NPWP,
+    disalin ke data invoice; voucher membayar nilai bersih. Perubahan dicatat nilai awal → nilai baru."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Pajak hanya bisa diubah saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    rate = db.get(TaxRate, body.code)
+    if rate is None or not rate.is_active:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Jenis pajak tidak dikenal.")
+    part = _file(doc, position)
+    data = dict(file_data(doc, part))
+    old = data.get("tax")
+    new = tax_service.build(rate, body.npwp, body.base, body.base is None, data)
+    if old and {k: old.get(k) for k in ("code", "npwp", "rate", "base")} == {k: new[k] for k in ("code", "npwp", "rate", "base")}:
+        return _detail(db, doc)
+    audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
+                         field=f"Bukti {position} ({part.original_filename}).pajak",
+                         old_value=tax_service.label(old) if old else None, new_value=tax_service.label(new))
+    part.data = {**data, "tax": new}
     db.commit()
     return _detail(db, doc)
 

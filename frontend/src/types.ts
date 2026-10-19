@@ -88,6 +88,26 @@ export interface FileData {
   vendor_name: string | null; invoice_no: string | null; invoice_date: string | null; total: string | null;
   bank_name: string | null; account_no: string | null; account_name: string | null;
   line_items: { description: string | null; qty: string | null; unit_price: string | null; subtotal: string | null }[];
+  /** Pilihan pajak PIC (Tahap 4); tarif disalin saat dipilih. */
+  tax?: TaxChoice | null;
+  tax_suggestion?: { code: string; name: string; reason: string; source: "ai" | "aturan" } | null;
+  /** NPWP vendor menurut data referensi: null = vendor belum terdaftar. */
+  npwp_known?: boolean | null;
+}
+
+export interface TaxChoice {
+  code: string; name: string; npwp: boolean; rate: string; base: string | null; base_auto: boolean; amount: string;
+  source: "ai" | "aturan" | "pic";
+}
+
+export interface TaxRate {
+  code: string; name: string; description: string | null; rate_npwp: string; rate_no_npwp: string;
+  is_active: boolean; needs_confirmation: boolean; updated_at: string | null;
+}
+
+export interface TaxSummary {
+  gross: string | null; tax_total: string; net: string | null;
+  lines: { invoice_no: string | null; name: string; rate: string; npwp: boolean; base: string; amount: string }[];
 }
 
 export interface DocumentDetail extends DocumentSummary {
@@ -104,6 +124,7 @@ export interface DocumentDetail extends DocumentSummary {
   cancellation?: { by: string; at: string; reason: string } | null;
   classification?: Classification | null;
   account_check?: AccountCheck | null;
+  tax_summary?: TaxSummary | null;
 }
 
 export interface AuditItem {
@@ -210,7 +231,10 @@ export interface VoucherRow {
   vendor_name: string | null;
   invoice_no: string | null;
   invoice_date: string | null;
+  /** Nilai yang dibayarkan (setelah potongan pajak). */
   total: string | null;
+  gross?: string | null;
+  tax_total?: string;
   status: DocStatus;
   approved_by: string;
   /** PIC Klien pengaju (pengunggah, atau PIC yang diwakili Intake Support). */

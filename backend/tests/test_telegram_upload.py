@@ -203,3 +203,12 @@ def test_many_missing_fields_are_summarized_in_one_line():
     assert len(lines) == 2
     assert "5 data (nama vendor, nomor invoice, tanggal, total, nomor rekening)" in lines[0]
     assert "Foto buram." in lines[1]
+
+
+def test_processing_result_shows_tax_deduction_and_net():
+    from bot.telegram_bot import format_processing_result
+    doc = {"id": "x", "request_id": "REQ-1", "status": "DRAFT", "vendor_name": "PT A", "total": "900000", "issues": [],
+           "tax_summary": {"gross": "900000", "tax_total": "18000", "net": "882000",
+                           "lines": [{"name": "PPh 23", "amount": "18000"}]}}
+    text = format_processing_result(doc)
+    assert "Potongan pajak (PPh 23)" in text and "882.000" in text

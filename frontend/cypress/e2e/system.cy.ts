@@ -533,6 +533,34 @@ describe("System Testing AMIGA Robot Admin", () => {
     });
   });
 
+  it("TS-045 PIC memilih pajak per invoice; voucher membayar nilai bersih", () => {
+    cy.visitAs("pic.alpha@amiga.test", "/referensi/tarif-pajak");
+    cy.get("table tbody tr").should("have.length", 5);
+    cy.contains(".alert", "perlu dikonfirmasi konsultan pajak");
+    cy.contains("button", "Ubah").should("not.exist");
+
+    upload("pic.alpha@amiga.test", "sys_normal_a.pdf", "tax");
+    waitStatus("Draf");
+    cy.contains(".tax-hint", "Keputusan tetap di Anda");
+    cy.get("#tax-code").select("PPh 23");
+    cy.get("#tax-npwp").select("Tidak punya NPWP");
+    cy.contains(".tax-calc", "4%");
+    cy.contains("button", "Terapkan pajak").click();
+    cy.contains(".alert", "Pajak bukti 1 diterapkan");
+    cy.contains(".tax-summary", "Potongan PPh 23").and("contain.text", "tanpa NPWP").and("contain.text", "Dibayarkan");
+    cy.then(() => {
+      cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.tax.id}/riwayat`);
+      cy.contains(".timeline li", "Diperbaiki PIC").should("contain.text", "PPh 23");
+    });
+
+    // Service Lead mengonfirmasi tarif
+    cy.visitAs("lead@amiga.test", "/referensi/tarif-pajak");
+    cy.contains("tr", "PPh 23").contains("button", "Ubah").click();
+    cy.contains(".modal label", "Sudah dikonfirmasi konsultan pajak").find("input").check();
+    cy.contains(".modal button", "Simpan").click();
+    cy.contains("tr", "PPh 23").should("contain.text", "sudah dikonfirmasi");
+  });
+
   it("TS-041 Service Lead membuat dan mengunduh rekap voucher PDF", () => {
     cy.visitAs("lead@amiga.test", "/rekap-voucher");
     cy.contains("h1", "Rekap voucher");

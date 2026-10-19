@@ -14,7 +14,7 @@ from app.auth import get_current_user, require_roles
 from app.db import get_db
 from app.models import Client, DocStatus, Document, Extraction, Role, User, Voucher
 from app.schemas.schemas import ClientRef, VoucherRow
-from app.services import audit_service
+from app.services import audit_service, tax_service
 from app.services.access_rules import accessible_client_ids
 from app.services.voucher_report import render_report
 
@@ -51,16 +51,19 @@ def _rows(db: Session, ids: set[uuid.UUID], *, vendor_id=None, vendor=None, stat
         like = f"%{q.strip()}%"
         query = query.where(Voucher.voucher_no.ilike(like) | Document.request_id.ilike(like)
                             | Extraction.invoice_no.ilike(like))
-    return [
-        VoucherRow(
+    rows = []
+    for v, doc, client, ex, approved_by, pic_name in db.execute(query).all():
+        # Nilai yang dibayarkan voucher = total tagihan dikurangi potongan pajak (Tahap 4)
+        taxes = tax_service.summary(doc)
+        rows.append(VoucherRow(
             document_id=doc.id, voucher_no=v.voucher_no, generated_at=v.generated_at, request_id=doc.request_id,
             client=ClientRef(id=client.id, name=client.name), vendor_id=doc.vendor_id,
             vendor_name=ex.vendor_name if ex else None, invoice_no=ex.invoice_no if ex else None,
-            invoice_date=ex.invoice_date if ex else None, total=ex.total if ex else None,
-            status=doc.status, approved_by=approved_by, pic_name=pic_name, request_type=doc.request_type,
-        )
-        for v, doc, client, ex, approved_by, pic_name in db.execute(query).all()
-    ]
+            invoice_date=ex.invoice_date if ex else None, total=taxes.net, gross=taxes.gross,
+            tax_total=taxes.tax_total, status=doc.status, approved_by=approved_by, pic_name=pic_name,
+            request_type=doc.request_type,
+        ))
+    return rows
 
 
 @router.get("/vouchers", response_model=list[VoucherRow])

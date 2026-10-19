@@ -335,6 +335,53 @@ class DocumentDetail(DocumentSummary):
     # Klasifikasi AI (invoice / struk / tidak relevan / meragukan) dan pemeriksaan rekening
     classification: dict | None = None
     account_check: dict | None = None
+    # Total tagihan, potongan pajak, dan nilai bersih yang dibayarkan voucher (Tahap 4)
+    tax_summary: "TaxSummaryOut | None" = None
+
+
+class TaxLineOut(BaseModel):
+    invoice_no: str | None
+    name: str
+    rate: Decimal
+    npwp: bool
+    base: Decimal
+    amount: Decimal
+
+
+class TaxSummaryOut(BaseModel):
+    gross: Decimal | None
+    tax_total: Decimal
+    net: Decimal | None
+    lines: list[TaxLineOut] = []
+
+
+class TaxChoice(BaseModel):
+    """Pilihan pajak PIC untuk satu invoice. `base` kosong = DPP otomatis dari rincian (tanpa baris PPN)."""
+    code: str = Field(max_length=20)
+    npwp: bool = True
+    base: Decimal | None = Field(None, ge=0)
+
+
+class TaxRateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str
+    name: str
+    description: str | None
+    rate_npwp: Decimal
+    rate_no_npwp: Decimal
+    is_active: bool
+    needs_confirmation: bool
+    updated_at: datetime | None = None
+
+
+class TaxRateUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=1000)
+    rate_npwp: Decimal | None = Field(None, ge=0, le=100)
+    rate_no_npwp: Decimal | None = Field(None, ge=0, le=100)
+    is_active: bool | None = None
+    needs_confirmation: bool | None = None
 
 
 class FixRequest(BaseModel):
@@ -515,7 +562,9 @@ class VoucherRow(BaseModel):
     vendor_name: str | None
     invoice_no: str | None
     invoice_date: date | None
-    total: Decimal | None
+    total: Decimal | None  # nilai yang dibayarkan (setelah potongan pajak)
+    gross: Decimal | None = None  # total tagihan sebelum potongan
+    tax_total: Decimal = Decimal(0)
     status: DocStatus
     approved_by: str
     pic_name: str | None = None  # PIC Klien pengaju: pengunggah, atau PIC yang diwakili Intake Support

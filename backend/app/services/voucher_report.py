@@ -107,7 +107,7 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
 
     total = sum((r.total or 0 for r in rows), Decimal(0))
     sent = sum(r.status == DocStatus.SENT_TO_CLIENT for r in rows)
-    stats = [("Jumlah voucher", str(len(rows))), ("Total nilai", _money(total)),
+    stats = [("Jumlah voucher", str(len(rows))), ("Total dibayarkan", _money(total)),
              ("Terkirim ke klien", str(sent)), ("Belum diunduh klien", str(len(rows) - sent)),
              ("Perusahaan", str(len({r.client.id for r in rows})))]
     pdf.ln(3)
@@ -135,13 +135,13 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
 
     _section(pdf, "Rekap per perusahaan")
     groups = _groups(rows, lambda r: r.client.name)
-    _table(pdf, ("Perusahaan", "Jumlah voucher", "Total nilai"), (110, 35, 50), ("LEFT", "CENTER", "RIGHT"),
+    _table(pdf, ("Perusahaan", "Jumlah voucher", "Total dibayarkan"), (110, 35, 50), ("LEFT", "CENTER", "RIGHT"),
            [(company_with_pic(g.name, g.pics), str(g.count), _money(g.total)) for g in groups],
            ("Total", str(len(rows)), _money(total)))
 
     _section(pdf, "Rekap per Finance Reviewer (penyetuju)")
     groups = _groups(rows, lambda r: r.approved_by)
-    _table(pdf, ("Finance Reviewer", "Jumlah voucher", "Total nilai"), (110, 35, 50), ("LEFT", "CENTER", "RIGHT"),
+    _table(pdf, ("Finance Reviewer", "Jumlah voucher", "Total dibayarkan"), (110, 35, 50), ("LEFT", "CENTER", "RIGHT"),
            [(g.name, str(g.count), _money(g.total)) for g in groups])
 
     _section(pdf, "Daftar voucher")
@@ -149,7 +149,7 @@ def render_report(rows: list[VoucherRow], date_from: date, date_to: date, period
                company_with_pic(r.client.name, [r.pic_name] if r.pic_name else []), r.vendor_name or "-", r.invoice_no or "-", _money(r.total), r.approved_by,
                STATUS_TEXT.get(r.status, r.status.value))
               for i, r in enumerate(sorted(rows, key=lambda r: r.generated_at), start=1)]
-    _table(pdf, ("No", "No. Voucher", "Terbit", "Request ID", "Perusahaan", "Vendor", "No. Invoice", "Total",
+    _table(pdf, ("No", "No. Voucher", "Terbit", "Request ID", "Perusahaan", "Vendor", "No. Invoice", "Dibayarkan",
                  "Disetujui oleh", "Status"),
            (9, 30, 25, 36, 38, 31, 27, 27, 31, 23),
            ("CENTER", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "LEFT", "RIGHT", "LEFT", "LEFT"),

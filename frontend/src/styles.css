@@ -867,3 +867,10 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .tabs button.active { color: var(--primary); border-bottom-color: var(--pink); font-weight: 600; }
 .modal.wide { width: min(1000px, calc(100vw - 32px)); max-width: none; }
 .modal.wide .pdf-body iframe { width: 100%; height: 100%; border: 0; }
+
+/* Pajak per invoice (Tahap 4) */
+.tax-panel { display: flex; flex-direction: column; gap: 10px; }
+.tax-hint { margin: 0; font-size: 13px; color: var(--fg-2); }
+.tax-calc { padding: 8px 0; font-size: 14px; }
+.tax-warn { color: var(--amber); }
+.tax-summary { border-top: 1px solid var(--line-soft); padding-top: 10px; }

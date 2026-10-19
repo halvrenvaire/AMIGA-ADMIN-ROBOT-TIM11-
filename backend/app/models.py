@@ -183,6 +183,25 @@ class Signatory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class TaxRate(Base):
+    """Tarif potongan pajak yang bisa dipilih PIC per invoice (Tahap 4 feedback owner).
+    Berlaku untuk semua klien; diubah Service Lead / System Admin. `needs_confirmation` = isi awal
+    memakai aturan umum dan belum dikonfirmasi konsultan pajak."""
+    __tablename__ = "tax_rates"
+
+    code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
+    # Persen, mis. 2 = 2%. Vendor tanpa NPWP memakai rate_no_npwp
+    rate_npwp: Mapped[Decimal] = mapped_column(Numeric(6, 3))
+    rate_no_npwp: Mapped[Decimal] = mapped_column(Numeric(6, 3))
+    position: Mapped[int] = mapped_column(SmallInteger, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    needs_confirmation: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Document(Base):
     __tablename__ = "documents"
 

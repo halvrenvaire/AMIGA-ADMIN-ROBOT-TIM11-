@@ -9,7 +9,7 @@ import { ReassignModal } from "../components/ReassignModal";
 import { SignerPicker } from "../components/SignerPicker";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
 import { FIELD_LABEL, ISSUE_LABEL, plainNumber, rupiah, tanggal, waktu } from "../format";
-import type { DocumentDetail, Extraction, FileData, Issue, Signatory, Vendor } from "../types";
+import type { DocumentDetail, Extraction, FileData, Issue, Signatory, TaxRate, TaxSummary, Vendor } from "../types";
 
 const HEADER_FIELDS = ["vendor_name", "invoice_no", "invoice_date", "total"] as const;
 const PAYMENT_FIELDS = ["bank_name", "account_no", "account_name"] as const;
@@ -219,6 +219,7 @@ function ReadOnlyData({ doc }: { doc: DocumentDetail }) {
         ))}
       </dl>
       <LinesTable lines={toLines(ex)} total={ex.total} />
+      {doc.tax_summary && <TaxSummaryBox summary={doc.tax_summary} multi={doc.files.length > 1} />}
       {doc.account_check && <AccountCheckBox check={doc.account_check} />}
     </section>
   );
@@ -284,9 +285,11 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
   const [fields, setFields] = useState(initial.fields);
   const [lines, setLines] = useState(initial.lines);
   const [busy, setBusy] = useState(false);
+  const [taxDirty, setTaxDirty] = useState(false);
   useEffect(() => { setFields(initial.fields); setLines(initial.lines); }, [initialKey, pos]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirty = JSON.stringify({ fields, lines }) !== initialKey;
+  const dataDirty = JSON.stringify({ fields, lines }) !== initialKey;
+  const dirty = dataDirty || taxDirty;
   const reimburse = doc.request_type === "Voucher Pengeluaran Reimburse";
   const blocking = doc.issues.filter((i) => BLOCKING.has(i.code));
   const flags = flagged(blocking);
@@ -392,16 +395,153 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
         </>
       )}
 
+      <TaxPanel key={`${file.position}-${JSON.stringify(file.data?.tax ?? null)}`} doc={doc} file={file} lines={lines}
+                total={fields.total} disabled={busy || dataDirty} onDirty={setTaxDirty} onChange={onChange} onNotice={onNotice} />
+      {doc.tax_summary && <TaxSummaryBox summary={doc.tax_summary} multi={doc.files.length > 1} />}
+
       <div className="decision">
-        {dirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
-        <button className="btn" disabled={busy || !dirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
+        {dataDirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
+        <button className="btn" disabled={busy || !dataDirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
         <SimulationButton docId={doc.id} disabled={busy || dirty} />
         <button className="btn primary" onClick={submit} disabled={busy || dirty || blocking.length > 0}
-                title={dirty ? "Simpan perubahan dulu" : blocking.length ? "Bereskan kendala dulu" : undefined}>
+                title={dirty ? "Simpan perubahan (data atau pajak) dulu" : blocking.length ? "Bereskan kendala dulu" : undefined}>
           <Send /> Kirim ke reviewer
         </button>
       </div>
     </section>
+  );
+}
+
+const VAT_LINE = /\b(ppn|vat|pajak pertambahan|pb1|pajak restoran)\b/i;
+
+/** DPP otomatis, sama dengan backend: jumlah rincian tanpa baris PPN; bila tidak ada rincian, total invoice. */
+function autoBase(lines: Line[], total: string): number | null {
+  const base = lines.filter((l) => l.subtotal !== "" && !VAT_LINE.test(l.description))
+    .reduce((s, l) => s + Number(l.subtotal), 0);
+  return base > 0 ? base : total !== "" ? Number(total) : null;
+}
+
+const pct = (v: string | number) => `${Number(v).toLocaleString("id-ID", { maximumFractionDigits: 3 })}%`;
+
+/** Pajak per invoice (Tahap 4): PIC memilih jenis pajak; AI hanya menyarankan; tarif sesuai NPWP vendor. */
+function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange, onNotice }: {
+  doc: DocumentDetail; file: DocumentDetail["files"][number]; lines: Line[]; total: string; disabled: boolean;
+  onDirty: (d: boolean) => void; onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
+}) {
+  const rates = useApi(() => api.get<TaxRate[]>("/tax-rates"), []);
+  const current = file.data?.tax ?? null;
+  const suggestion = file.data?.tax_suggestion ?? null;
+  const known = file.data?.npwp_known;
+  const [code, setCode] = useState(current?.code ?? "NONE");
+  const [npwp, setNpwp] = useState(current?.npwp ?? known !== false);
+  const [manual, setManual] = useState(current ? !current.base_auto : false);
+  const [base, setBase] = useState(current && !current.base_auto ? plainNumber(current.base) : "");
+  const [busy, setBusy] = useState(false);
+
+  const dirty = code !== (current?.code ?? "NONE") || npwp !== (current?.npwp ?? known !== false)
+    || manual !== (current ? !current.base_auto : false) || (manual && base !== plainNumber(current?.base ?? null));
+  useEffect(() => { onDirty(dirty); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onDirty(false), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const list = (rates.data ?? []).filter((r) => r.is_active || r.code === code);
+  const rate = list.find((r) => r.code === code);
+  const ratePct = rate ? Number(npwp ? rate.rate_npwp : rate.rate_no_npwp) : 0;
+  const dpp = manual ? (base === "" ? null : Number(base)) : autoBase(lines, total);
+  const cut = dpp && ratePct ? Math.round((dpp * ratePct) / 100) : 0;
+  const gross = total === "" ? null : Number(total);
+
+  async function apply() {
+    setBusy(true);
+    try {
+      const next = await api.put<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/tax`,
+                                                 { code, npwp, base: manual && base !== "" ? base : null });
+      onChange(next, { kind: "ok", text: `Pajak bukti ${file.position} diterapkan. Cek simulasi voucher sebelum dikirim.` });
+    } catch (e) {
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="tax-panel">
+      <div className="section-title">Pajak (potongan PPh)</div>
+      {suggestion && (
+        <p className="tax-hint">
+          <span className="chip gray">{suggestion.source === "ai" ? "Saran AI" : "Saran sistem"}</span>{" "}
+          <b>{suggestion.name}</b> · {suggestion.reason}. Keputusan tetap di Anda.
+        </p>
+      )}
+      <div className="grid-2">
+        <div className="field">
+          <label htmlFor="tax-code">Jenis pajak</label>
+          <select id="tax-code" className="input" value={code} disabled={disabled || busy} onChange={(e) => setCode(e.target.value)}>
+            {list.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
+          </select>
+          {rate?.description && <small>{rate.description}</small>}
+        </div>
+        <div className="field">
+          <label htmlFor="tax-npwp">NPWP vendor</label>
+          <select id="tax-npwp" className="input" value={npwp ? "1" : "0"} disabled={disabled || busy || code === "NONE"}
+                  onChange={(e) => setNpwp(e.target.value === "1")}>
+            <option value="1">Punya NPWP</option>
+            <option value="0">Tidak punya NPWP</option>
+          </select>
+          <small>{known == null ? "Vendor belum terdaftar di data referensi; pastikan NPWP-nya."
+            : known ? "Sesuai data referensi vendor (ada NPWP)." : "Data referensi vendor: tanpa NPWP."}</small>
+        </div>
+      </div>
+      {code !== "NONE" && (
+        <div className="grid-2">
+          <div className="field">
+            <label htmlFor="tax-base">Dasar pengenaan pajak (DPP)</label>
+            <input id="tax-base" className="input num" type="number" disabled={disabled || busy || !manual}
+                   value={manual ? base : dpp ?? ""} onChange={(e) => setBase(e.target.value)} />
+            <label className="toggle" style={{ marginTop: 4 }}>
+              <input type="checkbox" checked={!manual} disabled={disabled || busy}
+                     onChange={(e) => { setManual(!e.target.checked); setBase(dpp != null ? String(dpp) : ""); }} />
+              <span>Otomatis dari rincian (tanpa baris PPN)</span>
+            </label>
+          </div>
+          <div className="field">
+            <label>Potongan</label>
+            <div className="tax-calc num">
+              {pct(ratePct)} × {rupiah(dpp)} = <b>{rupiah(cut)}</b>
+              {gross != null && <div className="muted">Dibayarkan untuk bukti ini: <b>{rupiah(gross - cut)}</b></div>}
+            </div>
+            {rate?.needs_confirmation && <small className="tax-warn">Tarif awal memakai aturan umum; perlu dikonfirmasi konsultan pajak.</small>}
+          </div>
+        </div>
+      )}
+      {dirty && (
+        <div className="actions" style={{ justifyContent: "flex-end" }}>
+          <button className="btn" disabled={busy} onClick={() => {
+            setCode(current?.code ?? "NONE"); setNpwp(current?.npwp ?? known !== false);
+            setManual(current ? !current.base_auto : false); setBase(current && !current.base_auto ? plainNumber(current.base) : "");
+          }}><Undo2 /> Batalkan</button>
+          <button className="btn primary" disabled={busy || disabled || (manual && base === "")} onClick={apply}>Terapkan pajak</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Total tagihan, potongan pajak per invoice, dan nilai bersih yang dibayarkan voucher. */
+function TaxSummaryBox({ summary, multi }: { summary: TaxSummary; multi: boolean }) {
+  if (!summary.lines.length) {
+    return <p className="muted" style={{ margin: 0 }}>Tanpa potongan pajak. Voucher membayar <b className="num">{rupiah(summary.net)}</b>.</p>;
+  }
+  return (
+    <dl className="meta tax-summary">
+      <dt>Jumlah tagihan</dt><dd className="num">{rupiah(summary.gross)}</dd>
+      {summary.lines.map((t, i) => (
+        <Fragment key={i}>
+          <dt>Potongan {t.name} {pct(t.rate)}{t.npwp ? "" : " (tanpa NPWP)"}{multi && t.invoice_no ? ` · ${t.invoice_no}` : ""}</dt>
+          <dd className="num">−{rupiah(t.amount)} <span className="muted">dari DPP {rupiah(t.base)}</span></dd>
+        </Fragment>
+      ))}
+      <dt><b>Dibayarkan</b></dt><dd className="num"><b>{rupiah(summary.net)}</b></dd>
+    </dl>
   );
 }
 

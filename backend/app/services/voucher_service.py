@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import BACKEND_DIR, settings
 from app.models import Document, User, Voucher
-from app.services import audit_service, signature_service, storage, voucher_attachments
+from app.services import audit_service, signature_service, storage, tax_service, voucher_attachments
 from app.services.signer_service import COMPANY_POSITION
 from app.services.verification import rupiah
 
@@ -134,9 +134,22 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
             for text in (str(line.position), _t(line.description), qty,
                          _money(line.unit_price), _money(line.subtotal)):
                 row.cell(text)
+        taxes = tax_service.summary(doc)
+        if taxes.lines:
+            # Tahap 4: voucher membayar nilai bersih setelah potongan pajak per invoice
+            gross = table.row(style=FontFace(emphasis="BOLD"))
+            gross.cell("JUMLAH TAGIHAN", colspan=4, align="RIGHT")
+            gross.cell(_money(taxes.gross))
+            for t in taxes.lines:
+                rate = f"{t.rate.normalize():f}".replace(".", ",")
+                where = f" [{t.invoice_no}]" if t.invoice_no and n_files > 1 else ""
+                cut = table.row()
+                cut.cell(f"Potongan {t.name} {rate}%{'' if t.npwp else ' (tanpa NPWP)'} x DPP {_money(t.base)}{where}",
+                         colspan=4, align="RIGHT")
+                cut.cell(f"({_money(t.amount)})")
         total = table.row(style=FontFace(emphasis="BOLD", size_pt=10))
         total.cell("TOTAL DIBAYARKAN", colspan=4, align="RIGHT")
-        total.cell(_money(ex.total))
+        total.cell(_money(taxes.net))
     pdf.ln(12)
 
     # Rekening tujuan tidak dicetak (feedback owner): pengecekan rekening tetap berjalan di sistem

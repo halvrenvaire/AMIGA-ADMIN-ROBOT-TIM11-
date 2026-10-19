@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3, Bot, Building2, ClipboardCheck, FileBarChart, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
-  Upload, Users,
+  Percent, Upload, Users,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { ROLE_LABEL } from "../format";
@@ -29,6 +29,7 @@ const NAV: NavItem[] = [
 const REFERENCE_NAV: NavItem[] = [
   { to: "/referensi/vendor", label: "Vendor", icon: Store, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD"] },
   { to: "/referensi/penanda-tangan", label: "Penanda tangan", icon: PenLine, roles: ["PIC_KLIEN", "INTAKE_SUPPORT"] },
+  { to: "/referensi/tarif-pajak", label: "Tarif pajak", icon: Percent, roles: ["PIC_KLIEN", "INTAKE_SUPPORT", "FINANCE_REVIEWER", "SERVICE_LEAD", "SYSTEM_ADMIN"] },
 ];
 const ADMIN_NAV: NavItem[] = [
   { to: "/admin/pengguna", label: "Pengguna & Peran", icon: Users, roles: ["SYSTEM_ADMIN"] },
@@ -39,7 +40,7 @@ const ADMIN_NAV: NavItem[] = [
 const TITLES: [RegExp, string][] = [
   [/^\/dokumen\/[^/]+\/voucher$/, "Pratinjau Voucher"], [/^\/dokumen\/[^/]+\/riwayat$/, "Riwayat Dokumen"],
   [/^\/dokumen/, "Detail Dokumen"], [/^\/dashboard/, "Dashboard"], [/^\/antrean/, "Dashboard Antrean"],
-  [/^\/referensi\/vendor/, "Data Referensi / Vendor"], [/^\/referensi\/penanda-tangan/, "Data Referensi / Penanda tangan"], [/^\/peninjauan/, "Peninjauan Saya"],
+  [/^\/referensi\/vendor/, "Data Referensi / Vendor"], [/^\/referensi\/penanda-tangan/, "Data Referensi / Penanda tangan"], [/^\/referensi\/tarif-pajak/, "Data Referensi / Tarif pajak"], [/^\/peninjauan/, "Peninjauan Saya"],
   [/^\/unggah/, "Pembuatan Voucher"], [/^\/pengajuan/, "Pengajuan Saya"], [/^\/voucher/, "Voucher"],
   [/^\/riwayat/, "Riwayat & Audit"], [/^\/cari/, "Hasil Pencarian"],
   [/^\/akun/, "Pengaturan Akun"], [/^\/asisten/, "Asisten AI"], [/^\/rekap-voucher/, "Rekap Voucher"], [/^\/admin\/pengguna/, "Pengguna & Peran"], [/^\/admin\/klien/, "Klien"],

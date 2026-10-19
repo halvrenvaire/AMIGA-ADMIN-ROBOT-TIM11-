@@ -198,8 +198,12 @@ def format_processing_result(doc: dict) -> str:
                      f"{rupiah(doc['total']) if doc.get('total') is not None else '-'}")
     if status == "READY_FOR_REVIEW":
         lines.append(f"Invoice lolos verifikasi dan menunggu Finance Reviewer ({doc.get('assigned_reviewer') or '-'}).")
+    taxes = doc.get("tax_summary") or {}
+    if taxes.get("lines"):
+        names = ", ".join(sorted({t["name"] for t in taxes["lines"]}))
+        lines.append(f"Potongan pajak ({names}): {rupiah(taxes['tax_total'])} · Dibayarkan: {rupiah(taxes['net'])}")
     if status == "DRAFT":
-        lines.append("Draf siap. Periksa data per invoice dan simulasi voucher di dashboard, lalu kirim ke "
+        lines.append("Draf siap. Periksa data dan pajak per invoice serta simulasi voucher di dashboard, lalu kirim ke "
                      "Finance Reviewer (bisa juga lewat tombol di bawah).")
     issues = format_issues(doc)
     if issues:

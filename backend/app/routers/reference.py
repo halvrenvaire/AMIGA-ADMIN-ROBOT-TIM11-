@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import ensure_client_access, get_current_user, require_roles
 from app.db import get_db
-from app.models import Document, Extraction, Role, Signatory, SignatoryKind, User, Vendor
+from app.models import Document, Extraction, Role, Signatory, SignatoryKind, TaxRate, User, Vendor
 from app.schemas.schemas import (
-    ActiveUpdate, ClientRef, SignatoryCreate, SignatoryIn, SignatoryOut, SignatureIn, VendorCheck, VendorCreate, VendorIn, VendorOut,
+    ActiveUpdate, ClientRef, SignatoryCreate, SignatoryIn, SignatoryOut, SignatureIn, TaxRateOut, TaxRateUpdate, VendorCheck, VendorCreate, VendorIn, VendorOut,
 )
 from app.services import audit_service, signature_service
 from app.services.access_rules import accessible_client_ids
@@ -298,3 +298,35 @@ def delete_signature(signatory_id: uuid.UUID, user: User = Depends(signatory_edi
         db.commit()
         db.refresh(sig)
     return sig
+
+
+# --- Tarif pajak (Tahap 4 feedback owner) ---
+tax_editors = require_roles(Role.SERVICE_LEAD, Role.SYSTEM_ADMIN)
+
+
+@router.get("/tax-rates", response_model=list[TaxRateOut])
+def list_tax_rates(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Jenis dan tarif potongan pajak yang bisa dipilih PIC per invoice."""
+    return db.scalars(select(TaxRate).order_by(TaxRate.position)).all()
+
+
+@router.put("/tax-rates/{code}", response_model=TaxRateOut)
+def update_tax_rate(code: str, body: TaxRateUpdate, user: User = Depends(tax_editors), db: Session = Depends(get_db)):
+    """Ubah tarif (mis. setelah dikonfirmasi konsultan pajak). Draf dan voucher yang sudah ada tidak berubah
+    karena tarif disalin ke data invoice saat dipilih."""
+    rate = db.get(TaxRate, code)
+    if rate is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Jenis pajak tidak ditemukan.")
+    if code == "NONE" and (body.rate_npwp or body.rate_no_npwp or body.is_active is False):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "\"Tanpa potongan\" selalu 0% dan selalu aktif.")
+    for name, value in body.model_dump(exclude_unset=True).items():
+        old = getattr(rate, name)
+        if value is None or old == value:
+            continue
+        audit_service.record(db, user, "TAX_RATE_CHANGED", field=f"{code}.{name}",
+                             old_value=str(old), new_value=str(value))
+        setattr(rate, name, value)
+    rate.updated_by = user.id
+    rate.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return rate

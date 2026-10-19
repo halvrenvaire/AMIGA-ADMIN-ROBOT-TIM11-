@@ -41,10 +41,10 @@ export function VoucherTable() {
   }, [rows.data, groupBy]);
 
   function exportCsv() {
-    const header = ["No Voucher", "Tanggal Voucher", "Request ID", "Perusahaan", "Vendor", "No Invoice", "Tgl Invoice", "Total", "Status", "Disetujui oleh"];
+    const header = ["No Voucher", "Tanggal Voucher", "Request ID", "Perusahaan", "Vendor", "No Invoice", "Tgl Invoice", "Total Tagihan", "Potongan Pajak", "Dibayarkan", "Status", "Disetujui oleh"];
     const esc = (v: string | number | null) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = (rows.data ?? []).map((r) => [r.voucher_no, waktu(r.generated_at), r.request_id, r.client.name, r.vendor_name,
-      r.invoice_no, r.invoice_date, r.total, STATUS_LABEL[r.status], r.approved_by].map(esc).join(","));
+      r.invoice_no, r.invoice_date, r.gross ?? r.total, r.tax_total ?? 0, r.total, STATUS_LABEL[r.status], r.approved_by].map(esc).join(","));
     const blob = new Blob(["﻿" + [header.map(esc).join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "voucher-amiga.csv" });
     a.click();
@@ -106,7 +106,7 @@ export function VoucherTable() {
               <thead>
                 <tr>
                   <th>No voucher</th><th>Tanggal</th><th>Perusahaan</th><th>Vendor</th><th>No invoice</th>
-                  <th className="right">Total</th><th>Status</th><th className="right">Aksi</th>
+                  <th className="right" title="Setelah potongan pajak">Dibayarkan</th><th>Status</th><th className="right">Aksi</th>
                 </tr>
               </thead>
               <tbody>

@@ -5,11 +5,11 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignatureImage, SignatureModal } from "../components/Signature";
 import { Alert, Loading, Modal, useApi } from "../components/ui";
-import type { ClientRef, Me, Signatory, Vendor } from "../types";
+import type { ClientRef, Me, Signatory, TaxRate, Vendor } from "../types";
 
 const VENDOR_FIELDS: { key: keyof Vendor; label: string; hint?: string; wide?: boolean }[] = [
   { key: "name", label: "Nama perusahaan vendor", wide: true },
-  { key: "npwp", label: "NPWP", hint: "mis. 01.234.567.8-901.000" },
+  { key: "npwp", label: "NPWP", hint: "mis. 01.234.567.8-901.000. Kosongkan bila vendor tidak punya NPWP (tarif PPh lebih tinggi)." },
   { key: "contact_name", label: "Nama kontak" },
   { key: "phone", label: "Telepon" },
   { key: "email", label: "Email" },
@@ -384,6 +384,105 @@ function SignatoryModal({ value: existing, clientId, onClose, onDone }: {
       <div className="actions" style={{ justifyContent: "flex-end" }}>
         <button className="btn" onClick={onClose}>Batal</button>
         <button className="btn primary" disabled={busy || name.trim().length < 2 || position.trim().length < 2} onClick={submit}>Simpan</button>
+      </div>
+    </Modal>
+  );
+}
+
+// --- Tarif pajak (Tahap 4) ---
+
+const pctText = (v: string) => `${Number(v).toLocaleString("id-ID", { maximumFractionDigits: 3 })}%`;
+
+/** Jenis dan tarif potongan pajak yang dipilih PIC per invoice. Diubah Service Lead / System Admin. */
+export function TaxRates() {
+  const { has } = useAuth();
+  const canEdit = has("SERVICE_LEAD", "SYSTEM_ADMIN");
+  const rates = useApi(() => api.get<TaxRate[]>("/tax-rates"), []);
+  const [editing, setEditing] = useState<TaxRate | null>(null);
+  const pending = (rates.data ?? []).filter((r) => r.needs_confirmation && r.code !== "NONE").length;
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Tarif pajak</h1>
+          <p>Jenis potongan PPh yang bisa dipilih PIC untuk tiap invoice. AI hanya menyarankan; PIC yang memutuskan.
+            Tarif disalin saat dipilih, jadi perubahan di sini tidak mengubah draf atau voucher yang sudah ada.</p>
+        </div>
+      </div>
+      {pending > 0 && (
+        <Alert kind="warn">{pending} tarif masih memakai aturan umum dan <b>perlu dikonfirmasi konsultan pajak</b>.</Alert>
+      )}
+      <section className="card">
+        {rates.error && <Alert>{rates.error}</Alert>}
+        {!rates.data ? <Loading /> : (
+          <table className="table">
+            <thead><tr><th>Jenis</th><th>Keterangan</th><th className="right">Ber-NPWP</th><th className="right">Tanpa NPWP</th>
+              <th>Status</th>{canEdit && <th className="right">Aksi</th>}</tr></thead>
+            <tbody>
+              {rates.data.map((r) => (
+                <tr key={r.code}>
+                  <td><b>{r.name}</b> {!r.is_active && <span className="chip gray">nonaktif</span>}</td>
+                  <td className="muted" style={{ maxWidth: 420 }}>{r.description}</td>
+                  <td className="right num">{pctText(r.rate_npwp)}</td>
+                  <td className="right num">{pctText(r.rate_no_npwp)}</td>
+                  <td>{r.code === "NONE" ? <span className="chip gray">tetap</span>
+                    : r.needs_confirmation ? <span className="chip warn">perlu dikonfirmasi</span>
+                    : <span className="chip ok">sudah dikonfirmasi</span>}</td>
+                  {canEdit && <td className="right">{r.code !== "NONE" &&
+                    <button className="btn sm" onClick={() => setEditing(r)}><Pencil /> Ubah</button>}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+      {editing && <TaxRateModal rate={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); rates.reload(); }} />}
+    </>
+  );
+}
+
+function TaxRateModal({ rate, onClose, onDone }: { rate: TaxRate; onClose: () => void; onDone: () => void }) {
+  const [form, setForm] = useState({
+    name: rate.name, description: rate.description ?? "", rate_npwp: String(Number(rate.rate_npwp)),
+    rate_no_npwp: String(Number(rate.rate_no_npwp)), is_active: rate.is_active, confirmed: !rate.needs_confirmation,
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.put(`/tax-rates/${rate.code}`, {
+        name: form.name.trim(), description: form.description.trim() || null, rate_npwp: form.rate_npwp,
+        rate_no_npwp: form.rate_no_npwp, is_active: form.is_active, needs_confirmation: !form.confirmed,
+      });
+      onDone();
+    } catch (e) { setError((e as Error).message); setBusy(false); }
+  }
+  return (
+    <Modal title={`Ubah ${rate.name}`} onClose={onClose}>
+      {error && <Alert>{error}</Alert>}
+      <div className="field"><label htmlFor="tr-name">Nama</label>
+        <input id="tr-name" className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+      <div className="grid-2">
+        <div className="field"><label htmlFor="tr-npwp">Tarif ber-NPWP (%)</label>
+          <input id="tr-npwp" className="input num" type="number" step="0.001" min={0} max={100} value={form.rate_npwp}
+                 onChange={(e) => setForm({ ...form, rate_npwp: e.target.value })} /></div>
+        <div className="field"><label htmlFor="tr-nonpwp">Tarif tanpa NPWP (%)</label>
+          <input id="tr-nonpwp" className="input num" type="number" step="0.001" min={0} max={100} value={form.rate_no_npwp}
+                 onChange={(e) => setForm({ ...form, rate_no_npwp: e.target.value })} /></div>
+      </div>
+      <div className="field"><label htmlFor="tr-desc">Keterangan untuk PIC</label>
+        <textarea id="tr-desc" className="input" maxLength={1000} value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+      <label className="toggle"><input type="checkbox" checked={form.confirmed} onChange={(e) => setForm({ ...form, confirmed: e.target.checked })} />
+        <span>Sudah dikonfirmasi konsultan pajak</span></label>
+      <label className="toggle"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
+        <span>Aktif (bisa dipilih PIC)</span></label>
+      <div className="actions" style={{ justifyContent: "flex-end" }}>
+        <button className="btn" onClick={onClose}>Batal</button>
+        <button className="btn primary" disabled={busy || !form.name.trim() || form.rate_npwp === "" || form.rate_no_npwp === ""}
+                onClick={save}>Simpan</button>
       </div>
     </Modal>
   );
