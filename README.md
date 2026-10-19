@@ -145,7 +145,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 | F2. Ekstraksi AI | P0 | ✅ | Nova Lite membaca PDF langsung (2–4 detik per invoice dummy). Gagal baca → dokumen tetap tersimpan, Finance Reviewer bisa proses ulang. Ekstraksi ulang memakai Request ID sama |
 | F3. Verifikasi otomatis oleh sistem | P0 | ✅ | Kelengkapan, angka, duplikasi (dinormalisasi). Kode + alasan berbahasa sederhana. Perbaikan PIC didahulukan atas hasil AI |
 | F4. Peninjauan oleh Finance Reviewer | P0 | ✅ | Koreksi data + verifikasi ulang, Setujui (kendala terbuka menahan persetujuan), Kembalikan ke PIC dengan alasan, cek SoD + pengalihan otomatis, tandai bukan duplikat |
-| F5. Voucher PDF dan serah terima | P0 | ✅ | Voucher PDF (fpdf2) < 1 detik dengan teks batas otorisasi tercetak; unduhan pihak klien → SENT_TO_CLIENT |
+| F5. Voucher PDF dan serah terima | P0 | ✅ | Voucher PDF (fpdf2) < 1 detik; unduhan pihak klien → SENT_TO_CLIENT. Kop memakai **logo klien** (diunggah PIC Klien di Penanda tangan, atau System Admin di Klien; tanpa logo: nama klien). Klien, Request ID, vendor, No./Tgl. invoice, rekening, catatan tanda tangan elektronik, dan teks batas otorisasi **tidak dicetak** (feedback owner 19 Okt 2026; FR-5.2 dicabut owner) |
 | F6. Dashboard antrean | P1 | ✅ | `GET /dashboard/summary` (per status, bermasalah, tenggat, beban reviewer), filter di `GET /documents`, pengalihan oleh Service Lead |
 | F7. Hak akses dan isolasi klien | P0 | ✅ | Login JWT, peran ganda (tabel `user_roles`), cek peran di server, isolasi klien (ditolak + dicatat), API System Admin. Delegasi oleh PIC Klien dibangun bersama unggah (Tahap 4) |
 | F8. Jejak audit | P0 | ✅ | `audit_logs` **append-only** (trigger database). Mencatat unggah, perubahan status, ekstraksi, perbaikan PIC, koreksi reviewer (nilai awal → baru), persetujuan, pengembalian, penolakan SoD, pengalihan, voucher, unduhan, aksi admin, akses ditolak. `GET /documents/{id}/history` |
@@ -457,6 +457,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PUT | `/documents/{id}/files/{position}/tax` | PIC Klien / Intake Support: pilih pajak satu invoice saat DRAFT/EXCEPTION. Body: `{"code": "PPH23", "npwp": true, "base": null}` (`base` kosong = DPP otomatis). Tarif disalin ke data invoice; dicatat `FIXED_BY_PIC` |
 | GET | `/tax-rates` | Semua pengguna: jenis dan tarif pajak |
 | PUT | `/tax-rates/{code}` | Service Lead / System Admin: ubah nama, tarif ber-NPWP / tanpa NPWP, keterangan, aktif, status konfirmasi. Draf dan voucher lama tidak berubah |
+| GET/PUT/DELETE | `/clients/{id}/logo` | Logo klien (PNG) untuk kop voucher. PUT body `{"image": "data:image/png;base64,..."}` (PNG/JPG/WEBP ≤ 2 MB, dirapikan ke PNG); hanya PIC Klien klien itu atau System Admin |
 | POST | `/documents/{id}/fix` | (lama) PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}`. Dashboard kini memakai `PUT .../files/{position}/data` |
 | POST | `/documents/{id}/cancel` | PIC Klien / Intake Support: batalkan pengajuan saat DRAFT, EXCEPTION, atau READY_FOR_REVIEW. Body: `{"reason": "..."}` (min. 5 karakter). Status → CANCELLED, kendala ditutup, tercatat di jejak audit; tidak dihitung sebagai duplikat |
 | POST | `/documents/{id}/reprocess` | PIC Klien / Intake Support / Finance Reviewer: proses ulang dokumen yang gagal dibaca AI |
@@ -516,7 +517,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Persetujuan dan kendala | **Setujui** ditolak (409) selama masih ada kendala terbuka, termasuk kendala baru dari koreksi reviewer | Voucher tidak boleh terbit dari data yang gagal verifikasi |
 | Duplikat yang ternyata bukan duplikat | Finance Reviewer (bukan pihak pengaju) bisa **menandai bukan duplikat** dengan alasan wajib saat meninjau | PRD belum mengatur (pertanyaan terbuka 2) |
 | Serah terima voucher | Status jadi SENT_TO_CLIENT hanya bila diunduh **PIC Klien** atau **Intake Support yang mengunggah dokumen itu**. Pratinjau dan unduhan reviewer tidak mengubah status | Pengguna peran ganda yang mengunduh sebagai reviewer tidak boleh dianggap menyerahkan ke klien |
-| Nomor voucher | `VCH/YYYY/MM/NNNN`, urut per bulan (WIB). Teks batas otorisasi bisa diganti lewat `VOUCHER_AUTHORIZATION_TEXT` di `.env` | **Sementara**, menunggu format resmi dari tim Keuangan (pertanyaan terbuka 4) |
+| Nomor voucher | `VCH/YYYY/MM/NNNN`, urut per bulan (WIB) | **Sementara**, menunggu format resmi dari tim Keuangan (pertanyaan terbuka 4) |
 | Beban berlebih | Reviewer dengan **> 5** dokumen READY_FOR_REVIEW ditandai berlebih; tenggat "dekat" = ≤ 2 hari. Bisa diubah lewat `REVIEWER_OVERLOAD_THRESHOLD` dan `DUE_SOON_DAYS` | **Sementara**, menunggu batas resmi (pertanyaan terbuka 3) |
 | Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif yang bukan pihak pengaju | Pengalihan tidak boleh membuka celah SoD |
 | Asisten dan data antrean | `/ask-agent` memakai data antrean hanya bila pertanyaannya tentang antrean (mis. "dokumen apa yang tenggatnya dekat?"). Data dibangun di server dari klien yang ditugaskan; jawaban seperti ini **tidak disimpan** ke memori | Data cepat berubah, jadi tidak boleh menjadi referensi jawaban lain; hak akses sama dengan layar biasa |
@@ -545,7 +546,7 @@ Perlu dijawab klien / tim Keuangan AMIGA (PRD v2 §8):
 1. Apakah kode `CALCULATION_DISCREPANCY` disetujui dan ditambahkan ke glosarium BRD?
 2. Apakah `POSSIBLE_DUPLICATE` membuat status EXCEPTION (seperti PRD v2) atau hanya peringatan bagi reviewer? (Sementara: EXCEPTION, dan reviewer bisa menandai bukan duplikat dengan alasan.)
 3. Batas "beban terlalu banyak" bagi Service Lead, misalnya lebih dari N dokumen tertunda per reviewer. (Sementara: > 5.)
-4. Format nomor voucher dan teks batas otorisasi. (Sementara: `VCH/YYYY/MM/NNNN` dan teks di `app/config.py`.)
+4. Format nomor voucher. (Sementara: `VCH/YYYY/MM/NNNN`. Teks batas otorisasi sudah tidak dicetak atas permintaan owner.)
 5. Layanan AI/OCR yang dipakai dan kebijakan datanya (no-training).
 6. Tanggal Demo Day.
 

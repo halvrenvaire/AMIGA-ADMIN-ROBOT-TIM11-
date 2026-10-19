@@ -23,7 +23,7 @@ export interface AccountCheck {
   message: string; source: "AI" | "PIC"; vendor: string | null; verified_by: string | null;
 }
 
-export interface ClientRef { id: string; name: string }
+export interface ClientRef { id: string; name: string; logo_updated_at?: string | null }
 export interface ClientOverview extends ClientRef { created_at: string; pics: string[]; intakes: string[] }
 
 export interface Me {

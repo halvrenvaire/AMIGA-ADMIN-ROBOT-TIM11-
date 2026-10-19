@@ -187,7 +187,7 @@ def clients_overview(admin: User = Depends(admin_only), db: Session = Depends(ge
     ):
         people.setdefault(cid, {}).setdefault(role, []).append(name)
     return [
-        ClientOverview(id=c.id, name=c.name, created_at=c.created_at,
+        ClientOverview(id=c.id, name=c.name, created_at=c.created_at, logo_updated_at=c.logo_updated_at,
                        pics=people.get(c.id, {}).get(Role.PIC_KLIEN, []),
                        intakes=people.get(c.id, {}).get(Role.INTAKE_SUPPORT, []))
         for c in db.scalars(select(Client).order_by(Client.name))

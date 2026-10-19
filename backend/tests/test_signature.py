@@ -83,8 +83,9 @@ def test_voucher_carries_registered_signatures(extractor):
     doc = detail(upload().json()["id"])
     approve(doc)
     images, text = _voucher_images(doc["id"])
-    assert images == 3  # logo + 2 tanda tangan
-    assert "Tanda tangan elektronik pada 2 kotak" in text and "Ditandatangani:" in text
+    assert images == 2  # 2 tanda tangan (klien belum punya logo: kop berisi nama klien)
+    # Catatan "Tanda tangan elektronik pada N kotak" tidak dicetak lagi (feedback owner); tiap kotak tetap bertanggal
+    assert "Tanda tangan elektronik pada" not in text and "Ditandatangani:" in text
     [log] = audit(doc["id"], "E_SIGNATURE_APPLIED")
     assert "Rina (PIC Alpha)" in log.new_value and "Budi Santoso" in log.new_value
 
@@ -94,5 +95,5 @@ def test_voucher_without_signatures_keeps_wet_signature_boxes(extractor):
     doc = detail(upload().json()["id"])
     approve(doc)
     images, text = _voucher_images(doc["id"])
-    assert images == 1  # hanya logo
+    assert images == 0  # tanpa logo klien dan tanpa tanda tangan
     assert "Tanda tangan elektronik" not in text and "Tanggal:" in text

@@ -37,7 +37,7 @@ def test_many_lines_continue_on_next_page_with_total():
     reader = _render([_line(n, LONG) for n in range(1, 31)])
     assert len(reader.pages) >= 2
     last = reader.pages[-1].extract_text()
-    assert "TOTAL DIBAYARKAN" in last and "BATAS OTORISASI" in last
+    assert "TOTAL DIBAYARKAN" in last and "BATAS OTORISASI" not in last  # dihapus atas permintaan owner
     assert "Uraian" in last  # header tabel diulang di halaman lanjutan
 
 
@@ -55,3 +55,24 @@ def test_signature_blocks_stay_together_on_last_page():
     last = re.sub(r"\s+", " ", reader.pages[-1].extract_text())
     assert "Diajukan oleh" in last and "Disetujui oleh (opsional)" in last
     assert "Tanggal:" in last
+
+
+def test_header_and_rows_follow_owner_feedback():
+    # Feedback owner 19 Okt 2026: tanpa logo/tagline amiga, tanpa Klien, Request ID, vendor, No./Tgl. invoice
+    text = re.sub(r"\s+", " ", _render([_line(1, "Ongkir")]).pages[0].extract_text())
+    assert "PT Klien Alpha" in text and "Back Office as A Service" not in text  # tanpa logo: nama klien di kop
+    for gone in ("REQ-20261014-E321B5", "Request ID", "Blue 'n Bake", "INV/2026/0030", "Tgl. Invoice", "7770857591"):
+        assert gone not in text
+    assert "Tgl. Voucher" in text and "VOUCHER PENGELUARAN VCH/2026/10/0002" in text
+
+
+def test_client_logo_replaces_name_in_header():
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGBA", (300, 100), (200, 30, 60, 255)).save(buf, format="PNG")
+    ex = N(vendor_name="X", invoice_no="1", invoice_date=None, total=Decimal(1), bank_name=None, account_no=None,
+           account_name=None, line_items=[_line(1)])
+    doc = N(extraction=ex, client=N(name="PT Klien Alpha", logo_png=buf.getvalue()), request_id="REQ-1")
+    page = PdfReader(io.BytesIO(render_voucher(doc, "VCH/1", N(full_name="Dewi"), datetime.now(timezone.utc)))).pages[0]
+    assert len(page.images) == 1
+    assert "PT Klien Alpha" not in page.extract_text().split("VOUCHER PENGELUARAN")[0]

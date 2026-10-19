@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Building2, CheckCircle2, Plus, UserPlus, UserX, Users } from "lucide-react";
+import { ClientLogo } from "../components/ClientLogo";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { Alert, Loading, Modal, MultiSelect, useApi } from "../components/ui";
@@ -274,18 +275,20 @@ export function AdminClients() {
           {clients.loading && !clients.data ? <Loading /> : (
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Klien</th><th>PIC Klien</th><th>Intake Support</th><th>Terdaftar</th><th className="right">ID</th></tr></thead>
+                <thead><tr><th>Klien</th><th>Logo voucher</th><th>PIC Klien</th><th>Intake Support</th><th>Terdaftar</th><th className="right">ID</th></tr></thead>
                 <tbody>
                   {shown.map((c) => (
                     <tr key={c.id}>
                       <td><b>{c.name}</b></td>
+                      <td><ClientLogo clientId={c.id} clientName={c.name} version={c.logo_updated_at ?? null} canEdit compact
+                                      onChange={clients.reload} /></td>
                       <td>{c.pics.length ? people(c.pics) : <span className="chip warn">Belum ada PIC</span>}</td>
                       <td>{people(c.intakes)}</td>
                       <td>{tanggal(c.created_at)}</td>
                       <td className="mono muted right">{c.id.slice(0, 8)}</td>
                     </tr>
                   ))}
-                  {shown.length === 0 && <tr><td colSpan={5} className="empty">Tidak ada klien yang cocok.</td></tr>}
+                  {shown.length === 0 && <tr><td colSpan={6} className="empty">Tidak ada klien yang cocok.</td></tr>}
                 </tbody>
               </table>
             </div>

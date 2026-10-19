@@ -879,3 +879,12 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
 .tax-calc { padding: 8px 0; font-size: 14px; }
 .tax-warn { color: var(--amber); }
 .tax-summary { border-top: 1px solid var(--line-soft); padding-top: 10px; }
+
+/* Logo klien di kop voucher */
+.client-logo { display: flex; flex-direction: column; gap: 8px; }
+.client-logo-preview { min-height: 56px; display: flex; align-items: center; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; background: #fff; }
+.client-logo-preview .sig-img { max-height: 56px; max-width: 100%; object-fit: contain; }
+.client-logo.compact { flex-direction: row; align-items: center; }
+.client-logo.compact .client-logo-preview { min-height: 34px; width: 120px; padding: 4px; }
+.client-logo.compact .client-logo-preview .sig-img { max-height: 30px; }
+.client-logo.compact .muted { font-size: 12px; }

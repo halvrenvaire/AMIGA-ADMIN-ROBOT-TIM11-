@@ -196,3 +196,29 @@ def test_metrics_are_isolated(extractor):
     m = api("pic.beta@amiga.test").get("/dashboard/metrics").json()
     assert m["approved"] == 0 and Decimal(m["total_value"]) == 0
     assert api("admin@amiga.test").get("/dashboard/metrics").status_code == 403
+
+
+# --- Logo klien (feedback owner 19 Okt 2026) ---
+
+def _png(color=(10, 120, 200, 255)):
+    import base64
+    import io as _io
+    from PIL import Image
+    buf = _io.BytesIO()
+    Image.new("RGBA", (400, 120), color).save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def test_client_logo_upload_by_pic_and_admin_only(tx):
+    alpha = client_id(ALPHA)
+    assert api("pic.alpha@amiga.test").get(f"/clients/{alpha}/logo").status_code == 404
+    r = api("pic.alpha@amiga.test").put(f"/clients/{alpha}/logo", json={"image": _png()})
+    assert r.status_code == 200 and r.json()["logo_updated_at"]
+    logo = api("pic.alpha@amiga.test").get(f"/clients/{alpha}/logo")
+    assert logo.status_code == 200 and logo.content.startswith(b"\x89PNG")
+    # PIC klien lain dan Finance Reviewer tidak boleh mengganti logo Alpha
+    assert api("pic.beta@amiga.test").put(f"/clients/{alpha}/logo", json={"image": _png()}).status_code == 403
+    assert api("reviewer1@amiga.test").put(f"/clients/{alpha}/logo", json={"image": _png()}).status_code == 403
+    assert api("admin@amiga.test").delete(f"/clients/{alpha}/logo").status_code == 200
+    assert api("pic.alpha@amiga.test").get(f"/clients/{alpha}/logo").status_code == 404
+    assert api("pic.alpha@amiga.test").put(f"/clients/{alpha}/logo", json={"image": "bukan gambar"}).status_code == 422

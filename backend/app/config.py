@@ -35,13 +35,8 @@ class Settings(BaseSettings):
     reviewer_overload_threshold: int = 5
     due_soon_days: int = 2
 
-    # Voucher (format nomor dan teks batas otorisasi masih menunggu tim Keuangan AMIGA)
+    # Format nomor voucher (masih menunggu tim Keuangan AMIGA)
     voucher_prefix: str = "VCH"
-    voucher_authorization_text: str = (
-        "BATAS OTORISASI: Voucher ini disusun dan ditinjau oleh AMIGA berdasarkan invoice vendor. "
-        "Voucher ini BUKAN persetujuan pembayaran. Keputusan dan pelaksanaan pembayaran sepenuhnya "
-        "menjadi wewenang Client Approver."
-    )
 
     # RAG /ask
     # Titan Text sudah end of life, jadi LLM memakai Amazon Nova (tersedia di ap-southeast-1).

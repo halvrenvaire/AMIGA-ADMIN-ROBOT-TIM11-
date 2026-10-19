@@ -165,6 +165,7 @@ class ClientRef(BaseModel):
 
     id: uuid.UUID
     name: str
+    logo_updated_at: datetime | None = None  # ada logo klien untuk kop voucher bila terisi
 
 
 class ClientOverview(ClientRef):

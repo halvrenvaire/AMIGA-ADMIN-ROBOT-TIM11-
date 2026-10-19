@@ -68,6 +68,9 @@ class Client(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(200), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Logo klien (PNG) di kop Voucher Pengeluaran, menggantikan logo amiga (feedback owner 19 Okt 2026)
+    logo_png: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    logo_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class User(Base):

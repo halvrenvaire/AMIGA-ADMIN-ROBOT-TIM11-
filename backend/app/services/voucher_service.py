@@ -1,6 +1,7 @@
 """Pembuatan voucher PDF setelah disetujui (F5). Target <= 3 detik (FR-5.1).
 
-Teks batas otorisasi dicetak di dalam PDF sehingga tidak bisa dihapus dari layar (FR-5.2).
+Kop memakai logo klien yang mengajukan. Teks batas otorisasi (FR-5.2) tidak lagi dicetak atas permintaan
+owner (19 Okt 2026).
 """
 import io
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from fpdf import FPDF, FontFace
+from PIL import Image
 from fpdf.enums import TableCellFillMode
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -41,6 +43,31 @@ def brand_header(pdf: FPDF, page_width: float, title: str) -> None:
     pdf.rect(0, 24, page_width, 1.2, style="F")
     pdf.set_fill_color(*PINK)
     pdf.rect(0, 25.2, page_width, 0.8, style="F")
+    pdf.set_text_color(15, 23, 42)
+
+
+def client_header(pdf: FPDF, client, title: str) -> None:
+    """Kop Voucher Pengeluaran: logo klien yang mengajukan (nama klien bila belum ada logo), jenis dokumen
+    di kanan. Logo dan tagline amiga tidak dicetak (feedback owner 19 Okt 2026)."""
+    logo = getattr(client, "logo_png", None)
+    if logo:
+        with Image.open(io.BytesIO(logo)) as img:
+            ratio = img.width / img.height
+        h = 13 if 13 * ratio <= 70 else 70 / ratio  # tinggi 13 mm, lebar maks. 70 mm
+        pdf.image(io.BytesIO(logo), x=12, y=7 + (13 - h) / 2, h=h)
+    else:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_xy(12, 9)
+        pdf.cell(110, 7, _t(client.name))
+    pdf.set_text_color(51, 65, 85)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_xy(210 - 12 - 80, 10.5)
+    pdf.cell(80, 5, title, align="R")
+    pdf.set_draw_color(51, 65, 85)
+    pdf.set_line_width(0.4)
+    pdf.line(12, 24, 198, 24)
+    pdf.set_line_width(0.2)
     pdf.set_text_color(15, 23, 42)
 
 
@@ -89,7 +116,7 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.set_auto_page_break(True, margin=18)
     pdf.add_page()
 
-    brand_header(pdf, 210, "Simulasi Voucher Pengeluaran" if simulation else "Voucher Pengeluaran")
+    client_header(pdf, doc.client, "Simulasi Voucher Pengeluaran" if simulation else "Voucher Pengeluaran")
     pdf.set_y(32)
 
     pdf.set_font("Helvetica", "B", 13)
@@ -97,12 +124,8 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
     n_files = len(getattr(doc, "files", None) or [])
-    rows = [
-        ("Klien", doc.client.name), ("Request ID", doc.request_id),
-        ("Vendor", ex.vendor_name), ("No. Invoice" if n_files <= 1 else f"No. Invoice ({n_files})", ex.invoice_no),
-        ("Tgl. Invoice", ex.invoice_date.strftime("%d-%m-%Y") if ex.invoice_date else None),
-        ("Tgl. Voucher", "(terbit setelah disetujui)" if simulation else approved_at.strftime("%d-%m-%Y")),
-    ]
+    # Klien, Request ID, vendor, serta nomor dan tanggal invoice tidak dicetak (feedback owner 19 Okt 2026)
+    rows = [("Tgl. Voucher", "(terbit setelah disetujui)" if simulation else approved_at.strftime("%d-%m-%Y"))]
     for label, value in rows:
         pdf.cell(32, 6, label)
         # multi_cell: beberapa nomor invoice dalam satu voucher bisa lebih dari satu baris
@@ -155,22 +178,9 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     # Rekening tujuan tidak dicetak (feedback owner): pengecekan rekening tetap berjalan di sistem
     pdf.ln(2)
 
-    signed = _signature_blocks(pdf, doc, signatures or [], approved_at)
-    if signed:
-        pdf.set_font("Helvetica", "I", 7)
-        pdf.set_text_color(90, 100, 105)
-        pdf.multi_cell(0, 3.6, f"Tanda tangan elektronik pada {signed} kotak dibubuhkan sistem AMIGA saat voucher terbit "
-                               f"({approved_at.strftime('%d-%m-%Y %H:%M')} WIB) dari spesimen yang didaftarkan PIC Klien. "
-                               f"Pembubuhan tercatat di jejak audit {doc.request_id}.",
-                       new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(15, 23, 42)
-        pdf.ln(2)
-    pdf.ln(1)
-
-    pdf.set_draw_color(*TEAL)
-    pdf.set_fill_color(254, 243, 227)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.multi_cell(0, 5, _t(settings.voucher_authorization_text), border=1, fill=True, padding=3)
+    # Catatan tanda tangan elektronik dan kotak batas otorisasi tidak dicetak (feedback owner 19 Okt 2026);
+    # pembubuhan tanda tangan tetap tercatat di jejak audit
+    _signature_blocks(pdf, doc, signatures or [], approved_at)
     if simulation:
         _simulation_mark(pdf)
     return bytes(pdf.output())

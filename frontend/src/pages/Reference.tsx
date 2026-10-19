@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Building2, PenLine, Pencil, Plus, ShieldCheck, Star } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { ClientLogo } from "../components/ClientLogo";
 import { SignatureImage, SignatureModal } from "../components/Signature";
 import { Alert, Loading, Modal, useApi } from "../components/ui";
 import type { ClientRef, Me, Signatory, TaxRate, Vendor } from "../types";
@@ -283,7 +284,7 @@ export function Signatories() {
             </table>
           )}
         </section>
-        <SignatureAside clientName={clientName} items={items} me={user} isPic={canEdit} />
+        <SignatureAside clientId={clientId} clientName={clientName} items={items} me={user} isPic={canEdit} />
       </div>
       )}
       {signing && (
@@ -300,14 +301,21 @@ export function Signatories() {
 }
 
 /** Pratinjau baris tanda tangan di voucher, supaya PIC tahu hasil daftar ini di dokumen akhir. */
-function SignatureAside({ clientName, items, me, isPic }: {
-  clientName: string; items: Signatory[]; me: Me | null; isPic: boolean;
+function SignatureAside({ clientId, clientName, items, me, isPic }: {
+  clientId: string; clientName: string; items: Signatory[]; me: Me | null; isPic: boolean;
 }) {
+  const client = useApi(() => api.get<ClientRef>(`/clients/${clientId}`), [clientId]);
   const active = items.filter((s) => s.is_active);
   const first = active.find((s) => s.is_default) ?? active[0];
   const signed = active.filter((s) => s.signature_updated_at).length;
   return (
     <aside className="aside">
+      <section className="card panel">
+        <div className="panel-head"><div><h2>Logo di kop voucher</h2><p>Dicetak di kiri atas Voucher Pengeluaran {clientName}</p></div></div>
+        {client.data && <ClientLogo clientId={clientId} clientName={clientName} version={client.data.logo_updated_at ?? null}
+                                    canEdit={isPic} onChange={client.reload} />}
+        <small className="muted">PNG transparan paling rapi. Berlaku untuk voucher yang terbit setelah logo diunggah.</small>
+      </section>
       <section className="card panel">
         <div className="panel-head"><div><h2>Pratinjau di voucher</h2><p>Baris tanda tangan saat unggah dengan pilihan default</p></div></div>
         <div className="sign-preview">
