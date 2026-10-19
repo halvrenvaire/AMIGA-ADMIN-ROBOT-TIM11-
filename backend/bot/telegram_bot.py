@@ -57,12 +57,12 @@ COMMANDS = [
 ]
 
 STATUS_LABEL = {
-    "QUEUED": "Antre", "PROCESSING": "Diproses AI", "READY_FOR_REVIEW": "Siap ditinjau",
+    "QUEUED": "Antre", "PROCESSING": "Diproses AI", "DRAFT": "Draf", "READY_FOR_REVIEW": "Siap ditinjau",
     "EXCEPTION": "Ada kendala", "AMIGA_REVIEWED": "Disetujui", "SENT_TO_CLIENT": "Diserahkan",
     "CANCELLED": "Dibatalkan",
 }
 STATUS_ICON = {
-    "QUEUED": "⏳", "PROCESSING": "🤖", "READY_FOR_REVIEW": "🔎", "EXCEPTION": "⚠️",
+    "QUEUED": "⏳", "PROCESSING": "🤖", "DRAFT": "📝", "READY_FOR_REVIEW": "🔎", "EXCEPTION": "⚠️",
     "AMIGA_REVIEWED": "✅", "SENT_TO_CLIENT": "📨", "CANCELLED": "🚫",
 }
 ISSUE_LABEL = {
@@ -183,6 +183,9 @@ def format_processing_result(doc: dict) -> str:
                      f"{rupiah(doc['total']) if doc.get('total') is not None else '-'}")
     if status == "READY_FOR_REVIEW":
         lines.append(f"Invoice lolos verifikasi dan menunggu Finance Reviewer ({doc.get('assigned_reviewer') or '-'}).")
+    if status == "DRAFT":
+        lines.append("Draf siap. Periksa data per invoice dan simulasi voucher di dashboard, lalu kirim ke "
+                     "Finance Reviewer (bisa juga lewat tombol di bawah).")
     issues = format_issues(doc)
     if issues:
         lines += ["\nKendala yang perlu Anda tindak lanjuti:", *issues,
@@ -634,6 +637,10 @@ class AmigaBot:
             if link is None:
                 return login_instructions()
             user = link.user
+        if data.startswith("sub:"):
+            sent = self.amiga.request(user, "POST", f"/documents/{data[4:]}/submit")
+            return (f"📤 {sent['request_id']} dikirim ke Finance Reviewer ({sent.get('assigned_reviewer') or '-'}).\n"
+                    f"Status: {STATUS_LABEL.get(sent['status'], sent['status'])}")
         draft = self._draft(chat_id, user)
         if draft is None:
             return "Pengajuan ini sudah tidak aktif. Kirim ulang file PDF invoice untuk memulai."
@@ -696,12 +703,15 @@ class AmigaBot:
                 if detail["status"] not in IN_PROGRESS or time.time() >= deadline:
                     break
                 time.sleep(interval)
+            buttons = None
             if detail["status"] in IN_PROGRESS:
                 text = (f"⏳ {detail['request_id']} masih diproses. Cek lagi nanti dengan "
                         f"/status {detail['request_id']}")
             else:
                 text = format_processing_result(detail)
-            self.tg.send_message(chat_id, text)
+                if detail["status"] == "DRAFT":
+                    buttons = [[("📤 Kirim ke reviewer", f"sub:{detail['id']}")]]
+            self.tg.send_message(chat_id, text, buttons)
         except Exception:
             log.exception("Gagal memantau hasil proses dokumen")
 

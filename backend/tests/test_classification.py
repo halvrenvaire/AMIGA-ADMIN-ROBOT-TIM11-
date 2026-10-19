@@ -6,7 +6,7 @@ import pytest
 from app.services.extraction_service import ExtractedLine, parse_response
 from tests.test_documents import api, codes, detail, extractor, invoice, tx, upload  # noqa: F401
 from tests.test_reference import add_vendor
-from tests.test_review import NAMES, audit
+from tests.test_review import NAMES, audit, edit_file
 
 PIC = "pic.alpha@amiga.test"
 
@@ -96,11 +96,15 @@ def test_receipt_becomes_draft_with_missing_data_and_no_voucher(extractor):
 def test_receipt_cannot_be_turned_into_invoice_or_accepted_while_incomplete(extractor):
     extractor.result = receipt()
     doc = detail(upload().json()["id"])
+    # Data wajib belum lengkap: masih di tangan PIC, reviewer belum bisa memutuskan
+    assert doc["status"] == "EXCEPTION"
     rev = api("reviewer1@amiga.test")
     url = f"/documents/{doc['id']}/classification"
+    assert rev.post(url, json={"decision": "RECEIPT_ACCEPTED", "reason": "Struk sah"}).status_code == 409
+    # PIC melengkapi lalu mengirim; struk tetap tidak bisa dijadikan invoice resmi
+    edit_file(doc["id"], invoice_no="STRUK-1", bank_name="BCA", account_no="777", account_name="PT Vendor Jaya")
+    assert api(PIC).post(f"/documents/{doc['id']}/submit").status_code == 200
     assert rev.post(url, json={"decision": "INVOICE", "reason": "Kelihatan seperti invoice"}).status_code == 422
-    r = rev.post(url, json={"decision": "RECEIPT_ACCEPTED", "reason": "Struk sah untuk reimbursement"})
-    assert r.status_code == 409 and "MISSING_EVIDENCE" in r.json()["detail"]
 
 
 def test_receipt_accepted_only_with_complete_data_and_verified_account(extractor):
@@ -128,7 +132,8 @@ def test_receipt_accepted_only_with_complete_data_and_verified_account(extractor
 def test_uncertain_document_needs_manual_review(extractor):
     extractor.result = invoice(doc_class="UNCERTAIN", document_type="Tidak jelas", not_invoice_reason="Hasil pindai buram")
     doc = detail(upload().json()["id"])
-    assert doc["status"] == "EXCEPTION" and ("NEEDS_MANUAL_REVIEW", None) in codes(doc)
+    # Perlu pemeriksaan manual tidak menahan pengiriman; reviewer yang memeriksa
+    assert doc["status"] == "READY_FOR_REVIEW" and ("NEEDS_MANUAL_REVIEW", None) in codes(doc)
 
     r = api("reviewer1@amiga.test").post(f"/documents/{doc['id']}/classification",
                                          json={"decision": "INVOICE", "reason": "Dicek manual: invoice resmi vendor"})

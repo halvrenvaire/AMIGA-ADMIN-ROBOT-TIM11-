@@ -34,12 +34,19 @@ export function Submissions() {
   const docs = useDocs({ status, request_type: category }, [status, category]);
   const all = useDocs({}, []);
   const exceptions = all.data?.filter((d) => d.status === "EXCEPTION").length ?? 0;
+  const drafts = all.data?.filter((d) => d.status === "DRAFT").length ?? 0;
   return (
     <>
       <div className="page-head">
         <div><h1>Pengajuan saya</h1><p>Semua invoice klien Anda beserta statusnya.</p></div>
         <Link className="btn primary" to="/unggah"><UploadIcon /> Buat voucher</Link>
       </div>
+      {drafts > 0 && (
+        <Alert kind="info">
+          <span>{drafts} <b>draf</b> belum dikirim ke reviewer. Periksa datanya lalu klik &quot;Kirim ke reviewer&quot;.{" "}
+            <button className="btn sm" onClick={() => setStatus("DRAFT")}>Tampilkan</button></span>
+        </Alert>
+      )}
       {exceptions > 0 && (
         <Alert kind="warn">
           <span>{exceptions} dokumen <b>ada kendala</b> dan menunggu perbaikan Anda.{" "}

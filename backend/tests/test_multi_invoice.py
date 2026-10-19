@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from app.config import settings
 from tests.test_documents import (  # noqa: F401
-    api, client_id, codes, detail, extractor, invoice, make_pdf, tx,
+    submit_draft, api, client_id, codes, detail, extractor, invoice, make_pdf, tx,
 )
 from app.services.extraction_service import ExtractedLine, ExtractionError
 
@@ -14,7 +14,9 @@ def upload_many(pdfs, **form):
     data = {"client_id": client_id("PT Klien Alpha"), "request_type": "Voucher Pengeluaran Vendor", "channel": "Email",
             "submitted_date": "2026-10-15", **form}
     files = [("files", (f"inv{i}.pdf", pdf, "application/pdf")) for i, pdf in enumerate(pdfs, start=1)]
-    return api(PIC).post("/documents", data=data, files=files)
+    r = api(PIC).post("/documents", data=data, files=files)
+    submit_draft(r)
+    return r
 
 
 def second_invoice(**kw):

@@ -11,6 +11,7 @@ const ACTION: Record<string, [string, "" | "ok" | "warn" | "bad"]> = {
   EXTRACTED: ["AI selesai membaca invoice", ""],
   FIXED_BY_PIC: ["Diperbaiki PIC", "warn"],
   PIC_NOTE: ["Catatan PIC", ""],
+  SUBMITTED_TO_REVIEW: ["Dikirim PIC ke Finance Reviewer", "ok"],
   REPROCESS_REQUESTED: ["Diminta proses ulang", "warn"],
   CORRECTED_BY_REVIEWER: ["Dikoreksi reviewer", "warn"],
   REVERIFIED: ["Verifikasi ulang menemukan kendala", "warn"],

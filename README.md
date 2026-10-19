@@ -55,7 +55,7 @@ AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi
 
 ## Alur dokumen (BPMN)
 
-Setiap invoice melewati **6 status** dengan **3 titik keputusan**: verifikasi sistem, keputusan reviewer, dan cek Segregation of Duties. Selama voucher belum terbit, pengaju bisa **membatalkan** pengajuan (status `CANCELLED`, alasan wajib); datanya tetap tersimpan dan invoice yang sama boleh diajukan ulang.
+Setiap invoice melewati **7 status** dengan **3 titik keputusan**: verifikasi sistem, keputusan reviewer, dan cek Segregation of Duties. Hasil bacaan AI berhenti di **Draf** (`DRAFT`): PIC memeriksa dan mengedit data **per invoice**, melihat **simulasi voucher**, lalu mengirimnya ke Finance Reviewer. Reviewer **tidak mengedit**; hanya Setujui atau Kembalikan ke PIC (feedback owner, Tahap 3). Selama voucher belum terbit, pengaju bisa **membatalkan** pengajuan (status `CANCELLED`, alasan wajib); datanya tetap tersimpan dan invoice yang sama boleh diajukan ulang.
 
 ```mermaid
 flowchart TD
@@ -67,9 +67,10 @@ flowchart TD
     T3 --> T4[Sistem: verifikasi angka,<br/>kelengkapan & duplikasi]
     T4 --> G2{Lolos<br/>verifikasi?}
     G2 -- Tidak --> T5[Sistem: tandai <b>EXCEPTION</b><br/>+ kode & alasan]
-    T5 --> T6[PIC Klien: lengkapi /<br/>perbaiki data]
-    T6 -- "Ekstraksi & verifikasi ulang<br/>(Request ID sama)" --> T3
-    G2 -- Ya --> T7[Finance Reviewer: tinjau & koreksi<br/><b>READY_FOR_REVIEW</b>]
+    T5 --> T6[PIC Klien: edit data per invoice,<br/>lihat simulasi voucher]
+    G2 -- Ya --> TD[Sistem: <b>DRAFT</b>] --> T6
+    T6 -- "Simpan: verifikasi ulang<br/>(Request ID sama)" --> T4
+    T6 -- "Kirim ke reviewer<br/>(tanpa kendala wajib)" --> T7[Finance Reviewer: periksa, tanpa edit<br/><b>READY_FOR_REVIEW</b>]
     T7 --> G3{Keputusan<br/>reviewer}
     G3 -- "Kembalikan ke PIC<br/>(wajib alasan)" --> T6
     G3 -- Setujui --> T8[Sistem: cek<br/>Segregation of Duties]
@@ -86,7 +87,8 @@ flowchart TD
 Catatan alur:
 
 - **AI Engine hanya mengekstrak.** Verifikasi, cek SoD, dan pembuatan voucher dilakukan **Sistem**.
-- EXCEPTION bisa datang dari verifikasi sistem atau dari reviewer yang mengembalikan dokumen. Setelah PIC memperbaiki, dokumen kembali ke ekstraksi dengan **Request ID yang sama**.
+- EXCEPTION bisa datang dari verifikasi sistem atau dari reviewer yang mengembalikan dokumen. PIC memperbaiki di editor yang sama; setiap simpan memverifikasi ulang dengan **Request ID yang sama** (tanpa kendala wajib → kembali Draf).
+- **Kendala wajib** (harus dibereskan PIC sebelum dikirim): `MISSING_EVIDENCE`, `CALCULATION_DISCREPANCY`, `VENDOR_MISMATCH`, `NOT_AN_INVOICE`, `EXTRACTION_FAILED`, `ACCOUNT_MISMATCH`. Kendala lain (`POSSIBLE_DUPLICATE`, `RECEIPT_NOT_INVOICE`, `NEEDS_MANUAL_REVIEW`) ikut terkirim dan diputuskan reviewer.
 - Pengalihan oleh **Service Lead** terpisah dari alur SoD. Pengalihan ini hanya untuk pemerataan beban, dan status dokumen tidak berubah.
 - Persetujuan dan pembayaran oleh **Client Approver** terjadi di luar sistem.
 - Setiap aktivitas, perubahan data (nilai awal → nilai baru), penolakan, dan pengalihan dicatat permanen di **jejak audit**.
@@ -183,8 +185,8 @@ PoC dinyatakan siap demo bila **8 skenario** di bawah lulus semua dan target wak
 | 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | ✅ lulus E2E (Cypress) |
 | 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | ✅ lulus E2E (Cypress) |
 | 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | ✅ lulus E2E (Cypress) |
-| 7 | Jejak audit | Reviewer mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | ✅ lulus E2E (Cypress) |
-| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE | Kembali ke ekstraksi dengan Request ID sama, diverifikasi ulang, lalu READY_FOR_REVIEW | ✅ lulus E2E (Cypress) |
+| 7 | Jejak audit | Reviewer tidak bisa mengedit dan mengembalikan ke PIC; PIC mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | ✅ lulus E2E (Cypress) |
+| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE di editor draf | Diverifikasi ulang dengan Request ID sama → Draf, lalu dikirim → READY_FOR_REVIEW | ✅ lulus E2E (Cypress) |
 
 Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD v2, tetapi tetap diuji dengan test otomatis.
 
@@ -443,17 +445,21 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PATCH | `/admin/users/{id}/active` | System Admin: aktifkan/nonaktifkan akun |
 | POST | `/admin/users/{id}/password` | System Admin: reset password pengguna lain (sesi pengguna itu keluar) |
 | GET/POST | `/admin/clients` | System Admin: daftar dan tambah klien |
-| POST | `/documents` | PIC Klien / Intake Support: buat Voucher Pengeluaran (form: `client_id`, `request_type` = kategori `Voucher Pengeluaran Vendor` / `Voucher Pengeluaran Reimburse` / `Lainnya`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 file bukti untuk satu voucher (Reimburse: sampai 20), `signatory_ids` opsional = pemberi persetujuan berurutan, `submitter_name` opsional = nama di kotak "Diajukan oleh" bila bukan PIC pengaju). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice lalu hasilnya digabung |
+| POST | `/documents` | PIC Klien / Intake Support: buat Voucher Pengeluaran (form: `client_id`, `request_type` = kategori `Voucher Pengeluaran Vendor` / `Voucher Pengeluaran Reimburse` / `Lainnya`, `channel` = Email/WhatsApp/Lainnya, `submitted_date`, `due_date` opsional, `files` = 1–10 file bukti untuk satu voucher (Reimburse: sampai 20), `signatory_ids` opsional = pemberi persetujuan berurutan, `submitter_name` opsional = nama di kotak "Diajukan oleh" bila bukan PIC pengaju). Mengembalikan satu Request ID dan status QUEUED; AI membaca tiap invoice, hasilnya disimpan per invoice dan digabung, lalu berhenti di DRAFT (atau EXCEPTION bila ada kendala wajib) |
 | GET | `/documents` | Dokumen milik klien yang ditugaskan. Filter: `status`, `client_id`, `reviewer_id`, `problem=true`, `due_within_days`, `q` (Request ID/vendor), `request_type` (kategori), `sort=terbaru` atau `tenggat` |
 | GET | `/documents/{id}` | Status, kode & alasan kendala, data hasil ekstraksi, isian PIC |
 | GET | `/documents/{id}/file` | PDF asli |
-| POST | `/documents/{id}/fix` | PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}` |
-| POST | `/documents/{id}/cancel` | PIC Klien / Intake Support: batalkan pengajuan saat EXCEPTION atau READY_FOR_REVIEW. Body: `{"reason": "..."}` (min. 5 karakter). Status → CANCELLED, kendala ditutup, tercatat di jejak audit; tidak dihitung sebagai duplikat |
-| POST | `/documents/{id}/reprocess` | Finance Reviewer: proses ulang dokumen yang gagal dibaca AI |
-| PUT | `/documents/{id}/extraction` | Finance Reviewer: **Simpan & verifikasi ulang**. Body: `{"fields": {"total": "950000"}, "line_items": [...]}` (`line_items` opsional, menggantikan seluruh rincian) |
+| GET | `/documents/{id}/files/{position}` | PDF satu file bukti (layar edit per invoice) |
+| PUT | `/documents/{id}/files/{position}/data` | PIC Klien / Intake Support: simpan data **satu invoice** saat DRAFT/EXCEPTION. Body = data lengkap invoice itu: `vendor_name`, `invoice_no`, `invoice_date`, `total`, `bank_name`, `account_no`, `account_name`, `line_items`. Data voucher disusun ulang dari semua invoice, diverifikasi ulang, perubahan dicatat `FIXED_BY_PIC` (nilai awal → baru) |
+| GET | `/documents/{id}/voucher-preview` | Simulasi Voucher Pengeluaran bertanda SIMULASI (tanpa nomor dan tanda tangan elektronik), lengkap dengan lampiran |
+| POST | `/documents/{id}/submit` | PIC Klien / Intake Support: kirim draf ke Finance Reviewer → READY_FOR_REVIEW. 409 bila masih ada kendala wajib. Pengirim dihitung pihak pengaju (SoD) |
+| POST | `/documents/{id}/fix` | (lama) PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}`. Dashboard kini memakai `PUT .../files/{position}/data` |
+| POST | `/documents/{id}/cancel` | PIC Klien / Intake Support: batalkan pengajuan saat DRAFT, EXCEPTION, atau READY_FOR_REVIEW. Body: `{"reason": "..."}` (min. 5 karakter). Status → CANCELLED, kendala ditutup, tercatat di jejak audit; tidak dihitung sebagai duplikat |
+| POST | `/documents/{id}/reprocess` | PIC Klien / Intake Support / Finance Reviewer: proses ulang dokumen yang gagal dibaca AI |
+| PUT | `/documents/{id}/extraction` | **Dicabut** (403): Finance Reviewer tidak mengedit data; kembalikan ke PIC dengan alasan |
 | POST | `/documents/{id}/approve` | Finance Reviewer: **Setujui**. Pengunggah ditolak (403) dan dokumen dialihkan otomatis; bila lolos → AMIGA_REVIEWED + voucher |
 | POST | `/documents/{id}/return` | Finance Reviewer: **Kembalikan ke PIC**. Body: `{"reason": "..."}` (wajib) |
-| POST | `/documents/{id}/dismiss-duplicate` | Finance Reviewer: tandai bukan duplikat (alasan wajib) → READY_FOR_REVIEW |
+| POST | `/documents/{id}/dismiss-duplicate` | Finance Reviewer: tandai bukan duplikat (alasan wajib) saat READY_FOR_REVIEW; status tetap |
 | GET | `/documents/{id}/voucher` | Pratinjau voucher PDF. `?download=true` = unduh; oleh PIC Klien (atau Intake Support pengunggah) → SENT_TO_CLIENT |
 | GET | `/dashboard/summary` | Service Lead / Finance Reviewer: jumlah per status, bermasalah, tenggat dekat & lewat, beban per reviewer |
 | POST | `/documents/{id}/reassign` | Service Lead: alihkan ke reviewer lain (status tetap). Body: `{"reviewer_id": "...", "reason": "..."}` |
@@ -504,7 +510,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Pilihan saluran | Email, WhatsApp, Lainnya | PRD menyebut "mis. Email/WhatsApp" |
 | Format Request ID | `REQ-YYYYMMDD-XXXXXX` (6 karakter heksadesimal acak) | Mudah dibaca dan dicatat PIC |
 | Persetujuan dan kendala | **Setujui** ditolak (409) selama masih ada kendala terbuka, termasuk kendala baru dari koreksi reviewer | Voucher tidak boleh terbit dari data yang gagal verifikasi |
-| Duplikat yang ternyata bukan duplikat | Finance Reviewer (bukan pengunggah) bisa **menandai bukan duplikat** dengan alasan wajib → READY_FOR_REVIEW | Tanpa ini dokumen tertahan di EXCEPTION selamanya; PRD belum mengatur (pertanyaan terbuka 2) |
+| Duplikat yang ternyata bukan duplikat | Finance Reviewer (bukan pihak pengaju) bisa **menandai bukan duplikat** dengan alasan wajib saat meninjau | PRD belum mengatur (pertanyaan terbuka 2) |
 | Serah terima voucher | Status jadi SENT_TO_CLIENT hanya bila diunduh **PIC Klien** atau **Intake Support yang mengunggah dokumen itu**. Pratinjau dan unduhan reviewer tidak mengubah status | Pengguna peran ganda yang mengunduh sebagai reviewer tidak boleh dianggap menyerahkan ke klien |
 | Nomor voucher | `VCH/YYYY/MM/NNNN`, urut per bulan (WIB). Teks batas otorisasi bisa diganti lewat `VOUCHER_AUTHORIZATION_TEXT` di `.env` | **Sementara**, menunggu format resmi dari tim Keuangan (pertanyaan terbuka 4) |
 | Beban berlebih | Reviewer dengan **> 5** dokumen READY_FOR_REVIEW ditandai berlebih; tenggat "dekat" = ≤ 2 hari. Bisa diubah lewat `REVIEWER_OVERLOAD_THRESHOLD` dan `DUE_SOON_DAYS` | **Sementara**, menunggu batas resmi (pertanyaan terbuka 3) |
@@ -514,7 +520,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Beberapa invoice per voucher | 1–10 PDF per pengajuan, masing-masing maks. 5 halaman dan 10 MB. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Satu voucher hanya untuk satu vendor dan satu rekening (`VENDOR_MISMATCH`); duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
 | Vendor per klien | Data vendor milik masing-masing klien (tidak dibagi lintas klien) | Data rekening vendor termasuk data sensitif dan mengikuti aturan isolasi klien |
 | Halaman awal | Dashboard metrik untuk semua peran selain System Admin | Permintaan owner: metrik utama terlihat pertama |
-| `POSSIBLE_DUPLICATE` | Membuat status **EXCEPTION** | Sesuai PRD v2 dan target "0 duplikat lolos" |
+| `POSSIBLE_DUPLICATE` | Tidak menahan draf; ikut terkirim dan **Setujui ditolak** sampai reviewer menandai bukan duplikat (atau mengembalikan ke PIC) | Alur draf (Tahap 3): keputusan duplikat ada di reviewer; target "0 duplikat lolos" tetap terjaga |
 | Kembalikan ke PIC | Kode kendala `RETURNED_BY_REVIEWER` + alasan wajib | PRD v2 tidak memberi nama kode |
 | Jejak audit permanen | Ditegakkan dengan **trigger database**, bukan hanya di aplikasi | Bahkan akses langsung ke database tidak bisa mengubah atau menghapus catatan |
 | Sumber pengetahuan Asisten | `docs/sop.md` di repo adalah sumber kebenaran; file di S3 dengan nama sama dilewati | Mencegah salinan SOP lama ikut menjawab |

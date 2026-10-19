@@ -89,7 +89,11 @@ def test_pic_uploads_invoice_and_gets_processing_result(bot):
     _click(bot, chat, "up:send")
     sent = [text for _, text in bot[1].sent]
     assert "Terkirim ke AMIGA" in sent[-2] and "REQ-" in sent[-2]
-    assert "selesai diproses: Siap ditinjau" in sent[-1] and "PT Vendor Jaya" in sent[-1]
+    assert "selesai diproses: Draf" in sent[-1] and "PT Vendor Jaya" in sent[-1]
+    [doc] = _documents()
+    assert doc.status.value == "DRAFT"
+    # PIC mengirim draf ke reviewer langsung dari chat
+    assert "dikirim ke Finance Reviewer" in _click(bot, chat, f"sub:{doc.id}")
 
     [doc] = _documents()
     assert doc.status.value == "READY_FOR_REVIEW" and doc.original_filename == "inv-maret.pdf"
@@ -174,7 +178,7 @@ def test_photo_is_accepted_and_uploaded_with_original(bot):
     assert "Untuk perusahaan mana?" in tg.last  # foto juga menampilkan pilihan perusahaan
     _choose(bot, chat)
     _click(bot, chat, "up:send")
-    assert "Siap ditinjau" in tg.last
+    assert "selesai diproses: Draf" in tg.last
     [doc] = _documents()
     assert doc.files[0].source_format == "jpg" and doc.files[0].source_file_key
 

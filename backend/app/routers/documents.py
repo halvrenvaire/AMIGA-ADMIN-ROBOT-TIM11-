@@ -2,7 +2,7 @@
 import io
 import secrets
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import InvalidOperation
 from typing import Annotated, Literal, NamedTuple
 
@@ -23,13 +23,17 @@ from app.models import (
     UserClientAssignment, ValidationIssue,
 )
 from app.schemas.schemas import (
-    CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ReasonRequest, ExtractionOut, FixRequest, IssueItem, SignersUpdate, VoucherOut,
+    CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ExtractionOut, FileDataUpdate,
+    FixRequest, IssueItem, ReasonRequest, SignersUpdate, VoucherOut,
 )
-from app.services import audit_service, file_conversion, signer_service, storage
+from app.services import (
+    audit_service, file_conversion, signer_service, storage, voucher_attachments, voucher_service,
+)
 from app.services.access_rules import accessible_client_ids
 from app.services.account_check import check_account
 from app.services.document_processing import (
-    PIC_FIELDS, classification, parse_pic_value, process_document, set_status,
+    BLOCKING, DATA_FIELDS, PIC_FIELDS, classification, file_data, parse_pic_value, process_document, rebuild_from_files,
+    run_verification, send_to_review, set_status, settle_status,
 )
 
 router = APIRouter(prefix="/documents", tags=["Dokumen Invoice"])
@@ -84,7 +88,7 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         voucher=VoucherOut.model_validate(doc.voucher) if doc.voucher else None,
         vendor=ClientRef(id=doc.vendor.id, name=doc.vendor.name) if doc.vendor else None,
         signers=doc.signers or [],
-        files=[DocumentFileOut.model_validate(f) for f in doc.files],
+        files=[DocumentFileOut.model_validate(f).model_copy(update={"data": file_data(doc, f)}) for f in doc.files],
         cancellation=_cancellation(db, doc),
         classification=classification(doc.extraction),
         account_check=vars(check_account(db, doc)) if doc.extraction else None,
@@ -326,6 +330,117 @@ def get_document_file(document_id: uuid.UUID, user: User = Depends(get_current_u
                     headers={"Content-Disposition": f'inline; filename="{doc.request_id}.pdf"'})
 
 
+def _file(doc: Document, position: int) -> DocumentFile:
+    part = next((f for f in doc.files if f.position == position), None)
+    if part is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File bukti tidak ditemukan.")
+    return part
+
+
+@router.get("/{document_id}/files/{position}", response_class=Response)
+def get_single_file(document_id: uuid.UUID, position: int, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """PDF satu file bukti (dipakai saat PIC mengedit per invoice)."""
+    doc = _get_document(db, user, document_id)
+    part = _file(doc, position)
+    try:
+        data = storage.load(part.file_key)
+    except storage.StorageError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File PDF tidak ditemukan di penyimpanan.")
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{doc.request_id}-{position:02d}.pdf"'})
+
+
+EDITABLE = (DocStatus.DRAFT, DocStatus.EXCEPTION)
+
+
+def _fmt(value) -> str | None:
+    return None if value in (None, "") else str(value)
+
+
+@router.put("/{document_id}/files/{position}/data", response_model=DocumentDetail)
+def update_file_data(document_id: uuid.UUID, position: int, body: FileDataUpdate,
+                     user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """PIC melengkapi/mengedit data SATU invoice (feedback owner: edit per invoice; reviewer tidak mengedit).
+    Data voucher disusun ulang dari semua invoice, diverifikasi ulang, dan statusnya menjadi Draf atau Ada kendala.
+    Setiap perubahan dicatat nilai awal → nilai baru."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Data hanya bisa diedit saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    part = _file(doc, position)
+    old = file_data(doc, part)
+    new = {"vendor_name": (body.vendor_name or "").strip() or None, "invoice_no": (body.invoice_no or "").strip() or None,
+           "invoice_date": body.invoice_date.isoformat() if body.invoice_date else None, "total": _fmt(body.total),
+           "bank_name": (body.bank_name or "").strip() or None, "account_no": (body.account_no or "").strip() or None,
+           "account_name": (body.account_name or "").strip() or None,
+           "line_items": [{"description": (li.description or "").strip() or None, "qty": _fmt(li.qty),
+                           "unit_price": _fmt(li.unit_price), "subtotal": _fmt(li.subtotal)} for li in body.line_items]}
+    label = f"Bukti {position} ({part.original_filename})"
+    changes = [(k, _fmt(old.get(k)), _fmt(new[k])) for k in DATA_FIELDS
+               if (_fmt(old.get(k)) or "") != (_fmt(new[k]) or "")]
+    if (old.get("line_items") or []) != new["line_items"]:
+        changes.append(("line_items", f"{len(old.get('line_items') or [])} baris", f"{len(new['line_items'])} baris"))
+    if not changes:
+        return _detail(db, doc)
+    for field, before, after in changes:
+        audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
+                             field=f"{label}.{field}", old_value=before, new_value=after)
+    part.data = new
+    if any(f == "account_no" for f, _, _ in changes):
+        doc.pic_overrides = {**(doc.pic_overrides or {}), "account_no": new["account_no"] or ""}
+    rebuild_from_files(db, doc)
+    issues = run_verification(db, doc)
+    settle_status(db, doc, issues, "Data diperbarui PIC")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.post("/{document_id}/submit", response_model=DocumentDetail)
+def submit_to_review(document_id: uuid.UUID, user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """PIC mengirim draf ke Finance Reviewer (feedback owner). Ditolak bila masih ada kendala wajib;
+    kendala yang diputuskan reviewer (kemungkinan duplikat, struk, perlu pemeriksaan manual) ikut terkirim."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Hanya draf yang bisa dikirim ke reviewer (sekarang {doc.status.value}).")
+    if doc.extraction is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Data invoice belum ada. Lengkapi data per invoice dulu.")
+    open_issues = list(db.scalars(select(ValidationIssue).where(
+        ValidationIssue.document_id == doc.id, ValidationIssue.resolved.is_(False))))
+    blocking = sorted({i.code.value for i in open_issues if i.code in BLOCKING})
+    if blocking:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Masih ada kendala yang harus dilengkapi dulu: {', '.join(blocking)}.")
+    for issue in open_issues:
+        if issue.code == IssueCode.RETURNED_BY_REVIEWER:
+            issue.resolved = True  # catatan pengembalian sudah ditindaklanjuti PIC
+    audit_service.record(db, user, "SUBMITTED_TO_REVIEW", document_id=doc.id, client_id=doc.client_id,
+                         status_before=doc.status.value, status_after=DocStatus.READY_FOR_REVIEW.value)
+    send_to_review(db, doc, "Dikirim PIC ke Finance Reviewer")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.get("/{document_id}/voucher-preview", response_class=Response)
+def voucher_preview(document_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Simulasi Voucher Pengeluaran sebelum disetujui: bertanda SIMULASI, tanpa nomor voucher dan tanpa
+    tanda tangan elektronik, lengkap dengan lampiran bukti."""
+    doc = _get_document(db, user, document_id)
+    if doc.extraction is None or doc.status in (DocStatus.CANCELLED, DocStatus.QUEUED, DocStatus.PROCESSING):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Simulasi tersedia setelah AI selesai membaca invoice.")
+    now = datetime.now(timezone.utc)
+    pdf = voucher_service.render_voucher(doc, "SIMULASI", user, now, None, simulation=True)
+    try:
+        pdf = voucher_attachments.append_attachments(pdf, doc, "SIMULASI")
+    except storage.StorageError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File bukti tidak ditemukan di penyimpanan.")
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="simulasi-{doc.request_id}.pdf"'})
+
+
 @router.get("/{document_id}/files/{position}/original", response_class=Response)
 def get_original_file(document_id: uuid.UUID, position: int, user: User = Depends(get_current_user),
                       db: Session = Depends(get_db)):
@@ -396,18 +511,20 @@ def reprocess_document(
     document_id: uuid.UUID,
     request: Request,
     background: BackgroundTasks,
-    user: User = Depends(require_roles(Role.FINANCE_REVIEWER)),
+    user: User = Depends(require_roles(Role.PIC_KLIEN, Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER)),
     db: Session = Depends(get_db),
 ):
-    """Proses ulang dokumen yang gagal dibaca AI (FR-2.5)."""
+    """Proses ulang dokumen yang gagal dibaca AI (FR-2.5), oleh PIC dari draf atau oleh Finance Reviewer."""
     doc = _get_document(db, user, document_id)
     failed = db.scalar(select(ValidationIssue.id).where(
         ValidationIssue.document_id == doc.id, ValidationIssue.resolved.is_(False),
         ValidationIssue.code == IssueCode.EXTRACTION_FAILED))
+    if Role.FINANCE_REVIEWER not in user.roles:
+        ensure_submit_access(db, user, doc.client_id)
     if doc.status != DocStatus.EXCEPTION or failed is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Proses ulang hanya untuk dokumen yang gagal dibaca AI.")
     audit_service.record(db, user, "REPROCESS_REQUESTED", document_id=doc.id, client_id=doc.client_id)
-    set_status(db, doc, DocStatus.PROCESSING, "Diproses ulang oleh Finance Reviewer")
+    set_status(db, doc, DocStatus.PROCESSING, f"Diproses ulang oleh {user.full_name}")
     db.commit()
 
     background.add_task(process_document, doc.id, request.app.state.extractor)

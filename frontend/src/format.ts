@@ -11,6 +11,7 @@ export const ROLE_LABEL: Record<Role, string> = {
 export const STATUS_LABEL: Record<DocStatus, string> = {
   QUEUED: "Antre",
   PROCESSING: "Diproses AI",
+  DRAFT: "Draf",
   READY_FOR_REVIEW: "Siap ditinjau",
   EXCEPTION: "Ada kendala",
   AMIGA_REVIEWED: "Disetujui",
@@ -22,7 +23,7 @@ export const STATUS_LABEL: Record<DocStatus, string> = {
 export const REQUEST_CATEGORIES = ["Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya"] as const;
 
 export const STATUS_ORDER: DocStatus[] = [
-  "QUEUED", "PROCESSING", "READY_FOR_REVIEW", "EXCEPTION", "AMIGA_REVIEWED", "SENT_TO_CLIENT", "CANCELLED",
+  "QUEUED", "PROCESSING", "DRAFT", "READY_FOR_REVIEW", "EXCEPTION", "AMIGA_REVIEWED", "SENT_TO_CLIENT", "CANCELLED",
 ];
 
 export const ISSUE_LABEL: Record<IssueCode, string> = {

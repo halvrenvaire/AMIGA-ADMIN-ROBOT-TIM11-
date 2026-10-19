@@ -142,41 +142,55 @@ def test_uat5_uploader_cannot_approve_and_document_is_reassigned(extractor):
 
 # --- UAT 7: koreksi tercatat di jejak audit; field gagal verifikasi ditandai ---
 
-def test_uat7_reviewer_correction_is_audited_and_reverified(extractor):
+def edit_file(doc_id, position=1, email="pic.alpha@amiga.test", **changes):
+    """PIC mengedit data satu invoice (alur baru): kirim data lengkap file itu dengan perubahan."""
+    data = dict(next(f for f in detail(doc_id, email=email)["files"] if f["position"] == position)["data"])
+    data.update(changes)
+    return api(email).put(f"/documents/{doc_id}/files/{position}/data", json=data)
+
+
+def test_reviewer_can_no_longer_edit(extractor):
     doc = ready_doc()
-    reviewer = reviewer_of(doc)
-    r = reviewer.put(f"/documents/{doc['id']}/extraction", json={"fields": {"total": "950000"}})
+    r = reviewer_of(doc).put(f"/documents/{doc['id']}/extraction", json={"fields": {"total": "950000"}})
+    assert r.status_code == 403 and "Kembalikan dokumen ke PIC" in r.json()["detail"]
+
+
+def test_uat7_pic_edit_per_invoice_is_audited_and_reverified(extractor):
+    doc = detail(upload(submit=False).json()["id"])
+    assert doc["status"] == "DRAFT" and doc["assigned_reviewer"] is None
+    r = edit_file(doc["id"], total="950000")
     assert r.status_code == 200
     assert [i["code"] for i in r.json()["issues"]] == ["CALCULATION_DISCREPANCY"]
-    assert r.json()["status"] == "READY_FOR_REVIEW"
-    assert reviewer.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 409
+    assert r.json()["status"] == "EXCEPTION"
+    # Kendala wajib menahan pengiriman ke reviewer
+    assert api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/submit").status_code == 409
 
-    log = audit(doc["id"], "CORRECTED_BY_REVIEWER")[-1]
-    assert (log.field, Decimal(log.old_value), log.new_value) == ("total", Decimal(900000), "950000")
-    assert doc["assigned_reviewer"] in log.actor_label
-    assert log.created_at is not None
+    log = audit(doc["id"], "FIXED_BY_PIC")[-1]
+    assert (log.field, Decimal(log.old_value), log.new_value) == ("Bukti 1 (invoice.pdf).total", Decimal(900000), "950000")
+    assert "Rina" in log.actor_label
 
-    lines = [{"description": li["description"], "qty": li["qty"], "unit_price": li["unit_price"],
-              "subtotal": li["subtotal"]} for li in doc["extraction"]["line_items"]]
+    lines = r.json()["files"][0]["data"]["line_items"]
     lines[2]["subtotal"] = "150000"
-    r = reviewer.put(f"/documents/{doc['id']}/extraction", json={"line_items": lines})
-    assert r.json()["issues"] == []
-    assert audit(doc["id"], "CORRECTED_BY_REVIEWER")[-1].field == "line_items[3].subtotal"
-    assert reviewer.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 200
+    r = edit_file(doc["id"], line_items=lines)
+    assert r.json()["issues"] == [] and r.json()["status"] == "DRAFT"
+    assert Decimal(r.json()["extraction"]["total"]) == Decimal(950000)
+    sent = api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/submit")
+    assert sent.status_code == 200 and sent.json()["status"] == "READY_FOR_REVIEW"
+    assert reviewer_of(sent.json()).post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 200
 
 
-def test_correction_rejects_invalid_values(extractor):
-    doc = ready_doc()
-    reviewer = reviewer_of(doc)
-    assert reviewer.put(f"/documents/{doc['id']}/extraction",
-                        json={"fields": {"total": "9.500.000"}}).status_code == 422
-    assert reviewer.put(f"/documents/{doc['id']}/extraction",
-                        json={"fields": {"status": "x"}}).status_code == 422
+def test_edit_rejects_invalid_values_and_only_in_draft(extractor):
+    doc_id = upload(submit=False).json()["id"]
+    assert edit_file(doc_id, total="9.500.000").status_code == 422
+    assert edit_file(doc_id, invoice_date="31-02-2026").status_code == 422
+    assert api("reviewer1@amiga.test").put(f"/documents/{doc_id}/files/1/data", json={}).status_code == 403
+    api("pic.alpha@amiga.test").post(f"/documents/{doc_id}/submit")
+    assert edit_file(doc_id, total="1").status_code == 409  # sudah dikirim ke reviewer
 
 
 def test_clearing_account_number_flags_missing_evidence(extractor):
-    doc = ready_doc()
-    r = reviewer_of(doc).put(f"/documents/{doc['id']}/extraction", json={"fields": {"account_no": None}})
+    doc_id = upload(submit=False).json()["id"]
+    r = edit_file(doc_id, account_no=None)
     assert [(i["code"], i["field"]) for i in r.json()["issues"]] == [("MISSING_EVIDENCE", "account_no")]
 
 
@@ -193,11 +207,11 @@ def test_return_to_pic_requires_reason_then_pic_resubmits(extractor):
     assert issue["code"] == "RETURNED_BY_REVIEWER"
     assert "Lampirkan invoice revisi" in issue["message"]
 
-    again = api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/fix",
-                                             json={"note": "Invoice revisi sudah diunggah vendor."})
+    # PIC menindaklanjuti lalu mengirim ulang dengan Request ID yang sama
+    again = api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/submit")
     assert again.status_code == 200
     final = detail(doc["id"])
-    assert final["status"] == "READY_FOR_REVIEW"
+    assert final["status"] == "READY_FOR_REVIEW" and final["issues"] == []
     assert final["request_id"] == doc["request_id"]
 
 
@@ -206,15 +220,19 @@ def test_return_to_pic_requires_reason_then_pic_resubmits(extractor):
 def test_reviewer_can_dismiss_false_duplicate_with_reason(extractor):
     upload()
     dup = detail(upload().json()["id"])
-    assert dup["status"] == "EXCEPTION"
+    # Kemungkinan duplikat tidak menahan pengiriman; reviewer yang memutuskan
+    assert dup["status"] == "READY_FOR_REVIEW" and [i["code"] for i in dup["issues"]] == ["POSSIBLE_DUPLICATE"]
     assert api("pic.alpha@amiga.test").post(f"/documents/{dup['id']}/dismiss-duplicate",
                                             json={"reason": "Tagihan bulan berbeda"}).status_code == 403
+    reviewer = reviewer_of(dup)
+    assert reviewer.post(f"/documents/{dup['id']}/approve", json={"account_confirmed": True}).status_code == 409
 
-    r = api("reviewer1@amiga.test").post(f"/documents/{dup['id']}/dismiss-duplicate",
-                                         json={"reason": "Tagihan bulan berbeda, sudah dicek ke vendor"})
+    r = reviewer.post(f"/documents/{dup['id']}/dismiss-duplicate",
+                      json={"reason": "Tagihan bulan berbeda, sudah dicek ke vendor"})
     assert r.status_code == 200
-    assert r.json()["status"] == "READY_FOR_REVIEW"
+    assert r.json()["status"] == "READY_FOR_REVIEW" and r.json()["issues"] == []
     assert audit(dup["id"], "DUPLICATE_DISMISSED")[-1].note.startswith("Tagihan bulan berbeda")
+    assert reviewer.post(f"/documents/{dup['id']}/approve", json={"account_confirmed": True}).status_code == 200
 
 
 def test_uploader_cannot_dismiss_own_duplicate(extractor):
@@ -224,10 +242,9 @@ def test_uploader_cannot_dismiss_own_duplicate(extractor):
     assert r.status_code == 403
 
 
-def test_dismiss_only_when_duplicate_is_the_only_issue(extractor):
-    extractor.result = invoice(account_no=None)
-    doc_id = upload().json()["id"]
-    r = api("reviewer1@amiga.test").post(f"/documents/{doc_id}/dismiss-duplicate", json={"reason": "Bukan duplikat"})
+def test_dismiss_only_when_there_is_a_duplicate(extractor):
+    doc = ready_doc()
+    r = reviewer_of(doc).post(f"/documents/{doc['id']}/dismiss-duplicate", json={"reason": "Bukan duplikat"})
     assert r.status_code == 409
 
 

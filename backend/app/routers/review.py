@@ -6,7 +6,6 @@ Sistem menolak persetujuan itu dan mengalihkan dokumen otomatis ke reviewer lain
 import time
 import uuid
 from datetime import datetime, timezone
-from decimal import InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
@@ -15,16 +14,16 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_roles
 from app.db import get_db
-from app.models import AuditLog, DocStatus, Document, IssueCode, LineItem, Role, User, ValidationIssue
+from app.models import AuditLog, DocStatus, Document, IssueCode, Role, User, ValidationIssue
 from app.routers.documents import _detail, _get_document
 from app.schemas.schemas import (
-    ApproveRequest, AuditItem, ClassificationDecision, DocumentDetail, ReasonRequest, ReviewUpdate,
+    ApproveRequest, AuditItem, ClassificationDecision, DocumentDetail, ReasonRequest,
 )
 from app.services.account_check import MISMATCH, UNVERIFIED, VERIFIED, check_account
 from app.services import audit_service, storage
 from app.services.access_rules import can_access_client
 from app.services.document_processing import (
-    PIC_FIELDS, parse_pic_value, run_verification, send_to_review, set_status, submitter_ids, uploader_ids,
+    BLOCKING, run_verification, set_status, submitter_ids, uploader_ids,
 )
 from app.services.reviewer_assignment import pick_reviewer
 from app.services.voucher_service import create_voucher
@@ -32,7 +31,6 @@ from app.services.voucher_service import create_voucher
 router = APIRouter(prefix="/documents", tags=["Peninjauan & Voucher"])
 
 reviewer_only = require_roles(Role.FINANCE_REVIEWER)
-LINE_ATTRS = ("description", "qty", "unit_price", "subtotal")
 
 
 def _require_status(doc: Document, *allowed: DocStatus) -> None:
@@ -57,55 +55,11 @@ def _name(db: Session, user_id: uuid.UUID | None) -> str:
 
 
 @router.put("/{document_id}/extraction", response_model=DocumentDetail)
-def correct_extraction(document_id: uuid.UUID, body: ReviewUpdate, user: User = Depends(reviewer_only),
-                       db: Session = Depends(get_db)):
-    """Simpan & verifikasi ulang (FR-4.2). Setiap perubahan dicatat nilai awal → nilai baru (FR-8.2).
-    Field yang gagal verifikasi muncul sebagai kendala dan menahan persetujuan."""
-    doc = _get_document(db, user, document_id)
-    _require_status(doc, DocStatus.READY_FOR_REVIEW)
-    if doc.extraction is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Dokumen belum punya data ekstraksi.")
-    unknown = set(body.fields) - set(PIC_FIELDS)
-    if unknown:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            f"Field tidak bisa dikoreksi: {', '.join(sorted(unknown))}.")
-
-    ex = doc.extraction
-    changes: list[tuple[str, str | None, str | None]] = []
-    for name, raw in body.fields.items():
-        try:
-            new = parse_pic_value(name, raw) if raw is not None and raw.strip() else None
-        except (ValueError, InvalidOperation):
-            hint = "format YYYY-MM-DD" if name == "invoice_date" else "angka tanpa titik ribuan, mis. 1250000"
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Nilai {name} tidak valid ({hint}).")
-        old = getattr(ex, name)
-        if old != new:
-            setattr(ex, name, new)
-            changes.append((name, _text(old), _text(new)))
-
-    if body.line_items is not None:
-        old_lines = {line.position: line for line in ex.line_items}
-        new_lines = [LineItem(position=i, **item.model_dump()) for i, item in enumerate(body.line_items, start=1)]
-        for line in new_lines:
-            before = old_lines.get(line.position)
-            for attr in LINE_ATTRS:
-                old, new = (getattr(before, attr) if before else None), getattr(line, attr)
-                if old != new:
-                    changes.append((f"line_items[{line.position}].{attr}", _text(old), _text(new)))
-        for position in sorted(set(old_lines) - {line.position for line in new_lines}):
-            changes.append((f"line_items[{position}]", old_lines[position].description, "(dihapus)"))
-        ex.line_items = new_lines
-
-    for field, old, new in changes:
-        audit_service.record(db, user, "CORRECTED_BY_REVIEWER", document_id=doc.id, client_id=doc.client_id,
-                             field=field, old_value=old, new_value=new)
-    db.flush()
-    issues = run_verification(db, doc)
-    if issues:
-        audit_service.record(db, user, "REVERIFIED", document_id=doc.id, client_id=doc.client_id,
-                             note="Kendala: " + ", ".join(sorted({i.code.value for i in issues})))
-    db.commit()
-    return _detail(db, doc)
+def correct_extraction(document_id: uuid.UUID, user: User = Depends(reviewer_only)):
+    """Dicabut (feedback owner): Finance Reviewer hanya memeriksa. Data diedit PIC per invoice; bila ada yang
+    salah, reviewer mengembalikan dokumen ke PIC dengan alasan."""
+    raise HTTPException(status.HTTP_403_FORBIDDEN,
+                        "Finance Reviewer tidak mengedit data. Kembalikan dokumen ke PIC dengan alasan yang jelas.")
 
 
 @router.post("/{document_id}/approve", response_model=DocumentDetail)
@@ -187,14 +141,13 @@ def return_to_pic(document_id: uuid.UUID, body: ReasonRequest, user: User = Depe
 @router.post("/{document_id}/dismiss-duplicate", response_model=DocumentDetail)
 def dismiss_duplicate(document_id: uuid.UUID, body: ReasonRequest, user: User = Depends(reviewer_only),
                       db: Session = Depends(get_db)):
-    """Tandai bukan duplikat dengan alasan wajib, lalu lanjut ke peninjauan. Hanya bila kendala
-    yang tersisa POSSIBLE_DUPLICATE, dan tidak oleh pengunggah dokumen."""
+    """Tandai bukan duplikat dengan alasan wajib saat meninjau (dokumen sudah dikirim PIC). Status tetap
+    Siap ditinjau; kendala lain (bila ada) tetap harus diputuskan. Tidak oleh pihak pengaju (SoD)."""
     doc = _get_document(db, user, document_id)
-    _require_status(doc, DocStatus.EXCEPTION)
-    open_issues = _open_issues(db, doc)
-    if not open_issues or any(i.code != IssueCode.POSSIBLE_DUPLICATE for i in open_issues):
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "Hanya untuk dokumen yang kendalanya tinggal POSSIBLE_DUPLICATE.")
+    _require_status(doc, DocStatus.READY_FOR_REVIEW)
+    open_issues = [i for i in _open_issues(db, doc) if i.code == IssueCode.POSSIBLE_DUPLICATE]
+    if not open_issues:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dokumen ini tidak memiliki kendala kemungkinan duplikat.")
     if user.id in submitter_ids(db, doc):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Pihak pengaju (pengunggah atau yang memperbaiki data) tidak boleh menandai "
@@ -203,7 +156,6 @@ def dismiss_duplicate(document_id: uuid.UUID, body: ReasonRequest, user: User = 
         issue.resolved = True
     audit_service.record(db, user, "DUPLICATE_DISMISSED", document_id=doc.id, client_id=doc.client_id,
                          note=body.reason.strip())
-    send_to_review(db, doc, "Ditandai bukan duplikat")
     db.commit()
     return _detail(db, doc)
 
@@ -219,7 +171,7 @@ def decide_classification(document_id: uuid.UUID, body: ClassificationDecision, 
     - IRRELEVANT: dokumen ditolak sebagai tidak relevan.
     Tidak oleh pihak pengaju (SoD). Voucher tidak pernah terbit dari langkah ini."""
     doc = _get_document(db, user, document_id)
-    _require_status(doc, DocStatus.EXCEPTION)
+    _require_status(doc, DocStatus.READY_FOR_REVIEW)
     codes = {i.code for i in _open_issues(db, doc)}
     if not codes & {IssueCode.RECEIPT_NOT_INVOICE, IssueCode.NEEDS_MANUAL_REVIEW}:
         raise HTTPException(status.HTTP_409_CONFLICT, "Hanya untuk dokumen struk/nota atau yang perlu pemeriksaan manual.")
@@ -253,10 +205,10 @@ def decide_classification(document_id: uuid.UUID, body: ClassificationDecision, 
     audit_service.record(db, user, "CLASSIFICATION_DECIDED", document_id=doc.id, client_id=doc.client_id,
                          new_value=body.decision, note=body.reason.strip())
     issues = run_verification(db, doc)
-    if issues:
-        set_status(db, doc, DocStatus.EXCEPTION, "Keputusan klasifikasi: " + ", ".join(sorted({i.code.value for i in issues})))
-    else:
-        send_to_review(db, doc, f"Keputusan klasifikasi {body.decision}")
+    blocking = sorted({i.code.value for i in issues if i.code in BLOCKING})
+    if blocking:
+        # Masih ada data wajib yang harus dilengkapi PIC (reviewer tidak mengedit): dikembalikan ke PIC
+        set_status(db, doc, DocStatus.EXCEPTION, "Keputusan klasifikasi; perlu dilengkapi PIC: " + ", ".join(blocking))
     db.commit()
     return _detail(db, doc)
 

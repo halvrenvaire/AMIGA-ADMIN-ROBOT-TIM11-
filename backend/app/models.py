@@ -30,6 +30,8 @@ CATEGORY_VENDOR, CATEGORY_REIMBURSE, CATEGORY_OTHER = REQUEST_CATEGORIES
 class DocStatus(str, enum.Enum):
     QUEUED = "QUEUED"
     PROCESSING = "PROCESSING"
+    # AI selesai membaca; PIC memeriksa/mengedit per invoice lalu mengirim ke reviewer (feedback owner)
+    DRAFT = "DRAFT"
     READY_FOR_REVIEW = "READY_FOR_REVIEW"
     EXCEPTION = "EXCEPTION"
     AMIGA_REVIEWED = "AMIGA_REVIEWED"
@@ -239,6 +241,9 @@ class DocumentFile(Base):
     # File asli bila diunggah sebagai foto (JPG/PNG/WEBP) lalu dikonversi ke PDF di file_key
     source_file_key: Mapped[str | None] = mapped_column(String(500))
     source_format: Mapped[str | None] = mapped_column(String(10))
+    # Data invoice file ini (hasil AI, lalu dilengkapi/diedit PIC per invoice). Data gabungan voucher
+    # di tabel extractions disusun ulang dari data semua file setiap kali PIC menyimpan.
+    data: Mapped[dict | None] = mapped_column(JSONB)
 
     document: Mapped[Document] = relationship(back_populates="files")
 

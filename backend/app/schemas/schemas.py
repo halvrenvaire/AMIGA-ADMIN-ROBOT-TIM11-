@@ -312,6 +312,7 @@ class DocumentFileOut(BaseModel):
     page_count: int
     read_at: datetime | None = None  # selesai dibaca AI pada proses terakhir
     source_format: str | None = None  # "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF
+    data: dict | None = None  # data invoice file ini (diedit PIC per invoice)
 
 
 class CancellationOut(BaseModel):
@@ -349,6 +350,18 @@ class LineItemIn(BaseModel):
     qty: Decimal | None = None
     unit_price: Decimal | None = None
     subtotal: Decimal | None = None
+
+
+class FileDataUpdate(BaseModel):
+    """Data satu invoice yang diedit PIC (feedback owner: edit per invoice). Menggantikan data file itu."""
+    vendor_name: str | None = Field(None, max_length=300)
+    invoice_no: str | None = Field(None, max_length=100)
+    invoice_date: date | None = None
+    total: Decimal | None = None
+    bank_name: str | None = Field(None, max_length=100)
+    account_no: str | None = Field(None, max_length=50)
+    account_name: str | None = Field(None, max_length=200)
+    line_items: list[LineItemIn] = Field(default_factory=list, max_length=300)
 
 
 class ReviewUpdate(BaseModel):

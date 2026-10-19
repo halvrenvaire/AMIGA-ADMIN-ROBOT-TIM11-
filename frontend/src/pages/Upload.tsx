@@ -123,8 +123,8 @@ export function Upload() {
       {result && (
         <Alert kind="ok">
           <span>
-            Terkirim ke antrean dengan Request ID <b className="mono">{result.request_id}</b> (status QUEUED). Catat Request ID ini
-            untuk pelacakan. <Link to={`/dokumen/${result.id}`}>Lihat status dokumen →</Link>
+            Draf dibuat dengan Request ID <b className="mono">{result.request_id}</b>. Setelah AI selesai membaca, periksa datanya,
+            lihat simulasi voucher, lalu kirim ke Finance Reviewer. <Link to={`/dokumen/${result.id}`}>Buka draf →</Link>
           </span>
         </Alert>
       )}

@@ -44,6 +44,24 @@ def brand_header(pdf: FPDF, page_width: float, title: str) -> None:
     pdf.set_text_color(15, 23, 42)
 
 
+def _simulation_mark(pdf: FPDF) -> None:
+    """Tanda SIMULASI diagonal di setiap halaman: tidak bisa dipakai sebagai voucher resmi."""
+    pdf.set_auto_page_break(False)
+    for page in range(1, pdf.page_no() + 1):
+        pdf.page = page
+        with pdf.local_context(fill_opacity=0.12, text_color=(176, 48, 106)):
+            pdf.set_font("Helvetica", "B", 64)
+            with pdf.rotation(35, x=105, y=150):
+                pdf.set_xy(5, 140)
+                pdf.cell(200, 24, "SIMULASI", align="C")
+        pdf.set_xy(12, 287)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(176, 48, 106)
+        pdf.cell(186, 4, "SIMULASI - bukan voucher resmi. Nomor voucher terbit setelah disetujui Finance Reviewer.",
+                 align="C")
+    pdf.set_text_color(15, 23, 42)
+
+
 def next_voucher_no(db: Session, now: datetime) -> str:
     """VCH/2026/10/0001: urut per bulan (WIB)."""
     now = now.astimezone(WIB)
@@ -62,15 +80,16 @@ def _money(value: Decimal | None) -> str:
 
 
 def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: datetime,
-                   signatures: list[bytes | None] | None = None) -> bytes:
-    """`signatures`: spesimen tanda tangan elektronik per penanda tangan di `doc.signers` (urutan sama)."""
+                   signatures: list[bytes | None] | None = None, simulation: bool = False) -> bytes:
+    """`signatures`: spesimen tanda tangan elektronik per penanda tangan di `doc.signers` (urutan sama).
+    `simulation`: simulasi untuk PIC sebelum dikirim ke reviewer; diberi tanda SIMULASI di setiap halaman."""
     ex = doc.extraction
     approved_at = approved_at.astimezone(WIB)
     pdf = FPDF(format="A4")
     pdf.set_auto_page_break(True, margin=18)
     pdf.add_page()
 
-    brand_header(pdf, 210, "Voucher Pengeluaran")
+    brand_header(pdf, 210, "Simulasi Voucher Pengeluaran" if simulation else "Voucher Pengeluaran")
     pdf.set_y(32)
 
     pdf.set_font("Helvetica", "B", 13)
@@ -82,7 +101,7 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         ("Klien", doc.client.name), ("Request ID", doc.request_id),
         ("Vendor", ex.vendor_name), ("No. Invoice" if n_files <= 1 else f"No. Invoice ({n_files})", ex.invoice_no),
         ("Tgl. Invoice", ex.invoice_date.strftime("%d-%m-%Y") if ex.invoice_date else None),
-        ("Tgl. Voucher", approved_at.strftime("%d-%m-%Y")),
+        ("Tgl. Voucher", "(terbit setelah disetujui)" if simulation else approved_at.strftime("%d-%m-%Y")),
     ]
     for label, value in rows:
         pdf.cell(32, 6, label)
@@ -139,6 +158,8 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.set_fill_color(254, 243, 227)
     pdf.set_font("Helvetica", "B", 9)
     pdf.multi_cell(0, 5, _t(settings.voucher_authorization_text), border=1, fill=True, padding=3)
+    if simulation:
+        _simulation_mark(pdf)
     return bytes(pdf.output())
 
 

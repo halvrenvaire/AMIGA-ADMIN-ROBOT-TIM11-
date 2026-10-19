@@ -130,11 +130,22 @@ def client_id(name):
         return str(db.scalar(select(Client.id).where(Client.name == name)))
 
 
-def upload(email="pic.alpha@amiga.test", client="PT Klien Alpha", pdf=None, filename="invoice.pdf", **form):
+def upload(email="pic.alpha@amiga.test", client="PT Klien Alpha", pdf=None, filename="invoice.pdf",
+           submit=True, **form):
+    """Unggah lalu, seperti PIC di alur baru, kirim draf ke reviewer bila tidak ada kendala wajib
+    (`submit=False` untuk menguji draf)."""
     data = {"client_id": client_id(client), "request_type": "Voucher Pengeluaran Vendor", "channel": "Email",
             "submitted_date": "2026-10-14", **form}
-    return api(email).post("/documents", data=data,
-                           files={"files": (filename, pdf if pdf is not None else make_pdf(), "application/pdf")})
+    r = api(email).post("/documents", data=data,
+                        files={"files": (filename, pdf if pdf is not None else make_pdf(), "application/pdf")})
+    if submit:
+        submit_draft(r, email)
+    return r
+
+
+def submit_draft(response, email="pic.alpha@amiga.test"):
+    if response.status_code == 201 and detail(response.json()["id"], email=email)["status"] == "DRAFT":
+        api(email).post(f"/documents/{response.json()['id']}/submit")
 
 
 def detail(doc_id, email="pic.alpha@amiga.test"):
@@ -239,7 +250,8 @@ def test_uat4_duplicate_with_formatting_variants(extractor):
     first = upload().json()
     extractor.result = invoice(invoice_no="inv 001", vendor_name="PT. VENDOR JAYA")
     doc = detail(upload().json()["id"])
-    assert doc["status"] == "EXCEPTION"
+    # Kemungkinan duplikat tidak menahan pengiriman; ditandai untuk diputuskan reviewer
+    assert doc["status"] == "READY_FOR_REVIEW"
     assert codes(doc) == [("POSSIBLE_DUPLICATE", "invoice_no")]
     assert first["request_id"] in doc["issues"][0]["message"]
 
@@ -257,11 +269,12 @@ def test_extraction_failure_keeps_document_and_reviewer_can_reprocess(extractor)
     assert doc["status"] == "EXCEPTION"
     assert codes(doc) == [("EXTRACTION_FAILED", None)]
 
-    assert api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 403
+    assert api("lead@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 403
     extractor.result = invoice()
-    assert api("reviewer1@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 200
+    # PIC bisa meminta AI membaca ulang dari draf
+    assert api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 200
     again = detail(doc["id"])
-    assert again["status"] == "READY_FOR_REVIEW"
+    assert again["status"] == "DRAFT"
     assert again["request_id"] == doc["request_id"]
 
 
@@ -284,7 +297,7 @@ def test_uat8_pic_fix_reextracts_with_same_request_id_and_keeps_pic_value(extrac
 
     doc = detail(first["id"])
     assert doc["request_id"] == first["request_id"]
-    assert doc["status"] == "READY_FOR_REVIEW"
+    assert doc["status"] == "DRAFT"  # PIC memeriksa lalu mengirim sendiri ke reviewer
     assert doc["extraction"]["account_no"] == "9876543210"  # tidak ditimpa hasil AI yang kosong
     assert doc["pic_overrides"] == {"account_no": "9876543210"}
     assert extractor.calls == 2
@@ -357,5 +370,6 @@ def test_status_changes_are_audited(extractor):
                           .where(AuditLog.document_id == doc_id).order_by(AuditLog.id)).all()
     assert [tuple(r) for r in rows] == [
         ("DOCUMENT_UPLOADED", "QUEUED"), ("STATUS_CHANGED", "PROCESSING"),
-        ("EXTRACTED", None), ("STATUS_CHANGED", "READY_FOR_REVIEW"),
+        ("EXTRACTED", None), ("STATUS_CHANGED", "DRAFT"),
+        ("SUBMITTED_TO_REVIEW", "READY_FOR_REVIEW"), ("STATUS_CHANGED", "READY_FOR_REVIEW"),
     ]

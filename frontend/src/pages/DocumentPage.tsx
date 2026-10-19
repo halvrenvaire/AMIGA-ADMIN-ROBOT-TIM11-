@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Ban, CheckCircle2, FileClock, Plus, Receipt, RotateCcw, Save, Trash2, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, Eye, FileClock, Plus, Receipt, RotateCcw, Save, Send, Trash2, Undo2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { AiProcessingCard, AiResultCard, AiScanOverlay } from "../components/AiProcessing";
@@ -9,7 +9,7 @@ import { ReassignModal } from "../components/ReassignModal";
 import { SignerPicker } from "../components/SignerPicker";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
 import { FIELD_LABEL, ISSUE_LABEL, plainNumber, rupiah, tanggal, waktu } from "../format";
-import type { DocumentDetail, Extraction, Issue, Signatory, Vendor } from "../types";
+import type { DocumentDetail, Extraction, FileData, Issue, Signatory, Vendor } from "../types";
 
 const HEADER_FIELDS = ["vendor_name", "invoice_no", "invoice_date", "total"] as const;
 const PAYMENT_FIELDS = ["bank_name", "account_no", "account_name"] as const;
@@ -18,19 +18,14 @@ type Field = (typeof ALL_FIELDS)[number];
 type Fields = Record<Field, string>;
 interface Line { description: string; qty: string; unit_price: string; subtotal: string }
 
-function toFields(ex: Extraction | null): Fields {
-  const f = {} as Fields;
-  ALL_FIELDS.forEach((k) => {
-    const v = ex?.[k] ?? null;
-    f[k] = k === "total" ? plainNumber(v) : v ?? "";
-  });
-  return f;
-}
-
 const toLines = (ex: Extraction | null): Line[] =>
   (ex?.line_items ?? []).map((l) => ({
     description: l.description ?? "", qty: plainNumber(l.qty), unit_price: plainNumber(l.unit_price), subtotal: plainNumber(l.subtotal),
   }));
+
+/** Kendala yang harus dibereskan PIC sebelum draf boleh dikirim (sama dengan BLOCKING di backend). */
+const BLOCKING = new Set(["MISSING_EVIDENCE", "CALCULATION_DISCREPANCY", "VENDOR_MISMATCH", "NOT_AN_INVOICE",
+                          "EXTRACTION_FAILED", "ACCOUNT_MISMATCH"]);
 
 const flagged = (issues: Issue[]) => new Set(issues.map((i) => i.field).filter(Boolean) as string[]);
 const inputType = (k: Field) => (k === "invoice_date" ? "date" : k === "total" ? "number" : "text");
@@ -43,6 +38,8 @@ export function DocumentPage() {
   const [notice, setNotice] = useState<{ kind: "ok" | "info" | "error" | "warn"; text: string } | null>(null);
   const [reassign, setReassign] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Invoice yang sedang diedit PIC (posisi file, mulai 1)
+  const [pos, setPos] = useState(1);
   const d = doc.data;
   // Ringkasan hasil AI dianimasikan bila prosesnya selesai saat halaman ini terbuka
   const sawProcessing = useRef(false);
@@ -68,13 +65,16 @@ export function DocumentPage() {
   const processing = d.status === "QUEUED" || d.status === "PROCESSING";
   const codes = new Set(d.issues.map((i) => i.code));
   const isReviewer = has("FINANCE_REVIEWER");
+  const isPic = has("PIC_KLIEN", "INTAKE_SUPPORT");
   const canReview = isReviewer && d.status === "READY_FOR_REVIEW" && Boolean(d.extraction);
-  const canFix = has("PIC_KLIEN", "INTAKE_SUPPORT") && d.status === "EXCEPTION";
-  const canReprocess = isReviewer && d.status === "EXCEPTION" && codes.has("EXTRACTION_FAILED");
-  const canDismissDup = isReviewer && d.status === "EXCEPTION" && codes.size === 1 && codes.has("POSSIBLE_DUPLICATE");
+  // Draf dan dokumen berkendala diedit PIC per invoice; Finance Reviewer tidak mengedit (feedback owner)
+  const canEdit = isPic && (d.status === "DRAFT" || d.status === "EXCEPTION") && d.files.length > 0;
+  const canReprocess = (isReviewer || isPic) && d.status === "EXCEPTION" && codes.has("EXTRACTION_FAILED");
+  const canDismissDup = isReviewer && d.status === "READY_FOR_REVIEW" && codes.has("POSSIBLE_DUPLICATE");
+  const filePos = Math.min(pos, Math.max(d.files.length, 1));
   const hasVoucher = d.status === "AMIGA_REVIEWED" || d.status === "SENT_TO_CLIENT";
   // Pengaju boleh membatalkan selama voucher belum terbit (setelah AI selesai membaca)
-  const canCancel = has("PIC_KLIEN", "INTAKE_SUPPORT") && (d.status === "EXCEPTION" || d.status === "READY_FOR_REVIEW");
+  const canCancel = isPic && (d.status === "DRAFT" || d.status === "EXCEPTION" || d.status === "READY_FOR_REVIEW");
 
   const update = (next: DocumentDetail, message?: typeof notice) => {
     doc.setData(next);
@@ -124,12 +124,13 @@ export function DocumentPage() {
       <div className="split">
         <section className="card pdf-pane" aria-label="PDF asli">
           <div className="pdf-head">
-            <b>PDF asli</b>
+            <b>{canEdit && d.files.length > 1 ? `Bukti ${filePos} dari ${d.files.length}` : "PDF asli"}</b>
             <span className="muted">{d.files.length > 1 ? `${d.files.length} invoice` : d.original_filename} · {d.page_count} hal.
               {d.files.length === 1 && d.files[0].source_format && <> · dari foto <OriginalLink docId={d.id} position={1} /></>}</span>
           </div>
           <div className="pdf-body">
-            <PdfFrame path={`/documents/${id}/file`} title={`Invoice ${d.request_id}`} />
+            <PdfFrame path={canEdit && d.files.length > 1 ? `/documents/${id}/files/${filePos}` : `/documents/${id}/file`}
+                      title={`Invoice ${d.request_id}`} />
             {processing && <AiScanOverlay label={d.status === "QUEUED" ? "Menunggu giliran AI" : "AI membaca invoice"} />}
           </div>
         </section>
@@ -158,10 +159,10 @@ export function DocumentPage() {
           </section>
 
           {processing && <AiProcessingCard doc={d} />}
-          {!processing && !resultClosed && d.extraction && (fresh || d.status === "READY_FOR_REVIEW" || d.status === "EXCEPTION") && (
+          {!processing && !resultClosed && d.extraction && (fresh || d.status === "DRAFT" || d.status === "READY_FOR_REVIEW" || d.status === "EXCEPTION") && (
             <AiResultCard doc={d} onClose={() => setResultClosed(true)} />
           )}
-          <ClassificationPanel doc={d} canDecide={isReviewer && d.status === "EXCEPTION"}
+          <ClassificationPanel doc={d} canDecide={isReviewer && d.status === "READY_FOR_REVIEW"}
                                onDecided={(n, text) => update(n, { kind: "ok", text })} />
 
           {d.issues.length > 0 && (
@@ -179,7 +180,7 @@ export function DocumentPage() {
               {(canReprocess || canDismissDup) && (
                 <div className="actions">
                   {canReprocess && <button className="btn primary" onClick={reprocess}><RotateCcw /> Proses ulang</button>}
-                  {canDismissDup && <DismissDuplicate id={id} onDone={(n) => update(n, { kind: "ok", text: "Ditandai bukan duplikat; dokumen siap ditinjau." })} />}
+                  {canDismissDup && <DismissDuplicate id={id} onDone={(n) => update(n, { kind: "ok", text: "Ditandai bukan duplikat." })} />}
                 </div>
               )}
             </section>
@@ -187,11 +188,11 @@ export function DocumentPage() {
 
           <SignersPanel doc={d} onChange={(n) => update(n, { kind: "ok", text: "Penanda tangan voucher diperbarui." })} />
 
-          {canFix && <FixForm doc={d} onDone={(n) => update(n, { kind: "info", text: "Perbaikan terkirim. Dokumen kembali ke ekstraksi dengan Request ID yang sama." })} />}
-
-          {d.extraction && (canReview
-            ? <ReviewForm doc={d} onChange={update} onNotice={setNotice} />
-            : <ReadOnlyData doc={d} />)}
+          {canEdit
+            ? <DraftEditor doc={d} pos={filePos} onPos={setPos} onChange={update} onNotice={setNotice} />
+            : d.extraction && <ReadOnlyData doc={d} />}
+          {!canEdit && d.extraction && d.status !== "CANCELLED" && !hasVoucher && <SimulationButton docId={d.id} />}
+          {canReview && <ReviewDecision doc={d} onChange={update} onNotice={setNotice} />}
         </div>
       </div>
 
@@ -259,15 +260,172 @@ function LinesTable({ lines, total }: { lines: Line[]; total: string | null }) {
   );
 }
 
-/** Koreksi oleh Finance Reviewer: Simpan & verifikasi ulang, Kembalikan ke PIC, Setujui (FR-4.1–4.5). */
-function ReviewForm({ doc, onChange, onNotice }: {
-  doc: DocumentDetail;
-  onChange: (d: DocumentDetail, n?: { kind: "ok" | "info" | "error" | "warn"; text: string } | null) => void;
-  onNotice: (n: { kind: "ok" | "info" | "error" | "warn"; text: string } | null) => void;
+type Notice = { kind: "ok" | "info" | "error" | "warn"; text: string } | null;
+
+function dataFields(d: FileData | null | undefined): Fields {
+  const f = {} as Fields;
+  ALL_FIELDS.forEach((k) => { const v = d?.[k] ?? null; f[k] = k === "total" ? plainNumber(v) : v ?? ""; });
+  return f;
+}
+
+const dataLines = (d: FileData | null | undefined): Line[] =>
+  (d?.line_items ?? []).map((l) => ({
+    description: l.description ?? "", qty: plainNumber(l.qty), unit_price: plainNumber(l.unit_price), subtotal: plainNumber(l.subtotal),
+  }));
+
+/** Draf oleh PIC Klien / Intake Support: edit per invoice, lihat simulasi voucher, kirim ke reviewer (feedback owner). */
+function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
+  doc: DocumentDetail; pos: number; onPos: (p: number) => void;
+  onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
 }) {
-  const initial = useMemo(() => ({ fields: toFields(doc.extraction), lines: toLines(doc.extraction) }), [doc]);
+  const file = doc.files.find((f) => f.position === pos) ?? doc.files[0];
+  const initial = useMemo(() => ({ fields: dataFields(file.data), lines: dataLines(file.data) }), [file]);
+  const initialKey = JSON.stringify(initial);
   const [fields, setFields] = useState(initial.fields);
   const [lines, setLines] = useState(initial.lines);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setFields(initial.fields); setLines(initial.lines); }, [initialKey, pos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = JSON.stringify({ fields, lines }) !== initialKey;
+  const reimburse = doc.request_type === "Voucher Pengeluaran Reimburse";
+  const blocking = doc.issues.filter((i) => BLOCKING.has(i.code));
+  const flags = flagged(blocking);
+  const setLine = (i: number, k: keyof Line, v: string) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, [k]: v } : l)));
+
+  async function save() {
+    // Data lengkap satu invoice (backend mengganti data bukti ini dan mencatat field yang berubah)
+    const data = {
+      ...Object.fromEntries(ALL_FIELDS.map((k) => [k, fields[k].trim() || null])),
+      line_items: lines.map((l) => ({
+        description: l.description || null, qty: l.qty || null, unit_price: l.unit_price || null, subtotal: l.subtotal || null,
+      })),
+    };
+    setBusy(true);
+    try {
+      const next = await api.put<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/data`, data);
+      const left = next.issues.filter((i) => BLOCKING.has(i.code)).length;
+      onChange(next, left
+        ? { kind: "warn", text: `Tersimpan. Masih ada ${left} kendala yang harus dibereskan sebelum dikirim ke reviewer.` }
+        : { kind: "ok", text: "Tersimpan dan lolos verifikasi ulang. Cek simulasi voucher, lalu kirim ke reviewer." });
+    } catch (e) {
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit() {
+    setBusy(true);
+    try {
+      const next = await api.post<DocumentDetail>(`/documents/${doc.id}/submit`);
+      onChange(next, { kind: "ok", text: `Terkirim ke Finance Reviewer${next.assigned_reviewer ? ` (${next.assigned_reviewer})` : ""}.` });
+    } catch (e) {
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const fieldInput = (k: Field) => (
+    <div className="field" key={k}>
+      <label htmlFor={`f-${k}`}>{FIELD_LABEL[k]}</label>
+      <input id={`f-${k}`} className={`input ${flags.has(k) ? "flag" : ""} ${k === "account_no" ? "mono" : ""}`}
+             type={inputType(k)} step={k === "total" ? "0.01" : undefined} list={k === "vendor_name" ? "vendor-options" : undefined}
+             value={fields[k]} onChange={(e) => setFields({ ...fields, [k]: e.target.value })} />
+    </div>
+  );
+
+  return (
+    <section className="card panel" style={blocking.length ? { borderColor: "var(--amber-100)" } : undefined}>
+      <div className="panel-head">
+        <div>
+          <h2>{doc.status === "DRAFT" ? "Draf voucher" : "Perbaiki data"}</h2>
+          <p>Periksa data hasil bacaan AI untuk tiap bukti, lalu kirim ke Finance Reviewer. Reviewer hanya menyetujui atau mengembalikan.</p>
+        </div>
+      </div>
+
+      {doc.files.length > 1 && (
+        <div className="tabs" role="tablist" aria-label="Bukti">
+          {doc.files.map((f) => (
+            <button key={f.position} role="tab" aria-selected={f.position === file.position} className={f.position === file.position ? "active" : ""}
+                    disabled={busy} title={f.original_filename}
+                    onClick={() => { if (!dirty || confirm("Perubahan pada bukti ini belum disimpan. Pindah bukti?")) onPos(f.position); }}>
+              Bukti {f.position}
+            </button>
+          ))}
+        </div>
+      )}
+      <small className="muted">{file.original_filename} · {file.page_count} hal.</small>
+
+      <div className="section-title">Informasi utama</div>
+      <div className="grid-2">{HEADER_FIELDS.map(fieldInput)}</div>
+
+      <div className="section-title">Rincian barang/jasa</div>
+      <div style={{ overflowX: "auto" }}>
+        <table className="table compact">
+          <thead><tr><th>#</th><th>Uraian</th><th>Qty</th><th>Harga satuan</th><th>Subtotal</th><th /></tr></thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i}>
+                <td>{i + 1}</td>
+                <td><input className="input" value={l.description} onChange={(e) => setLine(i, "description", e.target.value)} aria-label={`Uraian ${i + 1}`} /></td>
+                <td style={{ width: 70 }}><input className="input num" type="number" value={l.qty} onChange={(e) => setLine(i, "qty", e.target.value)} aria-label={`Qty ${i + 1}`} /></td>
+                <td style={{ width: 120 }}><input className="input num" type="number" value={l.unit_price} onChange={(e) => setLine(i, "unit_price", e.target.value)} aria-label={`Harga ${i + 1}`} /></td>
+                <td style={{ width: 130 }}><input className="input num" type="number" value={l.subtotal} onChange={(e) => setLine(i, "subtotal", e.target.value)} aria-label={`Subtotal ${i + 1}`} /></td>
+                <td><button className="btn ghost sm" onClick={() => setLines(lines.filter((_, n) => n !== i))} aria-label={`Hapus baris ${i + 1}`}><Trash2 /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="actions" style={{ justifyContent: "space-between" }}>
+        <button className="btn sm" onClick={() => setLines([...lines, { description: "", qty: "", unit_price: "", subtotal: "" }])}><Plus /> Tambah baris</button>
+        <SumCheck lines={lines} total={fields.total} />
+      </div>
+
+      {!reimburse && (
+        <>
+          <div className="section-title">Data pembayaran</div>
+          <div className="grid-2">{PAYMENT_FIELDS.map(fieldInput)}</div>
+          <small className="muted">Rekening tidak dicetak di voucher, tetapi tetap dicek sistem terhadap data referensi vendor.</small>
+          {doc.account_check && <AccountCheckBox check={doc.account_check} />}
+        </>
+      )}
+
+      <div className="decision">
+        {dirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
+        <button className="btn" disabled={busy || !dirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
+        <SimulationButton docId={doc.id} disabled={busy || dirty} />
+        <button className="btn primary" onClick={submit} disabled={busy || dirty || blocking.length > 0}
+                title={dirty ? "Simpan perubahan dulu" : blocking.length ? "Bereskan kendala dulu" : undefined}>
+          <Send /> Kirim ke reviewer
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Simulasi Voucher Pengeluaran (bertanda SIMULASI, lengkap dengan lampiran) sebelum disetujui. */
+function SimulationButton({ docId, disabled }: { docId: string; disabled?: boolean }) {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <>
+      <button className="btn" disabled={disabled} onClick={() => setOpen(Date.now())}><Eye /> Lihat simulasi voucher</button>
+      {open && (
+        <Modal title="Simulasi voucher" onClose={() => setOpen(null)} wide>
+          <div className="pdf-body" style={{ height: "75vh" }}>
+            <PdfFrame path={`/documents/${docId}/voucher-preview?t=${open}`} title="Simulasi voucher" />
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** Keputusan Finance Reviewer: Setujui atau Kembalikan ke PIC; reviewer tidak mengedit data (feedback owner). */
+function ReviewDecision({ doc, onChange, onNotice }: {
+  doc: DocumentDetail; onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [returning, setReturning] = useState(false);
   // Rekening yang belum terverifikasi wajib dicek manual dan dikonfirmasi sebelum menyetujui
@@ -275,39 +433,8 @@ function ReviewForm({ doc, onChange, onNotice }: {
   const [accountNote, setAccountNote] = useState("");
   const account = doc.account_check;
   const needsConfirm = account?.state === "UNVERIFIED";
-  // Reset hanya bila isi data berubah, bukan setiap kali dokumen dimuat ulang dengan isi yang sama
-  // (bila tidak, centang konfirmasi rekening bisa hilang sesaat setelah dicentang)
-  const initialKey = JSON.stringify(initial);
   const accountKey = JSON.stringify(account ?? null);
-  useEffect(() => { setFields(initial.fields); setLines(initial.lines); }, [initialKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setAccountConfirmed(false); }, [initialKey, accountKey]);
-
-  const dirty = JSON.stringify({ fields, lines }) !== JSON.stringify(initial);
-  const flags = flagged(doc.issues);
-  const setLine = (i: number, k: keyof Line, v: string) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, [k]: v } : l)));
-
-  async function save() {
-    const changed = Object.fromEntries(
-      ALL_FIELDS.filter((k) => fields[k] !== initial.fields[k]).map((k) => [k, fields[k].trim() || null]),
-    );
-    const linesChanged = JSON.stringify(lines) !== JSON.stringify(initial.lines);
-    setBusy(true);
-    try {
-      const next = await api.put<DocumentDetail>(`/documents/${doc.id}/extraction`, {
-        fields: changed,
-        line_items: linesChanged ? lines.map((l) => ({
-          description: l.description || null, qty: l.qty || null, unit_price: l.unit_price || null, subtotal: l.subtotal || null,
-        })) : null,
-      });
-      onChange(next, next.issues.length
-        ? { kind: "warn", text: "Tersimpan. Verifikasi ulang menemukan kendala; persetujuan ditahan sampai kendala selesai." }
-        : { kind: "ok", text: "Tersimpan dan lolos verifikasi ulang. Perubahan tercatat di jejak audit." });
-    } catch (e) {
-      onNotice({ kind: "error", text: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => { setAccountConfirmed(false); }, [accountKey]);
 
   async function approve() {
     setBusy(true);
@@ -325,74 +452,37 @@ function ReviewForm({ doc, onChange, onNotice }: {
     }
   }
 
-  const fieldInput = (k: Field) => (
-    <div className="field" key={k}>
-      <label htmlFor={`f-${k}`}>{FIELD_LABEL[k]} {k in doc.pic_overrides && <span className="chip gray">diisi PIC</span>}</label>
-      <input id={`f-${k}`} className={`input ${flags.has(k) ? "flag" : ""} ${k === "account_no" ? "mono" : ""}`}
-             type={inputType(k)} step={k === "total" ? "0.01" : undefined} list={k === "vendor_name" ? "vendor-options" : undefined}
-             value={fields[k]} onChange={(e) => setFields({ ...fields, [k]: e.target.value })} />
-    </div>
-  );
-
   return (
     <section className="card panel">
-      <div className="section-title">Informasi utama</div>
-      <div className="grid-2">{HEADER_FIELDS.map(fieldInput)}</div>
-
-      <div className="section-title">Rincian barang/jasa</div>
-      <div style={{ overflowX: "auto" }}>
-        <table className="table compact">
-          <thead><tr><th>#</th><th>Uraian</th><th>Qty</th><th>Harga satuan</th><th>Subtotal</th><th /></tr></thead>
-          <tbody>
-            {lines.map((l, i) => (
-              <tr key={i}>
-                <td>{i + 1}</td>
-                <td><input className="input" value={l.description} onChange={(e) => setLine(i, "description", e.target.value)} aria-label={`Uraian ${i + 1}`} /></td>
-                <td style={{ width: 70 }}><input className="input num" type="number" value={l.qty} onChange={(e) => setLine(i, "qty", e.target.value)} aria-label={`Qty ${i + 1}`} /></td>
-                <td style={{ width: 120 }}><input className="input num" type="number" value={l.unit_price} onChange={(e) => setLine(i, "unit_price", e.target.value)} aria-label={`Harga ${i + 1}`} /></td>
-                <td style={{ width: 130 }}><input className={`input num ${flags.has("total") ? "flag" : ""}`} type="number" value={l.subtotal} onChange={(e) => setLine(i, "subtotal", e.target.value)} aria-label={`Subtotal ${i + 1}`} /></td>
-                <td><button className="btn ghost sm" onClick={() => setLines(lines.filter((_, n) => n !== i))} aria-label={`Hapus baris ${i + 1}`}><Trash2 /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="panel-head">
+        <div>
+          <h2>Keputusan reviewer</h2>
+          <p>Ada yang salah, termasuk salah ketik kecil? Kembalikan ke PIC dengan alasan yang jelas.</p>
+        </div>
       </div>
-      <div className="actions" style={{ justifyContent: "space-between" }}>
-        <button className="btn sm" onClick={() => setLines([...lines, { description: "", qty: "", unit_price: "", subtotal: "" }])}><Plus /> Tambah baris</button>
-        <SumCheck lines={lines} total={fields.total} />
-      </div>
-
-      <div className="section-title">Data pembayaran</div>
-      <div className="grid-2">{PAYMENT_FIELDS.map(fieldInput)}</div>
-      <small className="muted">Cek nomor rekening digit per digit dengan PDF (SOP 7.4).</small>
-      {account && <AccountCheckBox check={account} />}
-      {needsConfirm && !dirty && (
+      {needsConfirm && (
         <div className="account-confirm">
           <label className="toggle" style={{ alignItems: "flex-start" }}>
             <input type="checkbox" checked={accountConfirmed} onChange={(e) => setAccountConfirmed(e.target.checked)} style={{ marginTop: 3 }} />
-            <span>Saya sudah mencocokkan rekening <b className="mono">{fields.account_no || "-"}</b> dengan sumber tepercaya
+            <span>Saya sudah mencocokkan rekening <b className="mono">{doc.extraction?.account_no || "-"}</b> dengan sumber tepercaya
               (mis. konfirmasi langsung ke vendor), bukan hanya dari dokumen atau isian PIC.</span>
           </label>
           <input className="input" placeholder="Cara pengecekan (opsional), mis. telepon bagian keuangan vendor" value={accountNote}
                  onChange={(e) => setAccountNote(e.target.value)} maxLength={500} aria-label="Catatan pengecekan rekening" />
         </div>
       )}
-
       <div className="decision">
-        {dirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
-        <button className="btn" disabled={busy || !dirty} onClick={save}><Save /> Simpan & verifikasi ulang</button>
         <button className="btn danger" disabled={busy} onClick={() => setReturning(true)}>Kembalikan ke PIC</button>
         <button className="btn success" onClick={approve}
-                disabled={busy || dirty || doc.issues.length > 0 || account?.state === "MISMATCH" || (needsConfirm && !accountConfirmed)}
-                title={dirty ? "Simpan perubahan dulu" : doc.issues.length ? "Masih ada kendala"
-                  : needsConfirm && !accountConfirmed ? "Konfirmasi pengecekan rekening dulu" : undefined}>
+                disabled={busy || doc.issues.length > 0 || account?.state === "MISMATCH" || (needsConfirm && !accountConfirmed)}
+                title={doc.issues.length ? "Masih ada kendala" : needsConfirm && !accountConfirmed ? "Konfirmasi pengecekan rekening dulu" : undefined}>
           <CheckCircle2 /> Setujui
         </button>
       </div>
 
       {returning && (
         <ReasonModal title="Kembalikan ke PIC" label="Alasan (wajib, akan dibaca PIC)"
-                     placeholder="mis. Lampirkan invoice revisi dengan total yang benar."
+                     placeholder="mis. Total bukti 2 seharusnya 1.250.000, mohon diperbaiki."
                      submitLabel="Kembalikan" onClose={() => setReturning(false)}
                      onSubmit={async (reason) => {
                        const next = await api.post<DocumentDetail>(`/documents/${doc.id}/return`, { reason });
@@ -412,64 +502,6 @@ function SumCheck({ lines, total }: { lines: Line[]; total: string }) {
       Jumlah rincian <b>{rupiah(sum)}</b> · total {rupiah(total || null)}{" "}
       <span className={`chip ${match ? "ok" : "warn"}`}>{match ? "cocok" : "tidak cocok"}</span>
     </span>
-  );
-}
-
-/** Perbaikan oleh PIC Klien / Intake Support saat EXCEPTION (FR-3.4, SOP 7.3). */
-function FixForm({ doc, onDone }: { doc: DocumentDetail; onDone: (d: DocumentDetail) => void }) {
-  const flags = flagged(doc.issues);
-  const current = toFields(doc.extraction);
-  const [values, setValues] = useState<Partial<Fields>>({});
-  const [showAll, setShowAll] = useState(flags.size === 0);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const shown = ALL_FIELDS.filter((k) => showAll || flags.has(k));
-
-  async function submit() {
-    const fields = Object.fromEntries(Object.entries(values).filter(([, v]) => v && v.trim()));
-    setBusy(true);
-    setError(null);
-    try {
-      onDone(await api.post<DocumentDetail>(`/documents/${doc.id}/fix`, { fields, note: note.trim() || null }));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="card panel" style={{ borderColor: "var(--amber-100)" }}>
-      <div className="panel-head">
-        <div>
-          <h2>Kirim perbaikan</h2>
-          <p>Isi data yang kurang atau salah. Isian Anda tidak ditimpa saat AI membaca ulang invoice.</p>
-        </div>
-      </div>
-      {error && <Alert>{error}</Alert>}
-      <div className="grid-2">
-        {shown.map((k) => (
-          <div className="field" key={k}>
-            <label htmlFor={`fix-${k}`}>{FIELD_LABEL[k]}</label>
-            <input id={`fix-${k}`} className={`input ${flags.has(k) ? "flag" : ""}`} type={inputType(k)}
-                   list={k === "vendor_name" ? "vendor-options" : undefined}
-                   placeholder={current[k] || "kosong"} value={values[k] ?? ""}
-                   onChange={(e) => setValues({ ...values, [k]: e.target.value })} />
-            {k === "total" && <small>Angka tanpa titik ribuan, mis. 1250000</small>}
-          </div>
-        ))}
-      </div>
-      {!showAll && <button className="btn ghost sm" style={{ alignSelf: "flex-start" }} onClick={() => setShowAll(true)}>Perbaiki field lain</button>}
-      <div className="field">
-        <label htmlFor="fix-note">Catatan untuk reviewer</label>
-        <textarea id="fix-note" className="input" value={note} onChange={(e) => setNote(e.target.value)}
-                  placeholder="mis. Nomor rekening dikonfirmasi lewat email vendor tanggal 14/10." maxLength={1000} />
-      </div>
-      <div className="actions" style={{ justifyContent: "flex-end" }}>
-        <button className="btn primary" disabled={busy} onClick={submit}>{busy ? "Mengirim…" : "Kirim perbaikan"}</button>
-      </div>
-    </section>
   );
 }
 

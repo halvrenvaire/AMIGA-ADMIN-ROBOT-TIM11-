@@ -87,6 +87,85 @@ def combine(parts: list[ExtractedInvoice]) -> ExtractedInvoice:
     )
 
 
+# --- Data per invoice (feedback owner: PIC mengedit per invoice) ---
+
+DATA_FIELDS = ("vendor_name", "invoice_no", "invoice_date", "total", "bank_name", "account_no", "account_name")
+
+
+def _num(value) -> str | None:
+    return None if value is None else str(value)
+
+
+def part_to_data(p: ExtractedInvoice) -> dict:
+    """Data satu invoice dalam bentuk JSON (disimpan di document_files.data)."""
+    return {
+        "vendor_name": p.vendor_name, "invoice_no": p.invoice_no,
+        "invoice_date": p.invoice_date.isoformat() if p.invoice_date else None,
+        "total": _num(p.total), "bank_name": p.bank_name, "account_no": p.account_no, "account_name": p.account_name,
+        "line_items": [{"description": li.description, "qty": _num(li.qty), "unit_price": _num(li.unit_price),
+                        "subtotal": _num(li.subtotal)} for li in p.line_items],
+    }
+
+
+def data_to_part(d: dict | None) -> ExtractedInvoice:
+    d = d or {}
+    dec = lambda v: None if v in (None, "") else Decimal(str(v))  # noqa: E731
+    return ExtractedInvoice(
+        vendor_name=d.get("vendor_name"), invoice_no=d.get("invoice_no"),
+        invoice_date=date.fromisoformat(d["invoice_date"]) if d.get("invoice_date") else None,
+        total=dec(d.get("total")), bank_name=d.get("bank_name"), account_no=d.get("account_no"),
+        account_name=d.get("account_name"),
+        line_items=[ExtractedLine(li.get("description"), dec(li.get("qty")), dec(li.get("unit_price")),
+                                  dec(li.get("subtotal"))) for li in d.get("line_items") or []],
+    )
+
+
+def file_data(doc: Document, f: DocumentFile) -> dict:
+    """Data per invoice; dokumen lama tanpa data per file memakai data gabungan (1 file) atau kosong."""
+    if f.data is not None:
+        return f.data
+    ex = doc.extraction
+    if ex is not None and len(doc.files) == 1:
+        return part_to_data(ExtractedInvoice(
+            **{k: getattr(ex, k) for k in DATA_FIELDS},
+            line_items=[ExtractedLine(li.description, li.qty, li.unit_price, li.subtotal) for li in ex.line_items]))
+    return part_to_data(ExtractedInvoice())
+
+
+def rebuild_from_files(db, doc: Document) -> Extraction:
+    """Susun ulang data voucher (gabungan) dari data per invoice setelah PIC mengedit."""
+    parts = [data_to_part(file_data(doc, f)) for f in doc.files]
+    data = combine(parts)
+    ex = doc.extraction or Extraction(document_id=doc.id, extracted_at=datetime.now(timezone.utc))
+    raw = dict(ex.raw_json or {}) if isinstance(ex.raw_json, dict) else {}
+    for name in PIC_FIELDS:
+        setattr(ex, name, getattr(data, name))
+    raw["payees"] = [{"vendor_name": p.vendor_name, "account_no": p.account_no} for p in parts]
+    ex.raw_json = raw
+    ex.line_items = [LineItem(position=i, description=li.description, qty=li.qty, unit_price=li.unit_price,
+                              subtotal=li.subtotal) for i, li in enumerate(data.line_items, start=1)]
+    for f, p in zip(doc.files, parts):
+        f.invoice_no_norm = normalize(p.invoice_no)
+    doc.extraction = ex
+    db.add(ex)
+    db.flush()
+    return ex
+
+
+# Kendala yang wajib dibereskan PIC sebelum dikirim ke reviewer. Kendala lain (kemungkinan duplikat,
+# struk/nota, perlu pemeriksaan manual, catatan pengembalian) diputuskan Finance Reviewer.
+BLOCKING = {IssueCode.MISSING_EVIDENCE, IssueCode.CALCULATION_DISCREPANCY, IssueCode.VENDOR_MISMATCH,
+            IssueCode.NOT_AN_INVOICE, IssueCode.EXTRACTION_FAILED, IssueCode.ACCOUNT_MISMATCH}
+
+
+def settle_status(db, doc: Document, issues: list, note: str) -> None:
+    """Draf bila tidak ada kendala wajib; Ada kendala (EXCEPTION) bila masih ada. PIC yang mengirim ke reviewer."""
+    blocking = sorted({i.code.value for i in issues if i.code in BLOCKING})
+    new = DocStatus.EXCEPTION if blocking else DocStatus.DRAFT
+    if doc.status != new:
+        set_status(db, doc, new, f"{note}: {', '.join(blocking)}" if blocking else note)
+
+
 def document_checks(names: list[str], parts: list[ExtractedInvoice]) -> list[dict]:
     """Hasil pemeriksaan jenis dokumen per file, disimpan di raw_json untuk verifikasi."""
     return [{"file": name, "doc_class": p.doc_class, "is_invoice": p.is_invoice, "document_type": p.document_type,
@@ -207,11 +286,12 @@ def uploader_ids(doc: Document) -> set[uuid.UUID]:
 
 # Tindakan sisi pengaju. Siapa pun yang melakukannya pada sebuah dokumen dianggap "pengaju" dokumen
 # itu, termasuk pengguna peran ganda (mis. Intake Support + Finance Reviewer) yang memperbaiki data.
-SUBMITTER_ACTIONS = ("DOCUMENT_UPLOADED", "FIXED_BY_PIC", "PIC_NOTE", "SIGNERS_CHANGED")
+SUBMITTER_ACTIONS = ("DOCUMENT_UPLOADED", "FIXED_BY_PIC", "PIC_NOTE", "SIGNERS_CHANGED", "SUBMITTED_TO_REVIEW")
 
 
 def submitter_ids(db, doc: Document) -> set[uuid.UUID]:
     """Semua pihak pengaju dokumen: tidak boleh meninjau, menandai bukan duplikat, atau menyetujuinya (SoD)."""
+    db.flush()  # sesi tanpa autoflush: catatan audit yang baru ditambahkan (mis. pengiriman draf) ikut terbaca
     actors = db.scalars(select(AuditLog.actor_id).where(
         AuditLog.document_id == doc.id, AuditLog.action.in_(SUBMITTER_ACTIONS), AuditLog.actor_id.is_not(None)))
     return uploader_ids(doc) | set(actors)
@@ -308,6 +388,8 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
                 parts, names = [extractor.extract(storage.load(doc.file_key))], [doc.original_filename]
             data = combine(parts)
             data.raw = {**data.raw, "document_checks": document_checks(names, parts)}
+            for f, p in zip(files, parts):
+                f.data = part_to_data(p)
         except (ExtractionError, storage.StorageError) as e:
             log.warning("Ekstraksi %s gagal: %s", doc.request_id, e)
             _resolve_open_issues(db, doc)
@@ -324,9 +406,5 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
                                   f"dalam {duration_ms} ms")
 
         issues = run_verification(db, doc)
-        if issues:
-            codes = ", ".join(sorted({i.code.value for i in issues}))
-            set_status(db, doc, DocStatus.EXCEPTION, f"Verifikasi sistem: {codes}")
-        else:
-            send_to_review(db, doc, "Lolos verifikasi")
+        settle_status(db, doc, issues, "AI selesai membaca; menunggu PIC memeriksa dan mengirim ke reviewer")
         db.commit()

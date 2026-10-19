@@ -21,8 +21,8 @@ function upload(email: string, fixture: string, key: string) {
   cy.get("main input[type=file]").selectFile(`cypress/fixtures/${fixture}`, { force: true });
   cy.contains("button", "Preview").click();
   cy.contains("button", "Kirim ke antrean").click();
-  cy.contains("Terkirim ke antrean").find("b").invoke("text").then((requestId) => {
-    cy.contains("a", "Lihat status dokumen").click();
+  cy.contains("Draf dibuat").find("b").invoke("text").then((requestId) => {
+    cy.contains("a", "Buka draf").click();
     cy.location("pathname").should("match", /^\/dokumen\/[0-9a-f-]+$/).then((path) => {
       docs[key] = { id: path.split("/").pop()!, requestId };
     });
@@ -31,6 +31,13 @@ function upload(email: string, fixture: string, key: string) {
 
 const waitStatus = (label: string) => cy.contains(".page-head .badge", label, { timeout: 30_000 });
 const meta = (label: string) => cy.contains(".meta dt", label).next("dd");
+
+/** Draf hasil AI dikirim PIC ke Finance Reviewer (alur draf, feedback owner). */
+function submitDraft() {
+  waitStatus("Draf");
+  cy.contains(".decision button", "Kirim ke reviewer").click();
+  cy.contains(".alert", "Terkirim ke Finance Reviewer");
+}
 const reviewer = () => meta("Finance Reviewer").invoke("text").then((n) => REVIEWER_EMAIL[n]);
 const password = () => cy.env(["SEED_PASSWORD"], { log: false }).then((e) => e.SEED_PASSWORD as string);
 
@@ -83,6 +90,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-006 Unggah invoice PDF valid", () => {
     upload("pic.alpha@amiga.test", "sys_normal_a.pdf", "a");
     cy.then(() => expect(docs.a.requestId).to.match(/^REQ-\d{8}-[0-9A-F]{6}$/));
+    submitDraft();
     waitStatus("Siap ditinjau");
   });
 
@@ -126,7 +134,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-010 Dashboard Antrean menampilkan semua widget", () => {
     cy.visitAs("lead@amiga.test", "/antrean");
     cy.get(".stats .stat").should("have.length", 4);
-    cy.get(".status-strip button").should("have.length", 7);
+    cy.get(".status-strip button").should("have.length", 8);
     cy.contains("h2", "Beban reviewer");
     cy.contains("h2", "Antrean dokumen");
     cy.then(() => cy.contains("table", docs.a.requestId));
@@ -152,20 +160,39 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.then(() => {
       cy.visitAs("reviewer1@amiga.test", `/dokumen/${docs.a.id}`);
       cy.get(".pdf-pane iframe", { timeout: 15_000 }).should("have.attr", "src").and("match", /^blob:/);
-      cy.get("#f-vendor_name").should("have.value", "PT Konsultan Prima");
-      cy.get("table.compact tbody tr").should("have.length", 3);
+      meta("Nama vendor").should("contain.text", "PT Konsultan Prima");
+      cy.get("table.compact tbody tr").should("have.length", 4); // 3 baris + jumlah rincian
+      cy.get("#f-vendor_name").should("not.exist"); // reviewer tidak mengedit
     });
   });
 
-  it("TS-014 Simpan & verifikasi ulang menandai kendala dan menahan persetujuan", () => {
+  it("TS-014 PIC mengedit draf per invoice; kendala menahan pengiriman ke reviewer", () => {
     upload("pic.alpha@amiga.test", "sys_normal_b.pdf", "b");
-    waitStatus("Siap ditinjau");
-    reviewer().then((email) => {
-      cy.visitAs(email, `/dokumen/${docs.b.id}`);
+    waitStatus("Draf");
+    cy.get("#f-total").invoke("val").then((original) => {
       cy.get("#f-total").clear().type("6000000");
-      cy.contains(".decision button", "Simpan & verifikasi ulang").click();
+      cy.contains(".decision button", "Simpan bukti 1").click();
       cy.contains(".issue", "CALCULATION_DISCREPANCY");
-      cy.contains(".decision button", "Setujui").should("be.disabled");
+      waitStatus("Ada kendala");
+      cy.contains(".decision button", "Kirim ke reviewer").should("be.disabled");
+      // Kembalikan ke nilai semula: lolos lagi dan bisa dikirim
+      cy.get("#f-total").clear().type(String(original));
+      cy.contains(".decision button", "Simpan bukti 1").click();
+      cy.contains(".alert", "Tersimpan dan lolos verifikasi ulang");
+      submitDraft();
+      waitStatus("Siap ditinjau");
+    });
+  });
+
+  it("TS-044 Simulasi voucher sebelum dikirim", () => {
+    cy.then(() => {
+      cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.b.id}`);
+      cy.contains("button", "Lihat simulasi voucher").click();
+      cy.get(".modal iframe", { timeout: 15_000 }).should("have.attr", "src").and("match", /^blob:/);
+      cy.get(".modal button[aria-label=Tutup]").click();
+      cy.token("pic.alpha@amiga.test").then((t) =>
+        cy.request({ url: `/api/documents/${docs.b.id}/voucher-preview`, headers: { Authorization: `Bearer ${t}` } })
+          .its("headers.content-type").should("eq", "application/pdf"));
     });
   });
 
@@ -186,10 +213,12 @@ describe("System Testing AMIGA Robot Admin", () => {
 
   it("TS-016 Tandai bukan duplikat oleh reviewer", () => {
     upload("pic.alpha@amiga.test", "sys_dup_c.pdf", "c1");
+    submitDraft();
     waitStatus("Siap ditinjau");
     upload("pic.alpha@amiga.test", "sys_dup_c.pdf", "c2");
-    waitStatus("Ada kendala");
+    waitStatus("Draf");
     cy.contains(".issue", "POSSIBLE_DUPLICATE");
+    submitDraft(); // kemungkinan duplikat diputuskan reviewer
     cy.then(() => {
       cy.visitAs("reviewer1@amiga.test", `/dokumen/${docs.c2.id}`);
       cy.contains("button", "Tandai bukan duplikat").click();
@@ -216,6 +245,7 @@ describe("System Testing AMIGA Robot Admin", () => {
 
   it("TS-028 Pilihan reviewer pengalihan tidak memuat pengunggah (SoD)", () => {
     upload("multi@amiga.test", "sys_multi_d.pdf", "d"); // multi@ = Intake + Reviewer
+    submitDraft();
     waitStatus("Siap ditinjau");
     cy.then(() => {
       cy.visitAs("lead@amiga.test", `/dokumen/${docs.d.id}`);
@@ -354,7 +384,7 @@ describe("System Testing AMIGA Robot Admin", () => {
   // --- Fitur tambahan permintaan owner (14 Okt 2026) ---
   it("TS-029 Dashboard metrik menampilkan KPI status, tren, dan panel kinerja", () => {
     cy.visitAs("lead@amiga.test", "/dashboard");
-    cy.get(".kpi-status .kpi-mini").should("have.length", 7);
+    cy.get(".kpi-status .kpi-mini").should("have.length", 8);
     cy.contains(".stat", "Invoice masuk").find(".stat-val").invoke("text").then((t) => expect(Number(t)).to.be.greaterThan(0));
     cy.contains("h2", "Tren harian");
     cy.get(".recharts-line").should("have.length", 3);
@@ -451,23 +481,20 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.get(".file-list li").should("have.length", 2);
     cy.contains("button", "Preview").click();
     cy.contains("button", "Kirim ke antrean").click();
-    cy.contains("Terkirim ke antrean");
-    cy.contains("a", "Lihat status dokumen").click();
+    cy.contains("Draf dibuat");
+    cy.contains("a", "Buka draf").click();
     cy.contains(".pdf-head", "2 invoice");
     cy.contains(".meta dt", "File invoice").next("dd").should("contain.text", "sys_normal_a.pdf").and("contain.text", "sys_multi_d.pdf");
   });
 
   it("TS-039 Peran ganda yang memperbaiki data tidak bisa meninjau dokumen itu (SoD)", () => {
-    upload("pic.alpha@amiga.test", "sys_dup_c.pdf", "e"); // duplikat c1 → EXCEPTION
-    waitStatus("Ada kendala");
+    upload("pic.alpha@amiga.test", "sys_dup_c.pdf", "e"); // duplikat c1 → draf dengan POSSIBLE_DUPLICATE
+    waitStatus("Draf");
     cy.then(() => {
-      // Yoga (Intake + Reviewer) bertindak sebagai pengaju: mengirim perbaikan
+      // Yoga (Intake + Reviewer) bertindak sebagai pengaju: mengirim draf ke reviewer
       cy.visitAs("multi@amiga.test", `/dokumen/${docs.e.id}`);
-      cy.get("#fix-note").type("Nomor invoice sudah dikonfirmasi ke vendor.");
-      cy.contains("button", "Kirim perbaikan").click();
-      waitStatus("Ada kendala");
+      submitDraft();
       cy.contains(".issue", "POSSIBLE_DUPLICATE");
-      cy.reload();
       cy.contains("button", "Tandai bukan duplikat").click();
       cy.get("#reason").type("Tagihan berbeda, sudah dicek.");
       cy.contains(".modal button", "Tandai").click();

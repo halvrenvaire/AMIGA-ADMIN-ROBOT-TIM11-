@@ -32,6 +32,8 @@ def test_dual_role_user_who_fixed_the_data_cannot_review_it(extractor):
     r = yoga.post(f"/documents/{doc['id']}/fix", json={"fields": {"account_no": "1234567890"}})
     assert r.status_code == 200
     extractor.result = invoice()
+    assert detail(doc["id"])["status"] == "DRAFT"
+    assert yoga.post(f"/documents/{doc['id']}/submit").status_code == 200  # Yoga sebagai Intake mengirim
     d = detail(doc["id"])
     assert d["status"] == "READY_FOR_REVIEW"
     assert d["assigned_reviewer"] != NAMES["multi@amiga.test"]
@@ -49,6 +51,7 @@ def test_dual_role_user_who_fixed_cannot_dismiss_duplicate(extractor):
     extractor.result = invoice()
     assert yoga.post(f"/documents/{doc['id']}/fix", json={"fields": {"account_no": "1234567890"}}).status_code == 200
     assert [i["code"] for i in detail(doc["id"])["issues"]] == ["POSSIBLE_DUPLICATE"]
+    assert yoga.post(f"/documents/{doc['id']}/submit").status_code == 200
     r = yoga.post(f"/documents/{doc['id']}/dismiss-duplicate", json={"reason": "nomor sudah diganti"})
     assert r.status_code == 403
     # Reviewer lain boleh

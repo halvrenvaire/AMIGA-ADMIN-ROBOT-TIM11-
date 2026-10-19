@@ -3,7 +3,7 @@
 export type Role = "PIC_KLIEN" | "INTAKE_SUPPORT" | "FINANCE_REVIEWER" | "SERVICE_LEAD" | "SYSTEM_ADMIN";
 
 export type DocStatus =
-  | "QUEUED" | "PROCESSING" | "READY_FOR_REVIEW" | "EXCEPTION" | "AMIGA_REVIEWED" | "SENT_TO_CLIENT" | "CANCELLED";
+  | "QUEUED" | "PROCESSING" | "DRAFT" | "READY_FOR_REVIEW" | "EXCEPTION" | "AMIGA_REVIEWED" | "SENT_TO_CLIENT" | "CANCELLED";
 
 export type IssueCode =
   | "MISSING_EVIDENCE" | "CALCULATION_DISCREPANCY" | "POSSIBLE_DUPLICATE" | "EXTRACTION_FAILED"
@@ -84,6 +84,12 @@ export interface Extraction {
   duration_ms: number | null;
 }
 
+export interface FileData {
+  vendor_name: string | null; invoice_no: string | null; invoice_date: string | null; total: string | null;
+  bank_name: string | null; account_no: string | null; account_name: string | null;
+  line_items: { description: string | null; qty: string | null; unit_price: string | null; subtotal: string | null }[];
+}
+
 export interface DocumentDetail extends DocumentSummary {
   issues: Issue[];
   extraction: Extraction | null;
@@ -92,7 +98,9 @@ export interface DocumentDetail extends DocumentSummary {
   vendor: ClientRef | null;
   signers: Signer[];
   /** source_format: "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF. */
-  files: { position: number; original_filename: string; page_count: number; read_at: string | null; source_format?: string | null }[];
+  files: { position: number; original_filename: string; page_count: number; read_at: string | null; source_format?: string | null;
+    /** Data per invoice yang diedit PIC saat DRAFT/EXCEPTION. */
+    data?: FileData | null }[];
   cancellation?: { by: string; at: string; reason: string } | null;
   classification?: Classification | null;
   account_check?: AccountCheck | null;
