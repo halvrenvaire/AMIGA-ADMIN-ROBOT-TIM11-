@@ -175,3 +175,10 @@ def test_ai_pph21_for_a_company_is_corrected_to_pph23():
     out = tax_service.suggest(FakeBedrock('{"invoices": [{"code": "PPH21", "reason": "Jasa konsultasi"}, '
                                           '{"code": "PPH21", "reason": "Honor orang pribadi"}]}'), items, False, valid)
     assert [s.code for s in out] == ["PPH23", "PPH21"]
+
+
+def test_only_pph26_still_needs_confirmation(tx):
+    # Tahap 5 (20 Okt 2026): tarif PPh 21, 23, dan 4 ayat 2 dikonfirmasi tim; arti "Ppn 26" dari owner belum jelas
+    rates = {r["code"]: r for r in api(PIC).get("/tax-rates").json()}
+    assert {code for code, r in rates.items() if r["needs_confirmation"]} == {"PPH26"}
+    assert "Ppn 26" in rates["PPH26"]["description"]
