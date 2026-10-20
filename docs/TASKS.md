@@ -23,7 +23,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | 3 | Alur draf: PIC edit per invoice, simulasi voucher, reviewer hanya menyetujui | Besar | 7/7 | ✅ |
 | 4 | Pajak: tabel tarif, NPWP, saran AI, potongan di voucher | Besar | 8/8 | ✅ |
 | 5 | Konfirmasi tarif pajak | Kecil | 1/2 | ❓ PPh 26 |
-| 6 | Feedback owner 19–20 Okt (kop voucher, PPN) | Sedang | 2/3 | 🔄 T6.3 |
+| 6 | Feedback owner 19–20 Okt (kop voucher, PPN, tabel voucher) | Sedang | 4/4 | ✅ |
 | 7 | Pertanyaan terbuka ke owner | — | 0/4 | ❓ |
 | 8 | Dokumen & rilis (BRD, PRD, BPMN, deploy) | Sedang | 0/5 | ⏳ |
 
@@ -91,7 +91,8 @@ _Terakhir diperbarui: 20 Okt 2026_
 | --- | --- | --- | --- |
 | T6.1 | Kop voucher memakai **logo klien** (diunggah PIC Klien atau System Admin) | [x] | `82be79e` |
 | T6.2 | Klien, Request ID, vendor, No./Tgl. invoice, rekening, catatan e-sign, dan teks batas otorisasi **tidak dicetak** di voucher | [x] | `82be79e` |
-| T6.3 | PPN tidak diperhitungkan lagi: baris PPN tidak dicetak, voucher memakai "TOTAL INVOICE (TERMASUK PPN)", PPh dihitung dari nilai sebelum PPN | 🔄 | belum di-commit |
+| T6.3 | PPN tidak diperhitungkan lagi: baris PPN tidak dicetak, voucher memakai total invoice termasuk PPN, PPh dihitung dari nilai sebelum PPN | [x] | `5305fec` |
+| T6.4 | Tabel voucher jadi No · Uraian · Jumlah: PPN dilebur ke nilai barang, potongan PPh jadi baris bernomor tepat di bawah barangnya | [x] | `ecfdf59` |
 
 ## Tahap 7 — Pertanyaan terbuka ke owner
 
@@ -107,7 +108,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | ID | Tugas | Status | Catatan |
 | --- | --- | --- | --- |
 | T8.1 | Perbarui BPMN: alur draf (PIC edit → simulasi → kirim), reviewer tanpa edit | [ ] | BPMN v2 masih alur lama (reviewer mengoreksi) |
-| T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher | [ ] | |
+| T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4) | [ ] | |
 | T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6; FR-5.2 (teks batas otorisasi) dicabut owner | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak, lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
@@ -119,3 +120,4 @@ _Terakhir diperbarui: 20 Okt 2026_
 | Tanggal | Perubahan |
 | --- | --- |
 | 20 Okt 2026 | Dibuat dari Ringkasan Feedback Owner (18 Okt) dan commit Tahap 1–5 |
+| 20 Okt 2026 | T6.3 selesai (`5305fec`); T6.4 ditambahkan dan selesai (`ecfdf59`) |
