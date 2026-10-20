@@ -26,8 +26,9 @@ _Terakhir diperbarui: 20 Okt 2026_
 | 6 | Feedback owner 19–20 Okt (kop voucher, PPN, tabel voucher) | Sedang | 4/4 | ✅ |
 | 7 | Pertanyaan terbuka ke owner | — | 0/4 | ❓ |
 | 8 | Dokumen & rilis (BRD, PRD, BPMN, deploy) | Sedang | 0/5 | ⏳ |
-| 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ belum di-commit |
-| 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ belum di-commit |
+| 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ |
+| 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
+| 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
 
 ---
 
@@ -110,7 +111,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | ID | Tugas | Status | Catatan |
 | --- | --- | --- | --- |
 | T8.1 | Perbarui BPMN: alur draf (PIC edit → simulasi → kirim), reviewer tanpa edit | [ ] | BPMN v2 masih alur lama (reviewer mengoreksi) |
-| T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4, dan pengaturan PPN/PPh per baris T9.1–T9.6); satu voucher boleh beberapa vendor/rekening setelah dikonfirmasi PIC (T10.3) | [ ] | |
+| T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4, dan pengaturan PPN/PPh per baris T9.1–T9.6); satu voucher boleh beberapa vendor/rekening setelah dikonfirmasi PIC (T10.3); format voucher Tahap 11 | [ ] | |
 | T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
@@ -119,25 +120,54 @@ _Terakhir diperbarui: 20 Okt 2026_
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T9.1 | Pengaturan PPN per invoice: terpisah / harga sudah termasuk PPN / tidak ada; tarif bisa dipilih (bawaan 11%); baris bisa ditandai tidak kena PPN atau sebagai baris PPN | [x] | belum di-commit |
-| T9.2 | PPN invoice dibandingkan dengan hitungan sistem: selisih hanya peringatan, voucher tetap memakai total invoice | [x] | belum di-commit |
-| T9.3 | Pilihan "Tampilkan rincian PPN pada voucher" (bawaan tidak dicentang: PPN dilebur ke nilai barang, seperti T6.4) | [x] | belum di-commit |
-| T9.4 | Penerapan PPh: satu jenis untuk seluruh invoice (bawaan) atau berbeda per baris; PIC memilih beberapa baris sekaligus (multi-select) untuk satu jenis PPh | [x] | belum di-commit |
-| T9.5 | Saran PPh per baris dari aturan kata kunci (tanpa AI) sebagai isian awal; tombol "Minta rekomendasi AI untuk PPh per baris"; bila AI tidak tersedia muncul pesan dan saran aturan tetap dipakai | [x] | belum di-commit |
-| T9.6 | Voucher: potongan PPh per jenis dicetak tepat di bawah barang terakhir yang dipotong jenis itu; ringkasan pajak di layar menampilkan PPN dan baris yang dipotong | [x] | belum di-commit |
-| T9.7 | Navigasi cepat panel kanan layar tinjau: daftar bagian berwarna status (oranye = perlu diisi/diperbaiki, merah = menghalangi kirim), lompat ke kolom kosong, tombol "Perbaikan berikutnya", pemeriksaan di kartu hasil AI bisa diklik | [x] | belum di-commit |
-| T9.8 | Sample invoice pajak (`samples/pajak/`, 8 kasus) dan test (`backend/tests/test_tax_per_line.py`) | [x] | belum di-commit |
+| T9.1 | Pengaturan PPN per invoice: terpisah / harga sudah termasuk PPN / tidak ada; tarif bisa dipilih (bawaan 11%); baris bisa ditandai tidak kena PPN atau sebagai baris PPN | [x] | `707aef1` |
+| T9.2 | PPN invoice dibandingkan dengan hitungan sistem: selisih hanya peringatan, voucher tetap memakai total invoice | [x] | `707aef1` |
+| T9.3 | Pilihan "Tampilkan rincian PPN pada voucher" (bawaan tidak dicentang: PPN dilebur ke nilai barang, seperti T6.4) | [x] | `707aef1` |
+| T9.4 | Penerapan PPh: satu jenis untuk seluruh invoice (bawaan) atau berbeda per baris; PIC memilih beberapa baris sekaligus (multi-select) untuk satu jenis PPh | [x] | `707aef1` |
+| T9.5 | Saran PPh per baris dari aturan kata kunci (tanpa AI) sebagai isian awal; tombol "Minta rekomendasi AI untuk PPh per baris"; bila AI tidak tersedia muncul pesan dan saran aturan tetap dipakai | [x] | `707aef1` |
+| T9.6 | Voucher: potongan PPh per jenis dicetak tepat di bawah barang terakhir yang dipotong jenis itu; ringkasan pajak di layar menampilkan PPN dan baris yang dipotong | [x] | `707aef1` |
+| T9.7 | Navigasi cepat panel kanan layar tinjau: daftar bagian berwarna status (oranye = perlu diisi/diperbaiki, merah = menghalangi kirim), lompat ke kolom kosong, tombol "Perbaikan berikutnya", pemeriksaan di kartu hasil AI bisa diklik | [x] | `707aef1` |
+| T9.8 | Sample invoice pajak (`samples/pajak/`, 8 kasus) dan test (`backend/tests/test_tax_per_line.py`) | [x] | `707aef1` |
 
 ## Tahap 10 — Mengurangi ketergantungan AI (setelah kunci AWS dicabut, 20 Okt 2026)
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T10.1 | Mode isi manual: `AI_EXTRACTION_ENABLED=false` di `.env`, atau AI gagal membaca (mis. kredensial), membuat bukti menjadi draf kosong dengan pesan "Isi data invoice secara manual", bukan dokumen "Ada kendala". Bukti lain yang terbaca AI tetap dipakai; saran pajak dari aturan tetap ada; tombol "Coba baca ulang dengan AI" hanya membaca ulang bukti yang gagal. File yang hilang di penyimpanan tetap `EXTRACTION_FAILED` | [x] | belum di-commit |
-| T10.2 | Subtotal otomatis = qty × harga satuan (2 desimal, tanda "otomatis") bila keduanya terisi; selain itu subtotal diisi manual (borongan). Juga dihitung ulang di backend saat disimpan. Tombol "Samakan total dengan jumlah rincian" | [x] | belum di-commit |
-| T10.3 | Beberapa vendor/rekening dalam satu voucher (`VENDOR_MISMATCH`) menjadi peringatan: dokumen tetap Draf, PIC mengonfirmasi dengan alasan (`POST /documents/{id}/acknowledge`, tercatat di riwayat, tidak dicetak di voucher). Konfirmasi gugur bila daftar vendor/rekening berubah | [x] | belum di-commit |
-| T10.4 | Rekening dicek per invoice: setiap rekening dicocokkan dengan vendornya masing-masing (`ACCOUNT_MISMATCH` tetap menghalangi). Reviewer melihat "Pembayaran per rekening" (vendor, rekening, nilai dibayarkan, status), dan konfirmasi rekening saat menyetujui mencakup semua rekening yang belum terverifikasi | [x] | belum di-commit |
-| T10.5 | Pintasan rekening vendor dari layar dokumen: PIC "Daftarkan rekening vendor" / "Perbarui rekening vendor" (diisi dari invoice; hanya pencatatan, pengajuan tetap berjalan), Finance Reviewer "Verifikasi rekening vendor ini" (SoD tetap berlaku). Formulir vendor dipindah ke `components/VendorForm.tsx`; `GET /vendors/{id}` ditambahkan | [x] | belum di-commit |
-| T10.6 | Test: `test_documents.py` (isi manual, AI dimatikan, error tak terduga, file hilang), `test_multi_invoice.py` (konfirmasi PIC, konfirmasi gugur, rekening per invoice, daftar & verifikasi vendor), `test_review.py` (subtotal otomatis) | [x] | belum di-commit |
+| T10.1 | Mode isi manual: `AI_EXTRACTION_ENABLED=false` di `.env`, atau AI gagal membaca (mis. kredensial), membuat bukti menjadi draf kosong dengan pesan "Isi data invoice secara manual", bukan dokumen "Ada kendala". Bukti lain yang terbaca AI tetap dipakai; saran pajak dari aturan tetap ada; tombol "Coba baca ulang dengan AI" hanya membaca ulang bukti yang gagal. File yang hilang di penyimpanan tetap `EXTRACTION_FAILED` | [x] | `707aef1` |
+| T10.2 | Subtotal otomatis = qty × harga satuan (2 desimal, tanda "otomatis") bila keduanya terisi; selain itu subtotal diisi manual (borongan). Juga dihitung ulang di backend saat disimpan. Tombol "Samakan total dengan jumlah rincian" | [x] | `707aef1` |
+| T10.3 | Beberapa vendor/rekening dalam satu voucher (`VENDOR_MISMATCH`) menjadi peringatan: dokumen tetap Draf, PIC mengonfirmasi dengan alasan (`POST /documents/{id}/acknowledge`, tercatat di riwayat, tidak dicetak di voucher). Konfirmasi gugur bila daftar vendor/rekening berubah | [x] | `707aef1` |
+| T10.4 | Rekening dicek per invoice: setiap rekening dicocokkan dengan vendornya masing-masing (`ACCOUNT_MISMATCH` tetap menghalangi). Reviewer melihat "Pembayaran per rekening" (vendor, rekening, nilai dibayarkan, status), dan konfirmasi rekening saat menyetujui mencakup semua rekening yang belum terverifikasi | [x] | `707aef1` |
+| T10.5 | Pintasan rekening vendor dari layar dokumen: PIC "Daftarkan rekening vendor" / "Perbarui rekening vendor" (diisi dari invoice; hanya pencatatan, pengajuan tetap berjalan), Finance Reviewer "Verifikasi rekening vendor ini" (SoD tetap berlaku). Formulir vendor dipindah ke `components/VendorForm.tsx`; `GET /vendors/{id}` ditambahkan | [x] | `707aef1` |
+| T10.6 | Test: `test_documents.py` (isi manual, AI dimatikan, error tak terduga, file hilang), `test_multi_invoice.py` (konfirmasi PIC, konfirmasi gugur, rekening per invoice, daftar & verifikasi vendor), `test_review.py` (subtotal otomatis) | [x] | `707aef1` |
+
+## Tahap 11 — Format voucher sesuai contoh owner (20 Okt 2026)
+
+Sumber: contoh voucher owner `contoh voucher owner 1702 (tidak disimpan di repo)` (6 invoice, PPh 23) dan
+`1944_…Fee Pembicara…pdf` (PPh 21). Isi halaman 1 contoh 1702:
+
+- Kop data: **Nomor** 1702-04-2026 · **Nama** (pengaju) · **Peruntukan** · **Tanggal/Periode** · **Nominal** (= total bersih)
+- Tabel **NO · TANGGAL · KETERANGAN · JUMLAH · HARGA**; satu baris per invoice senilai total invoice (termasuk PPN),
+  lalu baris potongan di bawahnya: `Potongan PPh 23 ( Rp 2,304,696 x 2% ) Driver A` = `-Rp46,094`
+- PPh 23 hanya dari baris jasa (Management Fee), bukan Basic Fee/Overtime → sudah didukung PPh per baris (T9.4)
+- Kotak tanda tangan: **Diajukan Oleh · Diketahui Oleh · Disetujui Oleh** (nama + jabatan)
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T11.1 | Kop data voucher: Nomor, Nama (pengaju), **Peruntukan** (kolom baru diisi PIC, mis. "Pembayaran DSS Management Fee … Maret 2026"), Tanggal/Periode, Nominal (total dibayarkan) | [ ] | — |
+| T11.2 | Format nomor voucher `{urut}-{MM}-{YYYY}` (mis. 1702-04-2026); nomor urut tidak reset per bulan (1702 di April, 1944 di Oktober) | ❓ | — |
+| T11.3 | Kolom tabel NO · TANGGAL · KETERANGAN · JUMLAH · HARGA; tanggal = tanggal voucher | [ ] | — |
+| T11.4 | Satu baris per invoice (keterangan ringkas yang bisa diedit PIC, nilai = total invoice termasuk PPN), bukan per barang | ❓ | — |
+| T11.5 | Teks potongan `Potongan PPh 23 ( Rp DPP x 2% ) <keterangan>`, nilai negatif `-Rp…`; baris akhir `TOTAL` | [ ] | — |
+| T11.6 | Kotak tanda tangan ketiga **Diketahui oleh** (nama + jabatan, didaftarkan PIC seperti penanda tangan lain) | [ ] | — |
+| T11.7 | Gross-up PPh 21: contoh 1944 fee Rp 3.076.923 dipotong 2,5% agar bersih tepat Rp 3.000.000 | ❓ | — |
+| T11.8 | Format angka: contoh owner `Rp8,933,846` (koma); aplikasi sekarang `Rp 8.933.846` | ❓ | — |
+| T11.9 | Test dengan dua contoh owner: total 1702 = Rp 41.719.136, total 1944 = Rp 3.000.000 | [ ] | — |
+
+Pertanyaan ke owner untuk T11.2, T11.4, T11.7, T11.8:
+1. Nomor voucher: nomor urut per klien yang melanjutkan nomor terakhir mereka (1944 → 1945), atau mulai dari 1?
+2. Rincian per barang tetap boleh dicetak, atau selalu satu baris per invoice?
+3. Perlu hitung otomatis gross-up (PIC mengisi nilai bersih, sistem menghitung bruto)?
+4. Angka di voucher ikut format contoh (koma) atau format Indonesia (titik)?
 
 ---
 
@@ -149,3 +179,4 @@ _Terakhir diperbarui: 20 Okt 2026_
 | 20 Okt 2026 | T6.3 selesai (`5305fec`); T6.4 ditambahkan dan selesai (`ecfdf59`) |
 | 20 Okt 2026 | Tahap 9 ditambahkan dan selesai (T9.1–T9.8): PPN per invoice, PPh per baris, navigasi cepat, sample pajak; T8.2–T8.4 mencakup Tahap 9 |
 | 20 Okt 2026 | Tahap 10 ditambahkan dan selesai (T10.1–T10.6): isi manual saat AI bermasalah, subtotal otomatis, beberapa vendor per voucher, rekening per invoice, pintasan rekening vendor; T8.2–T8.4 mencakup Tahap 10 |
+| 20 Okt 2026 | Hash `707aef1` diisi untuk Tahap 9–10; Tahap 11 ditambahkan dari contoh voucher owner (No. 1702 & 1944) |
