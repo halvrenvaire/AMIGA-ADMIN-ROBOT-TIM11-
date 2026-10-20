@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Info, Loader2, Search, X } from "lucide-react";
 import { api } from "../api";
 import { STATUS_LABEL } from "../format";
@@ -25,7 +26,9 @@ export function Modal({ title, onClose, children, wide = false, full = false }: 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Dirender langsung di <body>: di dalam area konten, modal kalah tumpuk (stacking context) oleh topbar
+  // dan tombol Asisten, sehingga judul dan tombol Tutup tertutup pada layar yang pendek
+  return createPortal(
     <div className={`backdrop${full ? " full" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal${wide ? " wide" : ""}${full ? " full" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="panel-head">
@@ -34,7 +37,8 @@ export function Modal({ title, onClose, children, wide = false, full = false }: 
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
