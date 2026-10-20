@@ -123,7 +123,6 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.cell(0, 7, f"VOUCHER PENGELUARAN {voucher_no}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
-    n_files = len(getattr(doc, "files", None) or [])
     # Klien, Request ID, vendor, serta nomor dan tanggal invoice tidak dicetak (feedback owner 19 Okt 2026)
     rows = [("Tgl. Voucher", "(terbit setelah disetujui)" if simulation else approved_at.strftime("%d-%m-%Y"))]
     for label, value in rows:
@@ -137,10 +136,11 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     pdf.set_draw_color(150, 160, 165)
     pdf.set_fill_color(255, 255, 255)
     pdf.set_font("Helvetica", "", 9)
+    rows, paid = voucher_rows(doc)
     with pdf.table(
         cell_fill_mode=TableCellFillMode.NONE,
-        col_widths=(10, 84, 18, 38, 40),
-        text_align=("CENTER", "LEFT", "CENTER", "RIGHT", "RIGHT"),
+        col_widths=(12, 136, 42),
+        text_align=("CENTER", "LEFT", "RIGHT"),
         headings_style=FontFace(emphasis="BOLD", fill_color=(235, 245, 246)),
         line_height=5,
         padding=1.5,
@@ -149,33 +149,16 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         repeat_headings=1,
     ) as table:
         header = table.row()
-        for title in ("No", "Uraian", "Qty", "Harga Satuan", "Subtotal"):
+        for title in ("No", "Uraian", "Jumlah"):
             header.cell(title, align="CENTER")
-        # Baris PPN tidak dicetak (feedback owner 20 Okt 2026): PPN tidak diperhitungkan lagi, yang dipakai
-        # total invoice; potongan PPh dihitung dari nilai sebelum PPN. Data PPN tetap tersimpan di sistem.
-        shown = [line for line in ex.line_items if not tax_service.is_vat_line(line.description)]
-        vat_hidden = len(shown) < len(ex.line_items)
-        for no, line in enumerate(shown, start=1):
-            qty = "-" if line.qty is None else f"{line.qty.normalize():f}"
+        for no, (text, amount, is_cut) in enumerate(rows, start=1):
             row = table.row()
-            for text in (str(no), _t(line.description), qty, _money(line.unit_price), _money(line.subtotal)):
-                row.cell(text)
-        taxes = tax_service.summary(doc)
-        if taxes.lines or vat_hidden:
-            # Tahap 4: voucher membayar nilai bersih setelah potongan pajak per invoice
-            gross = table.row(style=FontFace(emphasis="BOLD"))
-            gross.cell("TOTAL INVOICE (TERMASUK PPN)" if vat_hidden else "JUMLAH TAGIHAN", colspan=4, align="RIGHT")
-            gross.cell(_money(taxes.gross))
-            for t in taxes.lines:
-                rate = f"{t.rate.normalize():f}".replace(".", ",")
-                where = f" [{t.invoice_no}]" if t.invoice_no and n_files > 1 else ""
-                cut = table.row()
-                cut.cell(f"Potongan {t.name} {rate}%{'' if t.npwp else ' (tanpa NPWP)'} x DPP {_money(t.base)}{where}",
-                         colspan=4, align="RIGHT")
-                cut.cell(f"({_money(t.amount)})")
+            row.cell(str(no))
+            row.cell(_t(text))
+            row.cell(f"({_money(amount)})" if is_cut else _money(amount))
         total = table.row(style=FontFace(emphasis="BOLD", size_pt=10))
-        total.cell("TOTAL DIBAYARKAN", colspan=4, align="RIGHT")
-        total.cell(_money(taxes.net))
+        total.cell("TOTAL DIBAYARKAN", colspan=2, align="RIGHT")
+        total.cell(_money(paid))
     pdf.ln(12)
 
     # Rekening tujuan tidak dicetak (feedback owner): pengecekan rekening tetap berjalan di sistem
@@ -187,6 +170,64 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     if simulation:
         _simulation_mark(pdf)
     return bytes(pdf.output())
+
+
+def _dec(value) -> Decimal | None:
+    return None if value in (None, "") else Decimal(str(value))
+
+
+def _qty(value: Decimal) -> str:
+    return f"{value.normalize():f}".replace(".", ",")
+
+
+def voucher_rows(doc) -> tuple[list[tuple[str, Decimal, bool]], Decimal]:
+    """Baris tabel voucher (feedback owner 20 Okt 2026): per invoice, barangnya dengan PPN dilebur ke nilai
+    barang (dibagi proporsional; sisa pembulatan ke barang terakhir), lalu baris potongan PPh tepat di bawahnya.
+    Jumlah semua baris = total dibayarkan. Hasil: [(uraian, jumlah, potongan?)], total dibayarkan."""
+    from app.services.document_processing import file_data  # hindari import melingkar
+
+    files = getattr(doc, "files", None) or []
+    if files:
+        groups = [file_data(doc, f) for f in files]
+    else:  # dokumen lama tanpa data per invoice
+        ex = doc.extraction
+        groups = [{"invoice_no": ex.invoice_no, "total": ex.total,
+                   "line_items": [{"description": li.description, "qty": li.qty, "unit_price": li.unit_price,
+                                   "subtotal": li.subtotal} for li in ex.line_items]}]
+    multi = len(groups) > 1
+    rows: list[tuple[str, Decimal, bool]] = []
+    for data in groups:
+        lines = data.get("line_items") or []
+        items = [li for li in lines if not tax_service.is_vat_line(li.get("description"))]
+        has_vat = len(items) < len(lines)
+        subtotals = [_dec(li.get("subtotal")) or Decimal(0) for li in items]
+        base_sum = sum(subtotals, Decimal(0))
+        total = _dec(data.get("total"))
+        # PPN tidak dicetak sendiri: selisih total invoice dengan jumlah barang dilebur ke barang
+        vat = (total - base_sum) if has_vat and total is not None else Decimal(0)
+        shares = [Decimal(0)] * len(items)
+        if vat and base_sum:
+            for i, sub in enumerate(subtotals[:-1]):
+                shares[i] = (vat * sub / base_sum).quantize(Decimal("0.01"))
+            shares[-1] = vat - sum(shares[:-1], Decimal(0))
+        tag = f"[{data.get('invoice_no')}] " if multi and data.get("invoice_no") else ""
+        for li, sub, share in zip(items, subtotals, shares):
+            qty, unit = _dec(li.get("qty")), _dec(li.get("unit_price"))
+            detail = [f"{_qty(qty)} x {_money(unit)}"] if qty is not None and unit is not None else []
+            if share:
+                detail.append("termasuk PPN")
+            text = f"{tag}{li.get('description') or '-'}" + (f" ({', '.join(detail)})" if detail else "")
+            rows.append((text, sub + share, False))
+        if not items and total is not None:  # invoice tanpa rincian: satu baris total
+            rows.append((f"{tag}Invoice {data.get('invoice_no') or ''}".strip(), total, False))
+        tax = data.get("tax")
+        if tax and tax.get("code") != tax_service.NONE and _dec(tax.get("amount")):
+            what = items[0].get("description") if len(items) == 1 else (data.get("invoice_no") or "invoice ini")
+            rate = _qty(Decimal(str(tax["rate"])))
+            rows.append((f"Potongan {tax['name']} {rate}%{'' if tax.get('npwp') else ' (tanpa NPWP)'} x DPP "
+                         f"{_money(_dec(tax.get('base')))} ({what})", _dec(tax["amount"]), True))
+    paid = sum((-a if cut else a for _, a, cut in rows), Decimal(0))
+    return rows, paid
 
 
 SIGN_BLOCK_H = 46  # mm per kotak: judul, ruang tanda tangan, garis, tiga baris keterangan

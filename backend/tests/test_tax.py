@@ -117,7 +117,9 @@ def test_voucher_shows_deduction_and_pays_net(extractor):
     doc = detail(doc_id)
     approve(doc)
     text = pdf_text(api(PIC).get(f"/documents/{doc['id']}/voucher").content)
-    assert "JUMLAH TAGIHAN" in text and "Potongan PPh 23 2% x DPP" in text
+    # Potongan menjadi baris bernomor tepat di bawah barangnya (feedback owner 20 Okt 2026)
+    assert re.search(r"1 Jasa konsultan pajak Oktober \(1 x Rp ?900\.000\) Rp ?900\.000 "
+                     r"2 Potongan PPh 23 2% x DPP Rp ?900\.000 \(Jasa konsultan pajak Oktober\) \(Rp ?18\.000\)", text)
     assert re.search(r"TOTAL DIBAYARKAN Rp ?882\.000", text)
     row = next(r for r in api(PIC).get("/vouchers").json() if r["document_id"] == doc["id"])
     assert (Decimal(row["total"]), Decimal(row["gross"]), Decimal(row["tax_total"])) == (882000, 900000, 18000)
@@ -197,10 +199,10 @@ def test_owner_example_ppn_not_printed_and_pph23_from_value_before_ppn(extractor
     send(doc_id)
     approve(detail(doc_id))
     text = pdf_text(api(PIC).get(f"/documents/{doc_id}/voucher").content)
-    assert re.search(r"1 COFFEE PRECIOUS CARGO 1 KG 3 Rp ?285\.000 Rp ?855\.000", text)
-    assert " PPN Rp" not in text and "94.050" not in text  # baris PPN tidak dicetak
-    assert re.search(r"TOTAL INVOICE \(TERMASUK PPN\) Rp ?949\.050", text)
-    assert re.search(r"Potongan PPh 23 2% x DPP Rp ?855\.000 \(Rp ?17\.100\)", text)
+    # PPN dilebur ke nilai barang; potongan PPh baris bernomor di bawahnya; jumlah baris = total dibayarkan
+    assert re.search(r"1 COFFEE PRECIOUS CARGO 1 KG \(3 x Rp ?285\.000, termasuk PPN\) Rp ?949\.050 "
+                     r"2 Potongan PPh 23 2% x DPP Rp ?855\.000 \(COFFEE PRECIOUS CARGO 1 KG\) \(Rp ?17\.100\)", text)
+    assert "94.050" not in text  # PPN tidak tampil sebagai baris sendiri
     assert re.search(r"TOTAL DIBAYARKAN Rp ?931\.950", text)
 
 
@@ -211,3 +213,17 @@ def test_item_mentioning_ppn_is_not_treated_as_ppn_line():
     data = {"total": "1110000", "line_items": [{"description": "Jasa servis AC (termasuk PPN)", "subtotal": "1000000"},
                                                {"description": "PPN 11%", "subtotal": "110000"}]}
     assert tax_service.default_base(data) == Decimal(1000000)
+
+
+def test_ppn_split_proportionally_over_items_and_rows_sum_to_paid():
+    from types import SimpleNamespace as N
+    from app.services.voucher_service import voucher_rows
+    data = {"invoice_no": "INV-9", "total": "1110000", "line_items": [
+        {"description": "Kursi", "qty": "2", "unit_price": "300000", "subtotal": "600000"},
+        {"description": "Meja", "qty": "1", "unit_price": "400000", "subtotal": "400000"},
+        {"description": "PPN 11%", "subtotal": "110000"}],
+        "tax": {"code": "PPH23", "name": "PPh 23", "rate": "2", "npwp": True, "base": "1000000", "amount": "20000"}}
+    rows, paid = voucher_rows(N(files=[N(data=data)], extraction=None))
+    assert [(round(a), cut) for _, a, cut in rows] == [(666000, False), (444000, False), (20000, True)]
+    assert rows[2][0].endswith("(INV-9)")  # beberapa barang: potongan menyebut nomor invoice
+    assert paid == Decimal(1090000)
