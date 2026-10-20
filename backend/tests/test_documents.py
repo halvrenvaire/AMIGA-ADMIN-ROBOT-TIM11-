@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
@@ -57,10 +57,12 @@ class FakeExtractor:
     def __init__(self):
         self.result: ExtractedInvoice | Exception = invoice()
         self.calls = 0
+        self.pages: list[int] = []  # jumlah halaman yang dikirim ke AI per panggilan
 
     def extract(self, pdf_bytes):
         assert pdf_bytes.startswith(b"%PDF-")
         self.calls += 1
+        self.pages.append(len(PdfReader(io.BytesIO(pdf_bytes)).pages))
         # Daftar hasil = satu hasil per file (unggahan beberapa invoice), berurutan
         result = self.result.pop(0) if isinstance(self.result, list) else self.result
         if isinstance(result, Exception):
@@ -190,7 +192,6 @@ def test_uat2_multi_line_items_are_all_read_and_total_correct(extractor):
 
 @pytest.mark.parametrize("pdf, filename, message", [
     (b"bukan pdf", "invoice.docx", "format PDF"),
-    (make_pdf(6), "invoice.pdf", "6 halaman"),
     (b"%PDF-1.4 rusak", "invoice.pdf", "rusak"),
 ])
 def test_invalid_files_are_rejected_with_clear_message(extractor, pdf, filename, message):
@@ -200,8 +201,11 @@ def test_invalid_files_are_rejected_with_clear_message(extractor, pdf, filename,
     assert api("pic.alpha@amiga.test").get("/documents").json() == []
 
 
-def test_five_pages_is_accepted(extractor):
-    assert upload(pdf=make_pdf(5)).json()["page_count"] == 5
+def test_page_count_is_not_limited_and_ai_reads_only_first_pages(extractor):
+    # Feedback owner 20 Okt 2026: satu berkas = invoice + Faktur Pajak + timesheet (bisa puluhan halaman)
+    doc = upload(pdf=make_pdf(33)).json()
+    assert doc["page_count"] == 33
+    assert extractor.pages == [settings.ai_max_pages]  # AI hanya membaca halaman awal
 
 
 def test_channel_is_required_and_limited(extractor):

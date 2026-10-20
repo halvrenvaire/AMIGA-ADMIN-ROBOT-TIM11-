@@ -109,12 +109,14 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.get(".file-list li").should("not.exist");
   });
 
-  it("TS-008 Unggah PDF lebih dari 5 halaman ditolak", () => {
+  it("TS-008 PDF banyak halaman diterima (invoice + Faktur Pajak + timesheet)", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     cy.get("main input[type=file]").selectFile("cypress/fixtures/enam_halaman.pdf", { force: true });
+    cy.get(".file-list li").should("have.length", 1);
+    cy.get("main .alert").should("not.exist");
     cy.contains("button", "Preview").click();
-    cy.contains("button", "Kirim ke antrean").click();
-    cy.contains(".alert", "6 halaman").and("contain.text", "Maksimal 5 halaman");
+    cy.contains("h1", "Preview pengajuan");
+    cy.get("main .alert").should("not.exist");
   });
 
   it("TS-009 Kategori voucher dan nama Diajukan oleh bisa dipilih", () => {

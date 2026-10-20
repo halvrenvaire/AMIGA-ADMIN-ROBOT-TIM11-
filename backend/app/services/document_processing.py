@@ -5,12 +5,14 @@ sistem memverifikasi → READY_FOR_REVIEW (reviewer ditugaskan) atau EXCEPTION (
 
 Dijalankan di background setelah respons dikirim, dengan sesi database sendiri.
 """
+import io
 import logging
 import time
 import uuid
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
+from pypdf import PdfReader, PdfWriter
 from sqlalchemy import select, update
 
 from app import db as db_module
@@ -431,6 +433,24 @@ def _manual_message(status: str, files: list[str], total: int) -> str:
             "secara manual dari file bukti, atau coba baca ulang dengan AI nanti.")
 
 
+def first_pages(pdf: bytes, limit: int) -> bytes:
+    """Hanya N halaman pertama yang dikirim ke AI (data invoice dan Faktur Pajak ada di depan; timesheet dan
+    lampiran lain di belakang tidak perlu dibaca). PDF yang tidak bisa dipotong dikirim apa adanya."""
+    try:
+        reader = PdfReader(io.BytesIO(pdf))
+        if len(reader.pages) <= limit:
+            return pdf
+        writer = PdfWriter()
+        for page in reader.pages[:limit]:
+            writer.add_page(page)
+        out = io.BytesIO()
+        writer.write(out)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001 - PDF aneh tetap dicoba dibaca utuh
+        log.warning("PDF tidak bisa dipotong untuk AI; dikirim utuh")
+        return pdf
+
+
 def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_manual: bool = False) -> None:
     """`retry_manual`: hanya baca ulang invoice yang sebelumnya diisi manual karena AI gagal; data invoice lain tetap."""
     with db_module.SessionLocal() as db:
@@ -462,7 +482,7 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                     continue
                 part = None
                 if ai_on:
-                    pdf = storage.load(key)
+                    pdf = first_pages(storage.load(key), settings.ai_max_pages)
                     try:
                         part = extractor.extract(pdf)
                     except ExtractionError as e:

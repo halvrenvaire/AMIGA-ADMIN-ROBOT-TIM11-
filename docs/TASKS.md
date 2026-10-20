@@ -29,6 +29,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ |
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
+| 12 | Berkas invoice banyak halaman (invoice + Faktur Pajak + timesheet) | Kecil | 2/2 | ✅ |
 
 ---
 
@@ -112,7 +113,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | --- | --- | --- | --- |
 | T8.1 | Perbarui BPMN: alur draf (PIC edit → simulasi → kirim), reviewer tanpa edit | [ ] | BPMN v2 masih alur lama (reviewer mengoreksi) |
 | T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4, dan pengaturan PPN/PPh per baris T9.1–T9.6); satu voucher boleh beberapa vendor/rekening setelah dikonfirmasi PIC (T10.3); format voucher Tahap 11 | [ ] | |
-| T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner | [ ] | |
+| T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner; batas 5 halaman per file dihapus (T12.1) | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
 
@@ -169,6 +170,16 @@ Pertanyaan ke owner untuk T11.2, T11.4, T11.7, T11.8:
 3. Perlu hitung otomatis gross-up (PIC mengisi nilai bersih, sistem menghitung bruto)?
 4. Angka di voucher ikut format contoh (koma) atau format Indonesia (titik)?
 
+## Tahap 12 — Berkas invoice banyak halaman (feedback owner 20 Okt 2026)
+
+Sumber: contoh owner `1702_…DSS Management Fee…pdf` (33 halaman): tiap invoice dikirim sebagai satu berkas berisi
+invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga batas 5 halaman per file menolaknya.
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T12.1 | Batas halaman per file dihapus (dashboard, API, Telegram); batas 10 MB per file tetap. AI hanya membaca 5 halaman pertama (`AI_MAX_PAGES`), semua halaman tetap dilampirkan di voucher. Diuji dengan berkas invoice pertama contoh 1702 (8 halaman): total Rp 8.933.846 terbaca tepat | [x] | belum di-commit |
+| T12.2 | Baris PPN berlabel "Jumlah PPN …", "Total PPN", "Nilai PPN" (format Faktur DSS) dikenali sebagai baris PPN, tidak jadi barang atau dasar PPh | [x] | belum di-commit |
+
 ---
 
 ## Riwayat pembaruan
@@ -180,3 +191,4 @@ Pertanyaan ke owner untuk T11.2, T11.4, T11.7, T11.8:
 | 20 Okt 2026 | Tahap 9 ditambahkan dan selesai (T9.1–T9.8): PPN per invoice, PPh per baris, navigasi cepat, sample pajak; T8.2–T8.4 mencakup Tahap 9 |
 | 20 Okt 2026 | Tahap 10 ditambahkan dan selesai (T10.1–T10.6): isi manual saat AI bermasalah, subtotal otomatis, beberapa vendor per voucher, rekening per invoice, pintasan rekening vendor; T8.2–T8.4 mencakup Tahap 10 |
 | 20 Okt 2026 | Hash `707aef1` diisi untuk Tahap 9–10; Tahap 11 ditambahkan dari contoh voucher owner (No. 1702 & 1944) |
+| 20 Okt 2026 | Tahap 12 ditambahkan dan selesai (T12.1–T12.2): batas halaman per file dihapus, AI membaca 5 halaman pertama, label "Jumlah PPN" dikenali; `docs/sop.md` ikut diperbarui (perlu `POST /reindex` agar Asisten memakai isi baru) |

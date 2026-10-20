@@ -54,9 +54,9 @@ def test_file_count_limits(extractor):
 
 
 def test_bad_file_in_batch_is_named(extractor):
-    r = upload_many([make_pdf(), make_pdf(6)])
+    r = upload_many([make_pdf(), b"%PDF-1.4 rusak"])
     assert r.status_code == 422
-    assert r.json()["detail"].startswith("inv2.pdf: ") and "6 halaman" in r.json()["detail"]
+    assert r.json()["detail"].startswith("inv2.pdf: ") and "rusak" in r.json()["detail"]
 
 
 def test_different_vendor_is_a_warning_the_pic_confirms(extractor):

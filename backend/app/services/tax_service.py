@@ -35,7 +35,8 @@ ENTITY = re.compile(r"^\s*(pt|cv|ud|pd|fa|firma|koperasi|yayasan|perum|persero)\
 # PPN tidak diperhitungkan lagi, yang dipakai total invoice). Hanya baris yang DIAWALI kata pajak, supaya
 # barang seperti "Jasa servis (termasuk PPN)" tidak ikut tersembunyi. Awalan "[INV-001] " dari invoice gabungan
 # dilewati.
-VAT_LINE = re.compile(r"^\s*(\[[^\]]*\]\s*)?(ppn|vat|pajak pertambahan|pb\s?1|pajak restoran)\b", re.IGNORECASE)
+VAT_LINE = re.compile(r"^\s*(\[[^\]]*\]\s*)?((jumlah|total|nilai)\s+)?(ppn|vat|pajak pertambahan|pb\s?1|pajak restoran)\b",
+                      re.IGNORECASE)  # mis. "PPN 11%", "Jumlah PPN (Pajak Pertambahan Nilai)", "Total VAT"
 
 
 def is_vat_line(description: str | None) -> bool:

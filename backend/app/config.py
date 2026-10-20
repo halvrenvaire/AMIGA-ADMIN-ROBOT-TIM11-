@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     # manual (mis. saat kunci AWS dicabut). Bila AI menyala tetapi gagal, dokumen juga jatuh ke isi manual.
     ai_extraction_enabled: bool = True
 
-    max_pdf_pages: int = 5
+    # Tidak ada batas halaman per file (feedback owner 20 Okt 2026): satu berkas bisa berisi invoice, Faktur Pajak,
+    # dan timesheet. AI hanya membaca N halaman pertama (data invoice dan Faktur Pajak); semua halaman tetap
+    # dilampirkan di voucher. Juga menjaga batas ukuran dokumen Amazon Bedrock (±4,5 MB).
+    ai_max_pages: int = 5
     max_upload_mb: int = 10  # per file
     max_upload_files: int = 10  # file invoice per voucher
     max_reimburse_files: int = 20  # bukti per Voucher Pengeluaran Reimburse (bon tol, parkir, dll.)

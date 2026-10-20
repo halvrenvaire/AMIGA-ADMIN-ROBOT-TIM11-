@@ -166,7 +166,6 @@ def test_only_submitters_can_upload(bot):
 
 def test_invalid_files_are_rejected(bot):
     chat = _link(bot, "pic.alpha@amiga.test")
-    assert "maksimal" in _send_pdf(bot, chat, pdf=make_pdf(pages=settings.max_pdf_pages + 1)).lower()
     assert "PDF atau foto" in _send_pdf(bot, chat, pdf=b"bukan pdf sama sekali")
     assert "PDF atau foto" in _send_pdf(bot, chat, pdf=b"PK\x03\x04", name="invoice.docx")
 

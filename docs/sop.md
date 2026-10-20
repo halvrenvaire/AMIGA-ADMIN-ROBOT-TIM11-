@@ -76,7 +76,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 
 ## 6. Ketentuan Umum
 
-1. Invoice berformat **PDF (maksimal 5 halaman)** atau **foto invoice JPG, PNG, atau WEBP**. Foto otomatis diubah menjadi PDF satu halaman, dan foto aslinya tetap disimpan. Format lain (Word, Excel, dan sebagainya) ditolak.
+1. Invoice berformat **PDF** (berapa pun halamannya; satu file boleh berisi invoice beserta Faktur Pajak dan timesheet) atau **foto invoice JPG, PNG, atau WEBP**. Foto otomatis diubah menjadi PDF satu halaman, dan foto aslinya tetap disimpan. Format lain (Word, Excel, dan sebagainya) ditolak.
 2. Setiap invoice **wajib ditinjau** Finance Reviewer sebelum voucher terbit. Hasil AI tidak boleh dipakai tanpa peninjauan.
 3. Pengiriman invoice lewat WhatsApp atau Email **tidak diproses**. PIC diarahkan untuk mengunggah ke sistem, dan asal pengajuan dicatat di kolom **Saluran**.
 4. Invoice boleh diunggah lewat **dashboard** atau lewat **bot Telegram resmi** (@amiga_ro_bot) dari **chat pribadi** akun yang sudah terhubung. Keduanya masuk ke sistem yang sama dengan aturan yang sama. Mengirim invoice ke nomor/akun lain, atau ke grup chat, tetap tidak diproses.
@@ -92,7 +92,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 2. Isi semua kolom wajib: **nama klien**, **jenis permintaan**, **saluran** (asal invoice, misalnya Email atau WhatsApp), dan **tanggal pengajuan**.
 3. Pilih file invoice PDF atau foto invoice (JPG, PNG, WEBP), lalu klik **Kirim ke antrean**. Pastikan foto tegak, tidak buram, dan seluruh isi invoice terlihat.
 4. Pastikan sistem menampilkan **Request ID** dan status **QUEUED**. Catat Request ID untuk pelacakan.
-5. Jika file ditolak (bukan PDF/foto yang didukung, atau lebih dari 5 halaman), sistem mengembalikan Anda ke formulir unggah. Perbaiki file lalu ulangi dari langkah 3.
+5. Jika file ditolak (bukan PDF/foto yang didukung, file rusak, atau lebih dari 10 MB), sistem mengembalikan Anda ke formulir unggah. Perbaiki file lalu ulangi dari langkah 3.
 6. Intake Support yang mengunggah atas nama klien hanya boleh melakukannya untuk klien yang didelegasikan. Sistem mencatat nama pengunggah sebenarnya.
 
 **Lewat bot Telegram (alternatif):**
@@ -190,7 +190,7 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 
 | Tahap | Target |
 | --- | --- |
-| Ekstraksi AI per invoice (≤ 5 halaman) | ≤ 15 detik |
+| Ekstraksi AI per invoice (AI membaca maks. 5 halaman pertama) | ≤ 15 detik |
 | Pemuatan antrean dan layar review | ≤ 2 detik |
 | Pembuatan voucher setelah disetujui | ≤ 3 detik |
 | Peninjauan oleh Finance Reviewer | [diisi sesuai SLA klien, misalnya 1 hari kerja] |
