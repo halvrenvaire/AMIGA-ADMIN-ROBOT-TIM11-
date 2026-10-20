@@ -177,8 +177,8 @@ invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga ba
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T12.1 | Batas halaman per file dihapus (dashboard, API, Telegram); batas 10 MB per file tetap. AI hanya membaca 5 halaman pertama (`AI_MAX_PAGES`), semua halaman tetap dilampirkan di voucher. Diuji dengan berkas invoice pertama contoh 1702 (8 halaman): total Rp 8.933.846 terbaca tepat | [x] | belum di-commit |
-| T12.2 | Baris PPN berlabel "Jumlah PPN …", "Total PPN", "Nilai PPN" (format Faktur DSS) dikenali sebagai baris PPN, tidak jadi barang atau dasar PPh | [x] | belum di-commit |
+| T12.1 | Batas halaman per file dihapus (dashboard, API, Telegram); batas 10 MB per file tetap. AI hanya membaca 5 halaman pertama (`AI_MAX_PAGES`), semua halaman tetap dilampirkan di voucher. Diuji dengan berkas invoice pertama contoh 1702 (8 halaman): total Rp 8.933.846 terbaca tepat | [x] | `1210ba3` |
+| T12.2 | Baris PPN berlabel "Jumlah PPN …", "Total PPN", "Nilai PPN" (format Faktur DSS) dikenali sebagai baris PPN, tidak jadi barang atau dasar PPh | [x] | `1210ba3` |
 
 ---
 
@@ -191,4 +191,4 @@ invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga ba
 | 20 Okt 2026 | Tahap 9 ditambahkan dan selesai (T9.1–T9.8): PPN per invoice, PPh per baris, navigasi cepat, sample pajak; T8.2–T8.4 mencakup Tahap 9 |
 | 20 Okt 2026 | Tahap 10 ditambahkan dan selesai (T10.1–T10.6): isi manual saat AI bermasalah, subtotal otomatis, beberapa vendor per voucher, rekening per invoice, pintasan rekening vendor; T8.2–T8.4 mencakup Tahap 10 |
 | 20 Okt 2026 | Hash `707aef1` diisi untuk Tahap 9–10; Tahap 11 ditambahkan dari contoh voucher owner (No. 1702 & 1944) |
-| 20 Okt 2026 | Tahap 12 ditambahkan dan selesai (T12.1–T12.2): batas halaman per file dihapus, AI membaca 5 halaman pertama, label "Jumlah PPN" dikenali; `docs/sop.md` ikut diperbarui (perlu `POST /reindex` agar Asisten memakai isi baru) |
+| 20 Okt 2026 | Tahap 12 ditambahkan dan selesai (T12.1–T12.2, `1210ba3`): batas halaman per file dihapus, AI membaca 5 halaman pertama, label "Jumlah PPN" dikenali; `docs/sop.md` ikut diperbarui (perlu `POST /reindex` agar Asisten memakai isi baru) |
