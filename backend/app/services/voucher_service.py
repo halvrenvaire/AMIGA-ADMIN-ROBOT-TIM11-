@@ -151,17 +151,20 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         header = table.row()
         for title in ("No", "Uraian", "Qty", "Harga Satuan", "Subtotal"):
             header.cell(title, align="CENTER")
-        for line in ex.line_items:
+        # Baris PPN tidak dicetak (feedback owner 20 Okt 2026): PPN tidak diperhitungkan lagi, yang dipakai
+        # total invoice; potongan PPh dihitung dari nilai sebelum PPN. Data PPN tetap tersimpan di sistem.
+        shown = [line for line in ex.line_items if not tax_service.is_vat_line(line.description)]
+        vat_hidden = len(shown) < len(ex.line_items)
+        for no, line in enumerate(shown, start=1):
             qty = "-" if line.qty is None else f"{line.qty.normalize():f}"
             row = table.row()
-            for text in (str(line.position), _t(line.description), qty,
-                         _money(line.unit_price), _money(line.subtotal)):
+            for text in (str(no), _t(line.description), qty, _money(line.unit_price), _money(line.subtotal)):
                 row.cell(text)
         taxes = tax_service.summary(doc)
-        if taxes.lines:
+        if taxes.lines or vat_hidden:
             # Tahap 4: voucher membayar nilai bersih setelah potongan pajak per invoice
             gross = table.row(style=FontFace(emphasis="BOLD"))
-            gross.cell("JUMLAH TAGIHAN", colspan=4, align="RIGHT")
+            gross.cell("TOTAL INVOICE (TERMASUK PPN)" if vat_hidden else "JUMLAH TAGIHAN", colspan=4, align="RIGHT")
             gross.cell(_money(taxes.gross))
             for t in taxes.lines:
                 rate = f"{t.rate.normalize():f}".replace(".", ",")

@@ -182,3 +182,32 @@ def test_only_pph26_still_needs_confirmation(tx):
     rates = {r["code"]: r for r in api(PIC).get("/tax-rates").json()}
     assert {code for code, r in rates.items() if r["needs_confirmation"]} == {"PPH26"}
     assert "Ppn 26" in rates["PPH26"]["description"]
+
+
+def test_owner_example_ppn_not_printed_and_pph23_from_value_before_ppn(extractor):
+    # Feedback owner 20 Okt 2026 (invoice PT SUKANADA DJAYA): PPN tidak diperhitungkan lagi; voucher memakai
+    # total invoice 949.050 dan PPh 23 2% dari nilai sebelum PPN (855.000) = 17.100, dibayar 931.950
+    extractor.result = invoice(
+        vendor_name="PT SUKANADA DJAYA", invoice_no="4031987411", total=Decimal(949050),
+        line_items=[ExtractedLine("COFFEE PRECIOUS CARGO 1 KG", Decimal(3), Decimal(285000), Decimal(855000)),
+                    ExtractedLine("PPN", None, None, Decimal(94050))])
+    doc_id = upload(submit=False).json()["id"]
+    tax = set_tax(doc_id, code="PPH23").json()["files"][0]["data"]["tax"]
+    assert (tax["base"], tax["amount"]) == ("855000", "17100")
+    send(doc_id)
+    approve(detail(doc_id))
+    text = pdf_text(api(PIC).get(f"/documents/{doc_id}/voucher").content)
+    assert re.search(r"1 COFFEE PRECIOUS CARGO 1 KG 3 Rp ?285\.000 Rp ?855\.000", text)
+    assert " PPN Rp" not in text and "94.050" not in text  # baris PPN tidak dicetak
+    assert re.search(r"TOTAL INVOICE \(TERMASUK PPN\) Rp ?949\.050", text)
+    assert re.search(r"Potongan PPh 23 2% x DPP Rp ?855\.000 \(Rp ?17\.100\)", text)
+    assert re.search(r"TOTAL DIBAYARKAN Rp ?931\.950", text)
+
+
+def test_item_mentioning_ppn_is_not_treated_as_ppn_line():
+    assert tax_service.is_vat_line("PPN 11%") and tax_service.is_vat_line("[INV-002] ppn")
+    assert tax_service.is_vat_line("PB1 10%") and tax_service.is_vat_line("VAT")
+    assert not tax_service.is_vat_line("Jasa servis AC (harga termasuk PPN)")
+    data = {"total": "1110000", "line_items": [{"description": "Jasa servis AC (termasuk PPN)", "subtotal": "1000000"},
+                                               {"description": "PPN 11%", "subtotal": "110000"}]}
+    assert tax_service.default_base(data) == Decimal(1000000)

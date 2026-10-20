@@ -417,7 +417,8 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
   );
 }
 
-const VAT_LINE = /\b(ppn|vat|pajak pertambahan|pb1|pajak restoran)\b/i;
+// Sama dengan backend (tax_service.VAT_LINE): hanya baris yang diawali kata pajak, mis. "PPN 11%"
+const VAT_LINE = /^\s*(\[[^\]]*\]\s*)?(ppn|vat|pajak pertambahan|pb\s?1|pajak restoran)\b/i;
 
 /** DPP otomatis, sama dengan backend: jumlah rincian tanpa baris PPN; bila tidak ada rincian, total invoice. */
 function autoBase(lines: Line[], total: string): number | null {

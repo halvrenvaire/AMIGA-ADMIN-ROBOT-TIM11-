@@ -23,8 +23,15 @@ log = logging.getLogger(__name__)
 NONE = "NONE"
 # Badan usaha (bukan orang pribadi): PPh 21 tidak berlaku, jasa badan dipotong PPh 23
 ENTITY = re.compile(r"^\s*(pt|cv|ud|pd|fa|firma|koperasi|yayasan|perum|persero)\b\.?|\b(tbk|persero)\b", re.I)
-# Baris PPN/pajak di rincian tidak ikut menjadi dasar pengenaan pajak (DPP) PPh
-VAT_LINE = re.compile(r"\b(ppn|vat|pajak pertambahan|pb1|pajak restoran)\b", re.IGNORECASE)
+# Baris PPN/pajak di rincian: tidak ikut DPP PPh dan tidak dicetak di voucher (feedback owner 20 Okt 2026:
+# PPN tidak diperhitungkan lagi, yang dipakai total invoice). Hanya baris yang DIAWALI kata pajak, supaya
+# barang seperti "Jasa servis (termasuk PPN)" tidak ikut tersembunyi. Awalan "[INV-001] " dari invoice gabungan
+# dilewati.
+VAT_LINE = re.compile(r"^\s*(\[[^\]]*\]\s*)?(ppn|vat|pajak pertambahan|pb\s?1|pajak restoran)\b", re.IGNORECASE)
+
+
+def is_vat_line(description: str | None) -> bool:
+    return bool(VAT_LINE.match(description or ""))
 
 # Cadangan berbasis kata kunci bila AI tidak tersedia; urutan = prioritas
 RULES: list[tuple[str, re.Pattern, str]] = [
@@ -108,7 +115,7 @@ def suggest(bedrock, items: list[dict], reimburse: bool, valid: set[str]) -> lis
 def default_base(data: dict) -> Decimal | None:
     """DPP awal: jumlah rincian tanpa baris PPN; bila tidak ada rincian, total invoice."""
     lines = [li for li in data.get("line_items") or [] if li.get("subtotal") not in (None, "")]
-    base = sum((Decimal(str(li["subtotal"])) for li in lines if not VAT_LINE.search(li.get("description") or "")),
+    base = sum((Decimal(str(li["subtotal"])) for li in lines if not is_vat_line(li.get("description"))),
                Decimal(0))
     if base > 0:
         return base
