@@ -9,17 +9,18 @@ import logging
 import time
 import uuid
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select, update
 
 from app import db as db_module
+from app.config import settings
 from app.models import (
     CATEGORY_REIMBURSE, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue,
     Vendor,
 )
 from app.services import audit_service, storage, tax_service
-from app.services.account_check import MISMATCH, check_account
+from app.services.account_check import MISMATCH, payee_checks
 from app.services.extraction_service import (
     INVOICE, IRRELEVANT, RECEIPT, UNCERTAIN, ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor,
 )
@@ -92,6 +93,14 @@ def combine(parts: list[ExtractedInvoice]) -> ExtractedInvoice:
 DATA_FIELDS = ("vendor_name", "invoice_no", "invoice_date", "total", "bank_name", "account_no", "account_name")
 
 
+def line_subtotal(qty, unit_price) -> Decimal | None:
+    """Subtotal = qty × harga satuan (2 desimal) bila keduanya terisi; None = subtotal diisi manual (borongan)."""
+    if qty in (None, "") or unit_price in (None, ""):
+        return None
+    value = (Decimal(str(qty)) * Decimal(str(unit_price))).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    return value.quantize(Decimal(1)) if value == value.to_integral_value() else value
+
+
 def _num(value) -> str | None:
     return None if value is None else str(value)
 
@@ -141,10 +150,11 @@ def vendor_npwp(db, client_id, vendor_name: str | None) -> bool | None:
     return None if npwp is None else bool((npwp[0] or "").strip())
 
 
-def prefill_tax(db, doc: Document, bedrock) -> None:
+def prefill_tax(db, doc: Document, bedrock, only: set | None = None) -> None:
     """Saran pajak per invoice dari AI (cadangan: aturan) dan NPWP vendor dari data referensi.
-    Pajak TIDAK dipilih otomatis: PIC wajib memilihnya sendiri sebelum draf dikirim (keputusan owner)."""
-    files = doc.files or []
+    Pajak TIDAK dipilih otomatis: PIC wajib memilihnya sendiri sebelum draf dikirim (keputusan owner).
+    `only`: id file yang baru dibaca; file lain (pilihan pajak PIC) tidak disentuh."""
+    files = [f for f in doc.files or [] if only is None or f.id in only]
     table = tax_service.rates(db)
     if not files or not table:
         return
@@ -179,13 +189,33 @@ def rebuild_from_files(db, doc: Document) -> Extraction:
 
 # Kendala yang wajib dibereskan PIC sebelum dikirim ke reviewer. Kendala lain (kemungkinan duplikat,
 # struk/nota, perlu pemeriksaan manual, catatan pengembalian) diputuskan Finance Reviewer.
-BLOCKING = {IssueCode.MISSING_EVIDENCE, IssueCode.CALCULATION_DISCREPANCY, IssueCode.VENDOR_MISMATCH,
-            IssueCode.NOT_AN_INVOICE, IssueCode.EXTRACTION_FAILED, IssueCode.ACCOUNT_MISMATCH}
+BLOCKING = {IssueCode.MISSING_EVIDENCE, IssueCode.CALCULATION_DISCREPANCY, IssueCode.NOT_AN_INVOICE,
+            IssueCode.EXTRACTION_FAILED, IssueCode.ACCOUNT_MISMATCH}
+# Peringatan yang cukup dikonfirmasi PIC beserta alasannya (feedback owner: beberapa vendor/rekening dalam satu
+# voucher boleh). Tidak membuat dokumen "Ada kendala", tetapi draf baru bisa dikirim setelah dikonfirmasi.
+ACKNOWLEDGEABLE = {IssueCode.VENDOR_MISMATCH}
+
+
+def payee_fingerprint(extraction: Extraction | None) -> str:
+    """Sidik daftar vendor+rekening; konfirmasi PIC gugur bila daftar ini berubah."""
+    pairs = sorted({f"{v or ''}|{a or ''}" for v, a in _payees(extraction)}) if extraction else []
+    return ";".join(pairs)
+
+
+def acknowledgement(extraction: Extraction | None, code: IssueCode) -> dict | None:
+    """Konfirmasi PIC atas peringatan `code` yang masih berlaku (daftar vendor/rekening belum berubah)."""
+    raw = extraction.raw_json if extraction and isinstance(extraction.raw_json, dict) else {}
+    ack = (raw.get("acknowledged") or {}).get(code.value)
+    return ack if ack and ack.get("fingerprint") == payee_fingerprint(extraction) else None
 
 
 def settle_status(db, doc: Document, issues: list, note: str) -> None:
-    """Draf bila tidak ada kendala wajib; Ada kendala (EXCEPTION) bila masih ada. PIC yang mengirim ke reviewer."""
-    blocking = sorted({i.code.value for i in issues if i.code in BLOCKING})
+    """Draf bila tidak ada kendala wajib; Ada kendala (EXCEPTION) bila masih ada. PIC yang mengirim ke reviewer.
+    Saat isi manual (AI tidak membaca), data yang belum diisi tidak membuat dokumen "Ada kendala": dokumen tetap Draf
+    supaya tidak tampak rusak, tetapi tetap tidak bisa dikirim sebelum lengkap (dicek saat kirim)."""
+    manual = manual_entry(doc.extraction) is not None
+    blocking = sorted({i.code.value for i in issues if i.code in BLOCKING
+                       and not (manual and i.code == IssueCode.MISSING_EVIDENCE)})
     new = DocStatus.EXCEPTION if blocking else DocStatus.DRAFT
     if doc.status != new:
         set_status(db, doc, new, f"{note}: {', '.join(blocking)}" if blocking else note)
@@ -346,11 +376,13 @@ def run_verification(db, doc: Document) -> list:
         db.flush()
         return class_issues
     issues = class_issues + verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction), reimburse)
+    issues = [i for i in issues if not (i.code in ACKNOWLEDGEABLE and acknowledgement(extraction, i.code))]
     db.flush()  # vendor_id baru dipakai pemeriksaan rekening
     db.refresh(doc, ["vendor"])
-    account = check_account(db, doc)
-    if account.state == MISMATCH:
-        issues.append(Issue(IssueCode.ACCOUNT_MISMATCH, "account_no", account.message))
+    # Rekening dicek per invoice: setiap rekening tujuan harus cocok dengan vendornya masing-masing
+    for payee in payee_checks(db, doc):
+        if payee.check.state == MISMATCH:
+            issues.append(Issue(IssueCode.ACCOUNT_MISMATCH, "account_no", payee.check.message))
     if _same_batch_duplicate(doc):
         issues.append(Issue(IssueCode.POSSIBLE_DUPLICATE, "invoice_no",
                             "Ada nomor invoice yang sama lebih dari sekali dalam pengajuan ini. Periksa apakah "
@@ -382,7 +414,25 @@ def _resolve_open_issues(db, doc: Document) -> None:
                .values(resolved=True))
 
 
-def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> None:
+def manual_entry(extraction: Extraction | None) -> dict | None:
+    """Info isi manual bila AI tidak membaca sebagian/semua invoice: {status: off|failed, files, message}."""
+    raw = extraction.raw_json if extraction and isinstance(extraction.raw_json, dict) else {}
+    info = raw.get("ai")
+    return info if isinstance(info, dict) and info.get("files") else None
+
+
+def _manual_message(status: str, files: list[str], total: int) -> str:
+    which = ("invoice ini" if total == 1 else "semua invoice" if len(files) == total
+             else f"{len(files)} dari {total} invoice ({', '.join(files)})")
+    if status == "off":
+        return (f"Pembacaan otomatis oleh AI sedang dimatikan, jadi data {which} belum terisi. Isi data invoice "
+                "secara manual dari file bukti, lalu simpan.")
+    return (f"AI sedang bermasalah dan belum berhasil membaca {which}. Dokumen tetap tersimpan. Isi data invoice "
+            "secara manual dari file bukti, atau coba baca ulang dengan AI nanti.")
+
+
+def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_manual: bool = False) -> None:
+    """`retry_manual`: hanya baca ulang invoice yang sebelumnya diisi manual karena AI gagal; data invoice lain tetap."""
     with db_module.SessionLocal() as db:
         doc = db.get(Document, document_id)
         if doc is None:
@@ -390,34 +440,68 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
             return
         if doc.status != DocStatus.PROCESSING:
             set_status(db, doc, DocStatus.PROCESSING, "AI mulai membaca invoice")
+        previous = (doc.extraction.raw_json if doc.extraction and isinstance(doc.extraction.raw_json, dict) else {})
+        old_checks = {c.get("file"): c for c in previous.get("document_checks") or []}
+        keep = {f.id for f in doc.files or [] if retry_manual and f.data is not None and not f.data.get("manual")}
         for f in doc.files or []:
-            f.read_at = None
+            if f.id not in keep:
+                f.read_at = None
         db.commit()
 
+        ai_on = settings.ai_extraction_enabled and extractor is not None
         started = time.monotonic()
         files = doc.files or []
+        sources = [(f, f.original_filename, f.file_key) for f in files] or [(None, doc.original_filename, doc.file_key)]
+        parts, checks, manual, errors, fresh, read = [], [], [], [], set(), 0
         try:
-            if files:
-                parts = []
-                for f in files:
+            for f, name, key in sources:
+                if f is not None and f.id in keep:
+                    parts.append(data_to_part(f.data))
+                    if name in old_checks:
+                        checks.append(old_checks[name])
+                    continue
+                part = None
+                if ai_on:
+                    pdf = storage.load(key)
                     try:
-                        parts.append(extractor.extract(storage.load(f.file_key)))
+                        part = extractor.extract(pdf)
                     except ExtractionError as e:
-                        raise ExtractionError(f"{f.original_filename}: {e}" if len(files) > 1 else str(e)) from e
-                    f.invoice_no_norm = normalize(parts[-1].invoice_no)
+                        errors.append(f"{name}: {e}")
+                    except Exception as e:  # noqa: BLE001 - AI tidak boleh membuat dokumen macet di PROCESSING
+                        log.exception("Pembacaan AI %s gagal tak terduga", name)
+                        errors.append(f"{name}: {type(e).__name__}")
+                if part is None and f is not None and f.data and not f.data.get("manual"):
+                    # Pembacaan ulang gagal: data sebelumnya (hasil AI dan isian PIC) tetap dipakai
+                    parts.append(data_to_part(f.data))
+                    if name in old_checks:
+                        checks.append(old_checks[name])
+                    f.read_at = datetime.now(timezone.utc)
+                    continue
+                if f is not None:
+                    fresh.add(f.id)
+                if part is None:
+                    manual.append(name)
+                    part = ExtractedInvoice()
+                else:
+                    checks += document_checks([name], [part])
+                    read += 1
+                parts.append(part)
+                if f is not None:
+                    f.invoice_no_norm = normalize(part.invoice_no)
+                    f.data = {**part_to_data(part), **({"manual": True} if name in manual else {})}
                     # Disimpan per file supaya layar detail menampilkan progres yang nyata
                     f.read_at = datetime.now(timezone.utc)
                     db.commit()
-                names = [f.original_filename for f in files]
-            else:
-                parts, names = [extractor.extract(storage.load(doc.file_key))], [doc.original_filename]
             data = combine(parts)
-            data.raw = {**data.raw, "document_checks": document_checks(names, parts)}
-            for f, p in zip(files, parts):
-                f.data = part_to_data(p)
-            prefill_tax(db, doc, getattr(extractor, "bedrock", None))
-        except (ExtractionError, storage.StorageError) as e:
-            log.warning("Ekstraksi %s gagal: %s", doc.request_id, e)
+            data.raw = {**data.raw, "document_checks": checks}
+            if manual:
+                status = "failed" if ai_on else "off"
+                data.raw["ai"] = {"status": status, "files": manual, "error": "; ".join(errors)[:500] or None,
+                                  "message": _manual_message(status, manual, len(sources))}
+            # Saran pajak tetap ada tanpa AI (aturan kata kunci)
+            prefill_tax(db, doc, getattr(extractor, "bedrock", None) if ai_on else None, fresh)
+        except storage.StorageError as e:
+            log.warning("File %s tidak bisa dibuka: %s", doc.request_id, e)
             _resolve_open_issues(db, doc)
             db.add(ValidationIssue(document_id=doc.id, code=IssueCode.EXTRACTION_FAILED,
                                    message=EXTRACTION_FAILED_MESSAGE))
@@ -427,10 +511,18 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor) -> Non
         duration_ms = int((time.monotonic() - started) * 1000)
 
         extraction = _save_extraction(db, doc, data, duration_ms)
-        audit_service.record(db, None, "EXTRACTED", document_id=doc.id, client_id=doc.client_id,
-                             note=f"AI membaca {len(files) or 1} invoice, {len(extraction.line_items)} baris "
-                                  f"dalam {duration_ms} ms")
+        if manual or errors:
+            log.warning("AI tidak membaca %s (AI %s): %s", doc.request_id, "menyala" if ai_on else "dimatikan",
+                        "; ".join(errors))
+            audit_service.record(db, None, "AI_UNAVAILABLE", document_id=doc.id, client_id=doc.client_id,
+                                 note=("AI dimatikan" if not ai_on else f"AI gagal membaca: {'; '.join(errors)[:300]}")
+                                      + (f". {len(manual)} bukti diisi manual oleh PIC" if manual
+                                         else ". Data sebelumnya tetap dipakai"))
+        if read:
+            audit_service.record(db, None, "EXTRACTED", document_id=doc.id, client_id=doc.client_id,
+                                 note=f"AI membaca {read} invoice, {len(extraction.line_items)} baris dalam {duration_ms} ms")
 
         issues = run_verification(db, doc)
-        settle_status(db, doc, issues, "AI selesai membaca; menunggu PIC memeriksa dan mengirim ke reviewer")
+        settle_status(db, doc, issues, "Menunggu PIC mengisi data secara manual" if manual else
+                      "AI selesai membaca; menunggu PIC memeriksa dan mengirim ke reviewer")
         db.commit()

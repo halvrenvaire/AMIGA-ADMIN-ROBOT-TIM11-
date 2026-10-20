@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # Kosong = memakai LLM_MODEL (Nova Lite), yang bisa membaca PDF langsung
     extraction_model_id: str = ""
     extraction_max_tokens: int = 4096
+    # false = AI tidak membaca invoice: setiap unggahan langsung menjadi draf kosong yang diisi PIC secara
+    # manual (mis. saat kunci AWS dicabut). Bila AI menyala tetapi gagal, dokumen juga jatuh ke isi manual.
+    ai_extraction_enabled: bool = True
 
     max_pdf_pages: int = 5
     max_upload_mb: int = 10  # per file

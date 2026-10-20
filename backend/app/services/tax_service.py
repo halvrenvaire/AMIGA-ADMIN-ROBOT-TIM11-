@@ -6,6 +6,14 @@
 
 Pilihan pajak disimpan di data per invoice (`document_files.data["tax"]`) beserta salinan tarif saat
 dipilih, sehingga perubahan tabel tarif tidak mengubah draf atau voucher yang sudah ada.
+
+Tahap 9 (feedback owner 20 Okt 2026):
+- PPN per invoice: terpisah di bawah rincian / sudah termasuk harga / tidak ada; tarif bisa dipilih (bawaan 11%).
+  Baris PPN tidak menjadi dasar PPh. Voucher tetap membayar total invoice; selisih PPN invoice dengan hitungan
+  sistem hanya diberi peringatan.
+- PPh "satu jenis untuk seluruh invoice" (bawaan) atau "berbeda per baris": PIC memilih baris untuk tiap jenis
+  PPh (`line_items[i]["pph"]`); potongan dihitung per jenis dari DPP baris yang dipilih.
+- Saran PPh per baris dari aturan kata kunci (tanpa AI); AI hanya bila PIC memintanya.
 """
 import json
 import logging
@@ -112,14 +120,88 @@ def suggest(bedrock, items: list[dict], reimburse: bool, valid: set[str]) -> lis
     return result
 
 
-def default_base(data: dict) -> Decimal | None:
-    """DPP awal: jumlah rincian tanpa baris PPN; bila tidak ada rincian, total invoice."""
-    lines = [li for li in data.get("line_items") or [] if li.get("subtotal") not in (None, "")]
-    base = sum((Decimal(str(li["subtotal"])) for li in lines if not is_vat_line(li.get("description"))),
-               Decimal(0))
+VAT_MODES = ("separate", "included", "none")  # PPN terpisah di bawah barang / sudah termasuk harga / tidak ada
+DEFAULT_VAT_RATE = Decimal(11)
+LINE = "LINE"  # kode pajak invoice bila PPh dipilih per baris
+VAT_TOLERANCE = Decimal(100)  # selisih PPN invoice vs hitungan sistem yang dianggap pembulatan
+
+
+def line_is_vat(li: dict) -> bool:
+    """Baris PPN: pilihan PIC (`kind`) bila ada; selain itu dari uraian (diawali kata pajak)."""
+    kind = li.get("kind")
+    if kind in ("vat", "item"):
+        return kind == "vat"
+    return is_vat_line(li.get("description"))
+
+
+def _dec(value) -> Decimal | None:
+    return None if value in (None, "") else Decimal(str(value))
+
+
+def item_lines(data: dict) -> list[tuple[int, dict]]:
+    """Baris barang/jasa (bukan baris PPN) beserta indeksnya di rincian."""
+    return [(i, li) for i, li in enumerate(data.get("line_items") or []) if not line_is_vat(li)]
+
+
+def vat_settings(tax: dict | None, data: dict) -> dict:
+    """Pengaturan PPN satu invoice. Bawaan: "terpisah" bila ada baris PPN, selain itu "tidak ada"; tarif 11%;
+    rincian PPN tidak dicetak di voucher (PPN dilebur ke nilai barang)."""
+    v = (tax or {}).get("vat") or {}
+    mode = v.get("mode") if v.get("mode") in VAT_MODES else (
+        "separate" if any(line_is_vat(li) for li in data.get("line_items") or []) else "none")
+    rate = _dec(v.get("rate")) or DEFAULT_VAT_RATE
+    return {"mode": mode, "rate": _num(rate), "show": bool(v.get("show"))}
+
+
+def line_dpp(li: dict, vat: dict) -> Decimal:
+    """DPP satu baris: harga sebelum PPN. Bila harga sudah termasuk PPN, dihitung mundur dari subtotal."""
+    sub = _dec(li.get("subtotal")) or Decimal(0)
+    if vat["mode"] == "included" and li.get("vat") is not False:
+        rate = Decimal(vat["rate"])
+        return (sub * 100 / (100 + rate)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return sub
+
+
+def default_base(data: dict, vat: dict | None = None) -> Decimal | None:
+    """DPP awal: jumlah DPP rincian tanpa baris PPN; bila tidak ada rincian, total invoice."""
+    vat = vat or vat_settings(data.get("tax"), data)
+    lines = [li for _, li in item_lines(data) if li.get("subtotal") not in (None, "")]
+    base = sum((line_dpp(li, vat) for li in lines), Decimal(0))
     if base > 0:
         return base
     return Decimal(str(data["total"])) if data.get("total") not in (None, "") else None
+
+
+def vat_breakdown(data: dict, vat: dict | None = None) -> dict:
+    """PPN satu invoice: nilai yang termasuk di total tagihan, hitungan sistem, dan peringatan bila berbeda.
+    Voucher tetap membayar total invoice (yang ditagih vendor); peringatan tidak memblokir."""
+    vat = vat or vat_settings(data.get("tax"), data)
+    lines = data.get("line_items") or []
+    items = [li for _, li in item_lines(data)]
+    rate = Decimal(vat["rate"])
+    taxed = [li for li in items if li.get("vat") is not False]
+    stated_lines = [_dec(li.get("subtotal")) or Decimal(0) for li in lines if line_is_vat(li)]
+    stated = sum(stated_lines, Decimal(0)) if stated_lines else None
+    item_sum = sum((_dec(li.get("subtotal")) or Decimal(0) for li in items), Decimal(0))
+    total = _dec(data.get("total"))
+    warning = None
+    if vat["mode"] == "included":
+        computed = sum(((_dec(li.get("subtotal")) or Decimal(0)) - line_dpp(li, vat) for li in taxed), Decimal(0))
+        amount = computed
+    elif vat["mode"] == "separate":
+        computed = (sum((line_dpp(li, vat) for li in taxed), Decimal(0)) * rate / 100).quantize(
+            Decimal(1), rounding=ROUND_HALF_UP)
+        amount = (total - item_sum) if total is not None else (stated if stated is not None else computed)
+        if abs(amount - computed) > VAT_TOLERANCE:
+            warning = (f"PPN pada invoice (Rp {amount:,.0f}) berbeda dengan hitungan sistem (Rp {computed:,.0f} = "
+                       f"{_num(rate)}% x DPP baris yang kena PPN). Voucher tetap memakai angka invoice; periksa tarif "
+                       f"PPN dan baris yang kena PPN.").replace(",", ".")
+    else:
+        computed = amount = Decimal(0)
+        if stated:
+            warning = "Ada baris PPN, tetapi PPN diatur \"Tidak ada PPN\". Periksa kembali pengaturan PPN."
+    return {"mode": vat["mode"], "rate": vat["rate"], "show": vat["show"], "amount": amount, "computed": computed,
+            "stated": stated, "warning": warning}
 
 
 def amount(base: Decimal | None, rate: Decimal) -> Decimal:
@@ -135,29 +217,150 @@ def _num(value) -> str | None:
     return f"{d.normalize():f}" if d == d.to_integral() else f"{d:f}"
 
 
-def build(rate: TaxRate, npwp: bool, base: Decimal | None, base_auto: bool, data: dict,
-          source: str = "pic") -> dict:
-    """Pilihan pajak satu invoice, lengkap dengan salinan tarif dan nilai potongan."""
+def groups(data: dict, rates_by_code: dict[str, dict], vat: dict) -> list[dict]:
+    """Potongan PPh per jenis untuk mode per baris: baris yang dipilih PIC untuk satu jenis PPh digabung
+    (DPP = jumlah DPP baris itu). Urutan mengikuti baris pertama tiap jenis."""
+    result: dict[str, dict] = {}
+    for i, li in item_lines(data):
+        code = li.get("pph")
+        if not code or code == NONE or code not in rates_by_code:
+            continue
+        g = result.setdefault(code, {"code": code, "name": rates_by_code[code]["name"],
+                                     "rate": rates_by_code[code]["rate"], "lines": [], "base": Decimal(0)})
+        g["lines"].append(i)
+        g["base"] += line_dpp(li, vat)
+    return [{**g, "base": _num(g["base"]), "amount": _num(amount(g["base"], Decimal(g["rate"])))}
+            for g in result.values()]
+
+
+def build(rate: TaxRate | None, npwp: bool, base: Decimal | None, base_auto: bool, data: dict,
+          source: str = "pic", mode: str = "invoice", table: dict[str, TaxRate] | None = None,
+          vat: dict | None = None) -> dict:
+    """Pilihan pajak satu invoice, lengkap dengan salinan tarif dan nilai potongan.
+    `mode`: "invoice" (satu jenis PPh untuk seluruh invoice) atau "line" (PPh dipilih per baris)."""
+    vat = vat_settings({"vat": vat} if vat else data.get("tax"), data)
+    if mode == "line":
+        used = {li.get("pph") for _, li in item_lines(data)} - {None, NONE}
+        snapshot = {code: {"name": r.name, "rate": _num(Decimal(r.rate_npwp if npwp else r.rate_no_npwp))}
+                    for code, r in (table or {}).items() if code in used}
+        tax = {"mode": "line", "code": LINE, "name": "PPh per baris", "npwp": npwp, "rates": snapshot,
+               "source": source, "vat": vat}
+        return recompute(tax, data)
     if base_auto or base is None:
-        base = default_base(data)
+        base = default_base(data, vat)
     pct = Decimal(rate.rate_npwp if npwp else rate.rate_no_npwp)
-    return {"code": rate.code, "name": rate.name, "npwp": npwp, "rate": _num(pct), "base": _num(base),
-            "base_auto": base_auto, "amount": _num(amount(base, pct)), "source": source}
+    return {"mode": "invoice", "code": rate.code, "name": rate.name, "npwp": npwp, "rate": _num(pct),
+            "base": _num(base), "base_auto": base_auto, "amount": _num(amount(base, pct)), "source": source,
+            "vat": vat}
 
 
 def recompute(tax: dict | None, data: dict) -> dict | None:
     """Hitung ulang potongan setelah data invoice diedit (DPP otomatis mengikuti rincian baru)."""
     if not tax:
         return tax
-    base = default_base(data) if tax.get("base_auto") else (Decimal(tax["base"]) if tax.get("base") else None)
-    return {**tax, "base": _num(base), "amount": _num(amount(base, Decimal(tax.get("rate") or 0)))}
+    vat = vat_settings(tax, data)
+    if tax.get("mode") == "line":
+        found = groups(data, tax.get("rates") or {}, vat)
+        total = sum((Decimal(g["amount"]) for g in found), Decimal(0))
+        return {**tax, "vat": vat, "groups": found, "amount": _num(total)}
+    base = default_base(data, vat) if tax.get("base_auto") else (Decimal(tax["base"]) if tax.get("base") else None)
+    return {**tax, "vat": vat, "base": _num(base), "amount": _num(amount(base, Decimal(tax.get("rate") or 0)))}
 
 
 def label(tax: dict | None) -> str:
+    vat = (tax or {}).get("vat") or {}
+    vat_text = {"separate": f"; PPN terpisah {vat.get('rate')}%", "included": f"; harga termasuk PPN {vat.get('rate')}%",
+                "none": "; tanpa PPN"}.get(vat.get("mode"), "")
+    if vat.get("show"):
+        vat_text += ", rincian PPN dicetak"
+    if tax and tax.get("mode") == "line":
+        parts = [f"{g['name']} {Decimal(g['rate']).normalize():f}% ({len(g['lines'])} baris) = {g['amount']}"
+                 for g in tax.get("groups") or []]
+        npwp = "" if tax.get("npwp") else ", tanpa NPWP"
+        return f"PPh per baris{npwp}: {'; '.join(parts) or 'tanpa potongan'}{vat_text}"
     if not tax or tax.get("code") == NONE:
-        return "Tanpa potongan"
+        return "Tanpa potongan" + vat_text
     npwp = "" if tax.get("npwp") else ", tanpa NPWP"
-    return f"{tax['name']} {Decimal(tax['rate']).normalize():f}%{npwp} = {tax['amount']}"
+    return f"{tax['name']} {Decimal(tax['rate']).normalize():f}%{npwp} = {tax['amount']}{vat_text}"
+
+
+# --- Saran PPh per baris (mode per baris) ---
+
+def _line_rule(text: str) -> tuple[str, str]:
+    for code, pattern, reason in RULES:
+        if pattern.search(text):
+            return code, reason
+    return NONE, "Barang; umumnya tidak dipotong PPh"
+
+
+def descriptions_key(data: dict) -> str:
+    return json.dumps([li.get("description") or "" for li in data.get("line_items") or []])
+
+
+def suggest_lines_by_rules(data: dict, reimburse: bool) -> list[dict | None]:
+    """Saran jenis PPh tiap baris dari aturan kata kunci (tanpa AI). Baris PPN: None."""
+    vendor_foreign = RULES[0][1].search(data.get("vendor_name") or "")
+    out: list[dict | None] = []
+    for li in data.get("line_items") or []:
+        if line_is_vat(li):
+            out.append(None)
+        elif reimburse:
+            out.append({"code": NONE, "reason": "Reimburse karyawan umumnya tidak dipotong PPh", "source": "aturan"})
+        elif vendor_foreign:
+            out.append({"code": RULES[0][0], "reason": RULES[0][2], "source": "aturan"})
+        else:
+            code, reason = _line_rule(li.get("description") or "")
+            out.append({"code": code, "reason": reason, "source": "aturan"})
+    return out
+
+
+def line_suggestions(data: dict, reimburse: bool) -> list[dict | None]:
+    """Saran per baris yang ditampilkan: hasil AI yang tersimpan bila rinciannya belum berubah, selain itu aturan."""
+    saved = data.get("line_suggestions_ai") or {}
+    if saved.get("key") == descriptions_key(data) and len(saved.get("items") or []) == len(data.get("line_items") or []):
+        return saved["items"]
+    return suggest_lines_by_rules(data, reimburse)
+
+
+LINE_PROMPT = """Kamu staf pajak di bagian keuangan perusahaan Indonesia. Untuk SETIAP baris rincian invoice, pilih
+SATU jenis potongan PPh yang paling mungkin dipotong pemberi kerja saat membayar baris itu:
+- NONE: pembelian barang, atau baris yang tidak dipotong PPh
+- PPH23: jasa oleh badan usaha (PT/CV), sewa alat/kendaraan, instalasi, perbaikan, konsultasi
+- PPH21: honor/jasa orang pribadi (BUKAN untuk PT, CV, UD, koperasi, yayasan)
+- PPH4_2: sewa tanah/bangunan, jasa konstruksi (final)
+- PPH26: vendor luar negeri
+Perhatikan vendor: jasa oleh PT/CV adalah PPH23, bukan PPH21.
+Jawab HANYA JSON: {"lines": [{"no": 1, "code": "...", "reason": "alasan singkat bahasa Indonesia, maks 12 kata"}]}
+untuk semua nomor baris yang diberikan."""
+
+
+def suggest_lines_ai(bedrock, data: dict, valid: set[str]) -> list[dict | None]:
+    """Saran PPh per baris dari AI. Baris yang tidak dijawab AI dengan kode sah memakai aturan kata kunci.
+    Melempar BedrockError bila layanan AI tidak tersedia (layar menampilkan pesan dan tetap memakai aturan)."""
+    rules = suggest_lines_by_rules(data, False)
+    numbered = [(n, li) for n, li in enumerate(data.get("line_items") or [], start=1) if not line_is_vat(li)]
+    if not numbered:
+        return rules
+    listing = f"Vendor: {data.get('vendor_name') or '-'}\n" + "\n".join(
+        f"{n}. {li.get('description') or '-'}" for n, li in numbered[:80])
+    text = bedrock.generate(LINE_PROMPT, [{"role": "user", "content": listing}], max_tokens=1500, temperature=0)
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    try:
+        answers = (json.loads(match.group(0)) if match else {}).get("lines") or []
+    except json.JSONDecodeError:
+        answers = []
+    by_no = {int(a["no"]): a for a in answers if isinstance(a, dict) and str(a.get("no", "")).isdigit()}
+    entity = bool(ENTITY.search(data.get("vendor_name") or ""))
+    out = list(rules)
+    for n, _ in numbered:
+        answer = by_no.get(n) or {}
+        code = str(answer.get("code") or "").upper()
+        reason = str(answer.get("reason") or "")[:200]
+        if code == "PPH21" and entity and "PPH23" in valid:
+            code, reason = "PPH23", "Jasa oleh badan usaha (PT/CV), bukan orang pribadi"
+        if code in valid:
+            out[n - 1] = {"code": code, "reason": reason or "Saran AI", "source": "ai"}
+    return out
 
 
 @dataclass
@@ -168,6 +371,17 @@ class TaxLine:
     npwp: bool
     base: Decimal
     amount: Decimal
+    detail: str | None = None  # mode per baris: baris yang dipotong
+
+
+@dataclass
+class VatLine:
+    invoice_no: str | None
+    mode: str
+    rate: Decimal
+    amount: Decimal
+    show: bool
+    warning: str | None
 
 
 @dataclass
@@ -175,21 +389,57 @@ class Summary:
     gross: Decimal | None
     tax_total: Decimal = Decimal(0)
     lines: list[TaxLine] = field(default_factory=list)
+    vat: list[VatLine] = field(default_factory=list)
 
     @property
     def net(self) -> Decimal | None:
         return None if self.gross is None else self.gross - self.tax_total
 
 
+def line_names(data: dict, indexes: list[int]) -> str:
+    """Uraian singkat baris yang dipotong: satu atau dua uraian, selain itu uraian pertama + jumlah baris lain."""
+    lines = data.get("line_items") or []
+    names = [(lines[i].get("description") or f"baris {i + 1}") for i in indexes if i < len(lines)]
+    if len(names) <= 2:
+        return ", ".join(names)
+    return f"{names[0]} dan {len(names) - 1} baris lain"
+
+
+def file_tax_total(data: dict) -> Decimal:
+    """Total potongan PPh satu invoice (0 bila pajak belum dipilih atau tanpa potongan)."""
+    tax = (data or {}).get("tax") or {}
+    if tax.get("mode") == "line":
+        return sum((Decimal(str(g.get("amount") or 0)) for g in tax.get("groups") or []), Decimal(0))
+    if tax.get("code") in (None, NONE):
+        return Decimal(0)
+    return Decimal(str(tax.get("amount") or 0))
+
+
 def summary(doc) -> Summary:
-    """Total tagihan, potongan pajak per invoice, dan nilai bersih yang dibayarkan voucher."""
+    """Total tagihan, PPN, potongan pajak per invoice (per jenis PPh bila per baris), dan nilai bersih."""
     gross = doc.extraction.total if doc.extraction else None
     result = Summary(gross)
     for f in getattr(doc, "files", None) or []:
-        tax = (f.data or {}).get("tax")
-        if not tax or tax.get("code") == NONE or not tax.get("amount") or Decimal(tax["amount"]) == 0:
+        data = f.data or {}
+        tax = data.get("tax")
+        vat = vat_breakdown(data, vat_settings(tax, data))
+        if vat["mode"] != "none" or vat["warning"]:
+            result.vat.append(VatLine(data.get("invoice_no"), vat["mode"], Decimal(vat["rate"]), vat["amount"],
+                                      vat["show"], vat["warning"]))
+        if not tax:
             continue
-        line = TaxLine((f.data or {}).get("invoice_no"), tax["name"], Decimal(tax["rate"]), bool(tax.get("npwp")),
+        if tax.get("mode") == "line":
+            for g in tax.get("groups") or []:
+                if Decimal(g["amount"]) == 0:
+                    continue
+                line = TaxLine(data.get("invoice_no"), g["name"], Decimal(g["rate"]), bool(tax.get("npwp")),
+                               Decimal(g["base"]), Decimal(g["amount"]), line_names(data, g["lines"]))
+                result.lines.append(line)
+                result.tax_total += line.amount
+            continue
+        if tax.get("code") == NONE or not tax.get("amount") or Decimal(tax["amount"]) == 0:
+            continue
+        line = TaxLine(data.get("invoice_no"), tax["name"], Decimal(tax["rate"]), bool(tax.get("npwp")),
                        Decimal(tax.get("base") or 0), Decimal(tax["amount"]))
         result.lines.append(line)
         result.tax_total += line.amount

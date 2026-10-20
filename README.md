@@ -89,7 +89,9 @@ Catatan alur:
 
 - **AI Engine hanya mengekstrak.** Verifikasi, cek SoD, dan pembuatan voucher dilakukan **Sistem**.
 - EXCEPTION bisa datang dari verifikasi sistem atau dari reviewer yang mengembalikan dokumen. PIC memperbaiki di editor yang sama; setiap simpan memverifikasi ulang dengan **Request ID yang sama** (tanpa kendala wajib → kembali Draf).
-- **Kendala wajib** (harus dibereskan PIC sebelum dikirim): `MISSING_EVIDENCE`, `CALCULATION_DISCREPANCY`, `VENDOR_MISMATCH`, `NOT_AN_INVOICE`, `EXTRACTION_FAILED`, `ACCOUNT_MISMATCH`. Kendala lain (`POSSIBLE_DUPLICATE`, `RECEIPT_NOT_INVOICE`, `NEEDS_MANUAL_REVIEW`) ikut terkirim dan diputuskan reviewer.
+- **Kendala wajib** (harus dibereskan PIC sebelum dikirim): `MISSING_EVIDENCE`, `CALCULATION_DISCREPANCY`, `NOT_AN_INVOICE`, `EXTRACTION_FAILED`, `ACCOUNT_MISMATCH`. **Peringatan yang dikonfirmasi PIC**: `VENDOR_MISMATCH` (beberapa vendor/rekening dalam satu voucher) tidak membuat dokumen "Ada kendala", tetapi draf baru bisa dikirim setelah PIC mengonfirmasinya dengan alasan. Kendala lain (`POSSIBLE_DUPLICATE`, `RECEIPT_NOT_INVOICE`, `NEEDS_MANUAL_REVIEW`) ikut terkirim dan diputuskan reviewer.
+- **Bila AI bermasalah** (kredensial dicabut, layanan gangguan) atau dimatikan dengan `AI_EXTRACTION_ENABLED=false`, bukti yang tidak terbaca menjadi **draf isi manual**: dokumen tetap Draf dengan pesan "Isi data invoice secara manual", saran pajak dari aturan tetap ada, dan PIC bisa mencoba "Coba baca ulang dengan AI" untuk bukti yang gagal saja. Hanya file yang hilang dari penyimpanan yang menjadi `EXTRACTION_FAILED`.
+- **Subtotal baris** dihitung sistem (qty × harga satuan, 2 desimal) bila keduanya terisi; tanpa qty atau harga, subtotal diisi manual (harga borongan).
 - Pengalihan oleh **Service Lead** terpisah dari alur SoD. Pengalihan ini hanya untuk pemerataan beban, dan status dokumen tidak berubah.
 - Persetujuan dan pembayaran oleh **Client Approver** terjadi di luar sistem.
 - Setiap aktivitas, perubahan data (nilai awal → nilai baru), penolakan, dan pengalihan dicatat permanen di **jejak audit**.
@@ -103,7 +105,8 @@ Catatan alur:
 | Duplikasi | `POSSIBLE_DUPLICATE` | Ada invoice lain dengan nomor invoice dan vendor yang sama | EXCEPTION |
 | Dikembalikan reviewer | `RETURNED_BY_REVIEWER` | Finance Reviewer memilih "Kembalikan ke PIC" | EXCEPTION |
 | Bukan invoice | `NOT_AN_INVOICE` | AI (berperan sebagai Invoice Verification Officer) menilai PDF bukan invoice/tagihan, mis. surat, PO, atau bukti transfer. Kendala data lain tidak ditampilkan | EXCEPTION |
-| Vendor/rekening berbeda | `VENDOR_MISMATCH` | Beberapa invoice dalam satu pengajuan punya vendor atau rekening tujuan berbeda | EXCEPTION |
+| Vendor/rekening berbeda | `VENDOR_MISMATCH` | Beberapa invoice dalam satu pengajuan punya vendor atau rekening tujuan berbeda | Peringatan: tetap Draf, PIC mengonfirmasi dengan alasan sebelum kirim; konfirmasi gugur bila daftar vendor/rekening berubah |
+| Rekening tidak cocok | `ACCOUNT_MISMATCH` | Rekening suatu invoice berbeda dengan rekening terverifikasi vendornya (dicek per invoice) | EXCEPTION |
 
 > **Voucher Pengeluaran Reimburse** (bon tol, parkir, dll.): struk/nota adalah bukti sah, boleh banyak vendor, data wajib hanya tanggal dan total, dan rekening vendor tidak dicek karena uang dibayarkan ke karyawan.
 
@@ -202,6 +205,8 @@ Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD
 | `04_selisih_total.pdf` | Aturan angka | CALCULATION_DISCREPANCY |
 | `05_normal_jasa.pdf` | UAT 5, 7 | READY_FOR_REVIEW |
 
+**Invoice dummy untuk pajak** (PPN dan PPh per baris, Tahap 9) ada di [`samples/pajak/`](samples/pajak/), dibuat ulang dengan `backend/.venv/bin/python backend/scripts/make_tax_invoices.py`. Langkah dan hasil yang diharapkan per file ada di [`samples/pajak/README.md`](samples/pajak/README.md).
+
 ---
 
 ## Arsitektur
@@ -226,6 +231,8 @@ Semua library dan tools yang dipakai bersifat **open source**. Satu-satunya laya
 
 Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EMBED_REGION` di `.env`. Setelah mengganti model embedding, jalankan `POST /reindex`.
 
+Tanpa akses AI, aplikasi tetap bisa dipakai: isi `AI_EXTRACTION_ENABLED=false` di `.env` supaya setiap unggahan langsung menjadi draf isi manual (AI tidak dipanggil). Bila AI menyala tetapi gagal, dokumen juga jatuh ke isi manual dengan pesan yang jelas.
+
 ### Struktur folder
 
 ```
@@ -235,6 +242,7 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
 ├── docs/
 │   └── sop.md                  # SOP v1.1 — juga sumber pengetahuan Asisten SOP
 ├── samples/invoices/           # Invoice PDF dummy untuk UAT
+├── samples/pajak/              # Invoice PDF dummy untuk PPN dan PPh per baris
 ├── scripts/run_e2e.sh          # Menjalankan 8 skenario UAT (Cypress) end-to-end
 ├── frontend/                   # React + Vite (lihat "Menjalankan frontend")
 │   └── src/
@@ -255,7 +263,7 @@ Model bisa diganti tanpa mengubah kode lewat `LLM_MODEL`, `EMBED_MODEL`, dan `EM
     │                           # aturan akses, jejak audit, Bedrock, RAG (loader, chunker, FAISS, indexing), riwayat, memori
     ├── alembic/                # Migrasi database
     ├── bot/telegram_bot.py     # Bot Telegram @amiga_ro_bot (program terpisah)
-    ├── scripts/                # create_db.sh, make_dummy_invoices.py, e2e_server.sh (backend E2E :8001)
+    ├── scripts/                # create_db.sh, make_dummy_invoices.py, make_tax_invoices.py, e2e_server.sh (backend E2E :8001)
     ├── seed.py                 # Data dummy: 2 klien, 8 pengguna
     ├── tests/                  # pytest
     ├── requirements.txt
@@ -455,13 +463,15 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | PUT | `/documents/{id}/files/{position}/data` | PIC Klien / Intake Support: simpan data **satu invoice** saat DRAFT/EXCEPTION. Body = data lengkap invoice itu: `vendor_name`, `invoice_no`, `invoice_date`, `total`, `bank_name`, `account_no`, `account_name`, `line_items`. Data voucher disusun ulang dari semua invoice, diverifikasi ulang, perubahan dicatat `FIXED_BY_PIC` (nilai awal → baru) |
 | GET | `/documents/{id}/voucher-preview` | Simulasi Voucher Pengeluaran bertanda SIMULASI (tanpa nomor dan tanda tangan elektronik), lengkap dengan lampiran |
 | POST | `/documents/{id}/submit` | PIC Klien / Intake Support: kirim draf ke Finance Reviewer → READY_FOR_REVIEW. 409 bila masih ada kendala wajib atau ada bukti yang pajaknya belum dipilih. Pengirim dihitung pihak pengaju (SoD) |
-| PUT | `/documents/{id}/files/{position}/tax` | PIC Klien / Intake Support: pilih pajak satu invoice saat DRAFT/EXCEPTION. Body: `{"code": "PPH23", "npwp": true, "base": null}` (`base` kosong = DPP otomatis). Tarif disalin ke data invoice; dicatat `FIXED_BY_PIC` |
+| PUT | `/documents/{id}/files/{position}/tax` | PIC Klien / Intake Support: pilih pajak satu invoice saat DRAFT/EXCEPTION. Body: `{"code": "PPH23", "npwp": true, "base": null}` (`base` kosong = DPP otomatis). PPh per baris: `"mode": "line"` dengan `"lines": [{"index": 1, "pph": "PPH23"}]`. Pengaturan PPN: `"vat": {"mode": "separate"\|"included"\|"none", "rate": "11", "show": false}`; per baris `vat` (kena PPN) dan `kind` (`item`/`vat`). Tarif disalin ke data invoice; dicatat `FIXED_BY_PIC` |
+| POST | `/documents/{id}/files/{position}/tax/ai-suggest` | PIC Klien / Intake Support: minta rekomendasi AI jenis PPh per baris. Hanya saran (berlaku setelah pajak diterapkan); 503 bila AI tidak tersedia, saran aturan tetap dipakai |
 | GET | `/tax-rates` | Semua pengguna: jenis dan tarif pajak |
 | PUT | `/tax-rates/{code}` | Service Lead / System Admin: ubah nama, tarif ber-NPWP / tanpa NPWP, keterangan, aktif, status konfirmasi. Draf dan voucher lama tidak berubah |
 | GET/PUT/DELETE | `/clients/{id}/logo` | Logo klien (PNG) untuk kop voucher. PUT body `{"image": "data:image/png;base64,..."}` (PNG/JPG/WEBP ≤ 2 MB, dirapikan ke PNG); hanya PIC Klien klien itu atau System Admin |
 | POST | `/documents/{id}/fix` | (lama) PIC Klien / Intake Support: kirim perbaikan saat EXCEPTION. Body: `{"fields": {"account_no": "..."}, "note": "..."}`. Dashboard kini memakai `PUT .../files/{position}/data` |
 | POST | `/documents/{id}/cancel` | PIC Klien / Intake Support: batalkan pengajuan saat DRAFT, EXCEPTION, atau READY_FOR_REVIEW. Body: `{"reason": "..."}` (min. 5 karakter). Status → CANCELLED, kendala ditutup, tercatat di jejak audit; tidak dihitung sebagai duplikat |
-| POST | `/documents/{id}/reprocess` | PIC Klien / Intake Support / Finance Reviewer: proses ulang dokumen yang gagal dibaca AI |
+| POST | `/documents/{id}/reprocess` | PIC Klien / Intake Support / Finance Reviewer: proses ulang dokumen yang gagal dibaca AI. Pada draf isi manual, hanya bukti yang belum terbaca AI yang dibaca ulang. 409 bila `AI_EXTRACTION_ENABLED=false` |
+| POST | `/documents/{id}/acknowledge` | PIC Klien / Intake Support: konfirmasi peringatan dengan alasan saat DRAFT/EXCEPTION. Body: `{"code": "VENDOR_MISMATCH", "reason": "..."}` (min. 5 karakter). Tercatat `WARNING_ACKNOWLEDGED`, tampil untuk reviewer, tidak dicetak di voucher |
 | PUT | `/documents/{id}/extraction` | **Dicabut** (403): Finance Reviewer tidak mengedit data; kembalikan ke PIC dengan alasan |
 | POST | `/documents/{id}/approve` | Finance Reviewer: **Setujui**. Pengunggah ditolak (403) dan dokumen dialihkan otomatis; bila lolos → AMIGA_REVIEWED + voucher |
 | POST | `/documents/{id}/return` | Finance Reviewer: **Kembalikan ke PIC**. Body: `{"reason": "..."}` (wajib) |
@@ -474,7 +484,7 @@ Semua endpoint selain `/health`, `/auth/login`, dan `/reindex` butuh header `Aut
 | GET | `/vouchers/report` | Service Lead: rekap voucher PDF (`period` = 1 / 7 / 30 hari terakhir, atau `custom` + `date_from` & `date_to`, maks. 366 hari, tanggal WIB). Berisi ringkasan, rekap per perusahaan dan per reviewer, serta daftar voucher; unduhan tercatat di jejak audit |
 | GET/POST | `/vendors` | Data referensi vendor (POST oleh PIC Klien/Intake; 409 bila nama sudah terdaftar) |
 | GET | `/vendors/check` | Cek nama vendor sudah terdaftar (`client_id`, `name`) |
-| PUT / PATCH | `/vendors/{id}`, `/vendors/{id}/active` | Ubah / nonaktifkan vendor |
+| GET / PUT / PATCH | `/vendors/{id}`, `/vendors/{id}/active` | Lihat / ubah / nonaktifkan vendor. Dari layar dokumen, PIC bisa mendaftarkan atau memperbarui rekening vendor (diisi dari invoice) |
 | GET/POST | `/signatories` | Pemberi persetujuan ("Disetujui oleh") per klien (POST/PUT/PATCH hanya PIC Klien) |
 | PUT | `/documents/{id}/signers` | Ganti penanda tangan dokumen sebelum voucher terbit. Body: `{"signatory_ids": [...]}` |
 | GET | `/documents/{id}/history` | Riwayat & jejak audit dokumen (System Admin boleh tanpa penugasan klien) |
@@ -523,7 +533,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif yang bukan pihak pengaju | Pengalihan tidak boleh membuka celah SoD |
 | Asisten dan data antrean | `/ask-agent` memakai data antrean hanya bila pertanyaannya tentang antrean (mis. "dokumen apa yang tenggatnya dekat?"). Data dibangun di server dari klien yang ditugaskan; jawaban seperti ini **tidak disimpan** ke memori | Data cepat berubah, jadi tidak boleh menjadi referensi jawaban lain; hak akses sama dengan layar biasa |
 | Penanda tangan voucher | Nama + kotak tanda tangan basah (tanpa gambar atau e-sign). Disalin ke dokumen saat dipilih, sehingga voucher lama tidak berubah bila daftar diedit. "Diajukan oleh" = PIC Klien pengaju (nama, "PIC Klien, <perusahaan>"); "Disetujui oleh" 1 kotak default, maks. 5 | Keputusan owner 14–16 Okt 2026 |
-| Beberapa invoice per voucher | 1–10 PDF per pengajuan, masing-masing maks. 5 halaman dan 10 MB. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Satu voucher hanya untuk satu vendor dan satu rekening (`VENDOR_MISMATCH`); duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
+| Beberapa invoice per voucher | 1–10 PDF per pengajuan, masing-masing maks. 5 halaman dan 10 MB. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Beberapa vendor/rekening dalam satu voucher harus dikonfirmasi PIC dengan alasan (`VENDOR_MISMATCH`, feedback owner 20 Okt 2026) dan tampil sebagai "Pembayaran per rekening" untuk reviewer; duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
 | Vendor per klien | Data vendor milik masing-masing klien (tidak dibagi lintas klien) | Data rekening vendor termasuk data sensitif dan mengikuti aturan isolasi klien |
 | Halaman awal | Dashboard metrik untuk semua peran selain System Admin | Permintaan owner: metrik utama terlihat pertama |
 | `POSSIBLE_DUPLICATE` | Tidak menahan draf; ikut terkirim dan **Setujui ditolak** sampai reviewer menandai bukan duplikat (atau mengembalikan ke PIC) | Alur draf (Tahap 3): keputusan duplikat ada di reviewer; target "0 duplikat lolos" tetap terjaga |

@@ -25,6 +25,9 @@ const ACTION: Record<string, [string, "" | "ok" | "warn" | "bad"]> = {
   E_SIGNATURE_APPLIED: ["Tanda tangan elektronik dibubuhkan", "ok"],
   CLASSIFICATION_DECIDED: ["Klasifikasi dokumen diputuskan reviewer", "warn"],
   ACCOUNT_CONFIRMED_BY_REVIEWER: ["Rekening dikonfirmasi manual oleh reviewer", "warn"],
+  TAX_AI_SUGGESTED: ["Rekomendasi AI untuk PPh per baris diminta", ""],
+  AI_UNAVAILABLE: ["AI tidak membaca invoice; data diisi manual oleh PIC", "warn"],
+  WARNING_ACKNOWLEDGED: ["Peringatan dikonfirmasi PIC", "warn"],
 };
 
 const statusText = (s: string | null) => (s ? STATUS_LABEL[s as DocStatus] ?? s : "");

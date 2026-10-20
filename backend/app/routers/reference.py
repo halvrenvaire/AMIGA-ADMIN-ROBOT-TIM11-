@@ -96,6 +96,12 @@ def check_vendor(client_id: uuid.UUID, name: str = Query(min_length=1, max_lengt
     return VendorCheck(exists=vendor is not None, vendor=_vendor_out(db, vendor) if vendor else None)
 
 
+@router.get("/vendors/{vendor_id}", response_model=VendorOut)
+def get_vendor(vendor_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Satu vendor, mis. untuk memperbarui atau memverifikasi rekeningnya dari layar dokumen."""
+    return _vendor_out(db, _get_vendor(db, user, vendor_id))
+
+
 @router.post("/vendors", response_model=VendorOut, status_code=201)
 def create_vendor(body: VendorCreate, user: User = Depends(vendor_editors), db: Session = Depends(get_db)):
     ensure_client_access(db, user, body.client_id)

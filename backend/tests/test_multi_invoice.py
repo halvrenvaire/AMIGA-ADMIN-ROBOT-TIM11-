@@ -3,9 +3,12 @@ from decimal import Decimal
 
 from app.config import settings
 from tests.test_documents import (  # noqa: F401
-    submit_draft, api, client_id, codes, detail, extractor, invoice, make_pdf, tx,
+    submit_draft, api, client_id, codes, detail, extractor, invoice, make_pdf, send, tx, upload,
 )
 from app.services.extraction_service import ExtractedLine, ExtractionError
+from tests.test_classification import verified_vendor
+from tests.test_reference import add_vendor
+from tests.test_review import NAMES, audit, edit_file
 
 PIC = "pic.alpha@amiga.test"
 
@@ -56,11 +59,64 @@ def test_bad_file_in_batch_is_named(extractor):
     assert r.json()["detail"].startswith("inv2.pdf: ") and "6 halaman" in r.json()["detail"]
 
 
-def test_different_vendor_in_one_voucher_is_an_exception(extractor):
+def test_different_vendor_is_a_warning_the_pic_confirms(extractor):
     extractor.result = [invoice(), second_invoice(vendor_name="CV Lain Sendiri", account_no="999")]
     doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
-    assert doc["status"] == "EXCEPTION"
+    # Peringatan, bukan kendala: tetap Draf, tetapi belum bisa dikirim sebelum dikonfirmasi PIC
+    assert doc["status"] == "DRAFT"
     assert ("VENDOR_MISMATCH", "vendor_name") in codes(doc)
+    assert api(PIC).post(f"/documents/{doc['id']}/submit").status_code == 409
+
+    ack = lambda reason, code="VENDOR_MISMATCH", email=PIC: api(email).post(  # noqa: E731
+        f"/documents/{doc['id']}/acknowledge", json={"code": code, "reason": reason})
+    assert ack("ok").status_code == 422  # alasan wajib
+    assert ack("Dua vendor satu proyek", code="CALCULATION_DISCREPANCY").status_code == 422
+    assert ack("Dua vendor satu proyek", email="reviewer1@amiga.test").status_code == 403
+    r = ack("Dua vendor dalam satu proyek renovasi")
+    assert r.status_code == 200
+    assert "VENDOR_MISMATCH" not in {c for c, _ in codes(r.json())}
+    assert r.json()["acknowledgements"]["VENDOR_MISMATCH"]["reason"] == "Dua vendor dalam satu proyek renovasi"
+
+    # Reviewer melihat pembayaran per rekening
+    payees = r.json()["payees"]
+    assert [(p["vendor_name"], p["account_no"], p["invoices"], Decimal(p["net"])) for p in payees] == [
+        ("PT Vendor Jaya", "1234567890", [1], Decimal(900000)), ("CV Lain Sendiri", "999", [2], Decimal(100000))]
+    assert {p["state"] for p in payees} == {"UNVERIFIED"}
+    sent = send(doc["id"])
+    assert sent.status_code == 200 and sent.json()["status"] == "READY_FOR_REVIEW"
+    reviewer = api(NAMES[sent.json()["assigned_reviewer"]])
+    assert reviewer.post(f"/documents/{doc['id']}/approve", json={}).status_code == 422
+    assert reviewer.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True}).status_code == 200
+    log = audit(doc["id"], "ACCOUNT_CONFIRMED_BY_REVIEWER")[-1]
+    assert log.new_value == "1234567890, 999"
+    assert audit(doc["id"], "WARNING_ACKNOWLEDGED")[-1].note == "Dua vendor dalam satu proyek renovasi"
+
+
+def test_confirmation_is_void_when_vendors_change(extractor):
+    extractor.result = [invoice(), second_invoice(vendor_name="CV Lain Sendiri", account_no="999")]
+    doc_id = upload_many([make_pdf(), make_pdf()]).json()["id"]
+    api(PIC).post(f"/documents/{doc_id}/acknowledge", json={"code": "VENDOR_MISMATCH", "reason": "Satu proyek"})
+    r = edit_file(doc_id, position=2, vendor_name="CV Vendor Ketiga")
+    assert ("VENDOR_MISMATCH", "vendor_name") in codes(r.json())
+    assert r.json()["acknowledgements"] == {}
+
+
+def test_account_is_checked_per_invoice(extractor):
+    verified_vendor()  # PT Vendor Jaya, rekening 1234567890 terverifikasi
+    extractor.result = [second_invoice(vendor_name="CV Lain Sendiri", account_no="999"),
+                        invoice(invoice_no="INV-003", account_no="5555")]
+    doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
+    # Rekening invoice kedua berbeda dengan rekening terverifikasi PT Vendor Jaya, walau invoice pertama vendor lain
+    assert ("ACCOUNT_MISMATCH", "account_no") in codes(doc)
+    assert doc["status"] == "EXCEPTION"
+    states = {p["vendor_name"]: p["state"] for p in doc["payees"]}
+    assert states == {"CV Lain Sendiri": "UNVERIFIED", "PT Vendor Jaya": "MISMATCH"}
+
+
+def test_same_vendor_invoices_share_one_payee_row(extractor):
+    extractor.result = [invoice(), second_invoice()]
+    doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
+    assert [(p["invoices"], Decimal(p["gross"])) for p in doc["payees"]] == [([1, 2], Decimal(1000000))]
 
 
 def test_same_invoice_twice_in_batch_is_flagged(extractor):
@@ -78,12 +134,23 @@ def test_invoice_reused_from_earlier_batch_is_a_duplicate(extractor):
     assert any(first["request_id"] in i["message"] for i in doc["issues"])
 
 
-def test_one_unreadable_invoice_fails_the_batch_with_its_name(extractor):
+def test_one_unreadable_invoice_is_filled_manually_and_retried_alone(extractor):
     extractor.result = [invoice(), ExtractionError("timeout")]
     doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
-    assert codes(doc) == [("EXTRACTION_FAILED", None)]
-    # Progres per file untuk layar detail: file pertama sempat terbaca, file kedua tidak
-    assert [bool(f["read_at"]) for f in doc["files"]] == [True, False]
+    assert doc["status"] == "DRAFT"
+    assert doc["ai_manual"]["files"] == ["inv2.pdf"] and "1 dari 2 invoice (inv2.pdf)" in doc["ai_manual"]["message"]
+    assert doc["files"][0]["data"]["vendor_name"] == "PT Vendor Jaya"
+    assert doc["files"][1]["data"]["vendor_name"] is None and doc["files"][1]["data"]["manual"] is True
+    api(PIC).put(f"/documents/{doc['id']}/files/1/tax", json={"code": "NONE"})
+
+    # Baca ulang hanya invoice yang gagal; data dan pilihan pajak invoice pertama tetap
+    extractor.result = [second_invoice()]
+    assert api(PIC).post(f"/documents/{doc['id']}/reprocess").status_code == 200
+    again = detail(doc["id"])
+    assert extractor.calls == 3
+    assert again["ai_manual"] is None
+    assert again["files"][0]["data"]["tax"]["code"] == "NONE"
+    assert again["files"][1]["data"]["invoice_no"] == "INV-002"
 
 
 def test_every_file_is_marked_read_after_processing(extractor):
@@ -112,3 +179,19 @@ def test_non_invoice_file_in_batch_is_named(extractor):
     doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
     assert codes(doc) == [("NOT_AN_INVOICE", None)]
     assert "inv2.pdf" in doc["issues"][0]["message"] and "inv1.pdf" not in doc["issues"][0]["message"]
+
+
+def test_pic_registers_vendor_from_draft_and_reviewer_verifies_it(extractor):
+    doc_id = upload(submit=False).json()["id"]
+    assert detail(doc_id)["payees"][0]["vendor_id"] is None
+    # Pendaftaran hanya pencatatan: draf tetap bisa dikirim walau rekening belum diverifikasi
+    vendor = add_vendor(account_name="PT Vendor Jaya").json()
+    payee = detail(doc_id)["payees"][0]
+    assert payee["vendor_id"] == vendor["id"] and payee["state"] == "UNVERIFIED" and not payee["vendor_verified"]
+    sent = send(doc_id)
+    assert sent.status_code == 200
+    reviewer = api(NAMES[sent.json()["assigned_reviewer"]])
+    assert reviewer.post(f"/vendors/{vendor['id']}/verify").status_code == 200
+    assert detail(doc_id)["payees"][0]["state"] == "VERIFIED"
+    # Rekening sudah terverifikasi: persetujuan tidak lagi memerlukan konfirmasi manual
+    assert reviewer.post(f"/documents/{doc_id}/approve", json={}).status_code == 200

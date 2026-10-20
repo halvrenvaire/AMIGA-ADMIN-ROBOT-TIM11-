@@ -89,7 +89,7 @@ def test_editing_invoice_data_keeps_tax_and_recomputes_it(extractor):
     extractor.result = invoice(line_items=JASA)
     doc = set_tax(draft()["id"], code="PPH23").json()
     lines = doc["files"][0]["data"]["line_items"]
-    lines[0]["subtotal"] = "1000000"
+    lines[0]["unit_price"] = "1000000"  # qty 1: subtotal dihitung sistem
     r = edit_file(doc["id"], line_items=lines, total="1000000")
     tax = r.json()["files"][0]["data"]["tax"]
     assert tax["code"] == "PPH23" and tax["amount"] == "20000"

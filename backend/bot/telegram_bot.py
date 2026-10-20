@@ -202,6 +202,11 @@ def format_processing_result(doc: dict) -> str:
     if taxes.get("lines"):
         names = ", ".join(sorted({t["name"] for t in taxes["lines"]}))
         lines.append(f"Potongan pajak ({names}): {rupiah(taxes['tax_total'])} · Dibayarkan: {rupiah(taxes['net'])}")
+    manual = doc.get("ai_manual")
+    if manual:
+        # AI dimatikan/bermasalah: data diisi PIC di dashboard; daftar data kosong tidak perlu diulang
+        lines += [f"\n✍️ {manual['message']}", f"Isi datanya di dashboard: {doc_url(doc['id'])}"]
+        return "\n".join(lines)
     if status == "DRAFT":
         lines.append("Draf siap. Periksa data per invoice dan simulasi voucher di dashboard, pilih pajak tiap bukti, "
                      "lalu kirim ke Finance Reviewer (bisa juga lewat tombol di bawah).")
@@ -760,7 +765,7 @@ class AmigaBot:
                         f"/status {detail['request_id']}")
             else:
                 text = format_processing_result(detail)
-                if detail["status"] == "DRAFT":
+                if detail["status"] == "DRAFT" and not detail.get("ai_manual"):
                     buttons = draft_buttons(detail)
             self.tg.send_message(chat_id, text, buttons)
         except Exception:

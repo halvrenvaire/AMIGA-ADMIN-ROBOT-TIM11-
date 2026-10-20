@@ -222,3 +222,9 @@ def test_client_logo_upload_by_pic_and_admin_only(tx):
     assert api("admin@amiga.test").delete(f"/clients/{alpha}/logo").status_code == 200
     assert api("pic.alpha@amiga.test").get(f"/clients/{alpha}/logo").status_code == 404
     assert api("pic.alpha@amiga.test").put(f"/clients/{alpha}/logo", json={"image": "bukan gambar"}).status_code == 422
+
+
+def test_get_one_vendor(tx):
+    vendor = add_vendor().json()
+    assert api("pic.alpha@amiga.test").get(f"/vendors/{vendor['id']}").json()["name"] == "PT Vendor Jaya"
+    assert api("pic.beta@amiga.test").get(f"/vendors/{vendor['id']}").status_code == 403

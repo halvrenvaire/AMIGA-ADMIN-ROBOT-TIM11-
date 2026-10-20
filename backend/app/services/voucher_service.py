@@ -180,9 +180,17 @@ def _qty(value: Decimal) -> str:
     return f"{value.normalize():f}".replace(".", ",")
 
 
+def _cut_text(tax: dict, name: str, rate, base, what: str) -> str:
+    npwp = "" if tax.get("npwp") else " (tanpa NPWP)"
+    return f"Potongan {name} {_qty(Decimal(str(rate)))}%{npwp} x DPP {_money(_dec(base))} ({what})"
+
+
 def voucher_rows(doc) -> tuple[list[tuple[str, Decimal, bool]], Decimal]:
-    """Baris tabel voucher (feedback owner 20 Okt 2026): per invoice, barangnya dengan PPN dilebur ke nilai
-    barang (dibagi proporsional; sisa pembulatan ke barang terakhir), lalu baris potongan PPh tepat di bawahnya.
+    """Baris tabel voucher (feedback owner 20 Okt 2026). Per invoice:
+    - Bawaan: PPN dilebur ke nilai barang yang kena PPN (dibagi proporsional; sisa pembulatan ke barang terakhir).
+      Bila PIC mencentang "Tampilkan rincian PPN", barang dicetak senilai DPP dan PPN menjadi satu baris sendiri.
+    - Potongan PPh: satu jenis untuk seluruh invoice → satu baris di bawah barangnya; PPh per baris → satu baris
+      per jenis PPh, tepat di bawah barang terakhir yang dipotong jenis itu.
     Jumlah semua baris = total dibayarkan. Hasil: [(uraian, jumlah, potongan?)], total dibayarkan."""
     from app.services.document_processing import file_data  # hindari import melingkar
 
@@ -197,35 +205,55 @@ def voucher_rows(doc) -> tuple[list[tuple[str, Decimal, bool]], Decimal]:
     multi = len(groups) > 1
     rows: list[tuple[str, Decimal, bool]] = []
     for data in groups:
-        lines = data.get("line_items") or []
-        items = [li for li in lines if not tax_service.is_vat_line(li.get("description"))]
-        has_vat = len(items) < len(lines)
+        tax = data.get("tax") or {}
+        vat = tax_service.vat_settings(tax, data)
+        indexed = tax_service.item_lines(data)
+        items = [li for _, li in indexed]
         subtotals = [_dec(li.get("subtotal")) or Decimal(0) for li in items]
-        base_sum = sum(subtotals, Decimal(0))
         total = _dec(data.get("total"))
-        # PPN tidak dicetak sendiri: selisih total invoice dengan jumlah barang dilebur ke barang
-        vat = (total - base_sum) if has_vat and total is not None else Decimal(0)
-        shares = [Decimal(0)] * len(items)
-        if vat and base_sum:
-            for i, sub in enumerate(subtotals[:-1]):
-                shares[i] = (vat * sub / base_sum).quantize(Decimal("0.01"))
-            shares[-1] = vat - sum(shares[:-1], Decimal(0))
+        vat_amount = tax_service.vat_breakdown(data, vat)["amount"]
+        if vat["mode"] == "none" and len(items) < len(data.get("line_items") or []) and total is not None:
+            # Baris PPN padahal diatur "tidak ada PPN": tetap dilebur supaya voucher membayar total invoice
+            vat_amount = total - sum(subtotals, Decimal(0))
+        # Nilai tiap barang tanpa PPN (DPP) dan bagian PPN-nya
+        if vat["mode"] == "included":
+            dpps = [tax_service.line_dpp(li, vat) for li in items]
+            shares = [sub - dpp for sub, dpp in zip(subtotals, dpps)]
+        else:
+            dpps = subtotals
+            shares = [Decimal(0)] * len(items)
+            taxed = [i for i, li in enumerate(items) if li.get("vat") is not False] or list(range(len(items)))
+            taxed_sum = sum((subtotals[i] for i in taxed), Decimal(0))
+            if vat_amount and taxed_sum:
+                for i in taxed[:-1]:
+                    shares[i] = (vat_amount * subtotals[i] / taxed_sum).quantize(Decimal("0.01"))
+                shares[taxed[-1]] = vat_amount - sum(shares, Decimal(0))
         tag = f"[{data.get('invoice_no')}] " if multi and data.get("invoice_no") else ""
-        for li, sub, share in zip(items, subtotals, shares):
+        # PPh per baris: potongan dicetak setelah barang terakhir yang dipotong jenis itu
+        cuts_after: dict[int, list[dict]] = {}
+        if tax.get("mode") == "line":
+            for g in tax.get("groups") or []:
+                if g.get("lines") and _dec(g.get("amount")):
+                    cuts_after.setdefault(max(g["lines"]), []).append(g)
+        for (index, li), dpp, share in zip(indexed, dpps, shares):
             qty, unit = _dec(li.get("qty")), _dec(li.get("unit_price"))
             detail = [f"{_qty(qty)} x {_money(unit)}"] if qty is not None and unit is not None else []
-            if share:
+            if share and not vat["show"]:
                 detail.append("termasuk PPN")
             text = f"{tag}{li.get('description') or '-'}" + (f" ({', '.join(detail)})" if detail else "")
-            rows.append((text, sub + share, False))
+            rows.append((text, dpp + (Decimal(0) if vat["show"] else share), False))
+            for g in cuts_after.get(index, []):
+                what = tax_service.line_names(data, g["lines"])
+                rows.append((_cut_text(tax, g["name"], g["rate"], g["base"], what), _dec(g["amount"]), True))
         if not items and total is not None:  # invoice tanpa rincian: satu baris total
             rows.append((f"{tag}Invoice {data.get('invoice_no') or ''}".strip(), total, False))
-        tax = data.get("tax")
-        if tax and tax.get("code") != tax_service.NONE and _dec(tax.get("amount")):
+        if vat["show"] and items:
+            vat_total = sum(shares, Decimal(0))
+            if vat_total:
+                rows.append((f"{tag}PPN {_qty(Decimal(vat['rate']))}%", vat_total, False))
+        if tax.get("mode") != "line" and tax and tax.get("code") != tax_service.NONE and _dec(tax.get("amount")):
             what = items[0].get("description") if len(items) == 1 else (data.get("invoice_no") or "invoice ini")
-            rate = _qty(Decimal(str(tax["rate"])))
-            rows.append((f"Potongan {tax['name']} {rate}%{'' if tax.get('npwp') else ' (tanpa NPWP)'} x DPP "
-                         f"{_money(_dec(tax.get('base')))} ({what})", _dec(tax["amount"]), True))
+            rows.append((_cut_text(tax, tax["name"], tax["rate"], tax.get("base"), what), _dec(tax["amount"]), True))
     paid = sum((-a if cut else a for _, a, cut in rows), Decimal(0))
     return rows, paid
 
