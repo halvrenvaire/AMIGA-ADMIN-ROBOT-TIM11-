@@ -227,3 +227,14 @@ def test_ppn_split_proportionally_over_items_and_rows_sum_to_paid():
     assert [(round(a), cut) for _, a, cut in rows] == [(666000, False), (444000, False), (20000, True)]
     assert rows[2][0].endswith("(INV-9)")  # beberapa barang: potongan menyebut nomor invoice
     assert paid == Decimal(1090000)
+
+
+def test_owner_1702_ppn_label_is_recognised():
+    # Faktur DSS (contoh voucher owner 1702) dibaca AI sebagai "Jumlah PPN (Pajak Pertambangan Nilai)"
+    data = {"total": "8933846", "line_items": [
+        {"description": "Basic Fee (Fixed) & BPJS Driver Service", "subtotal": "6375633"},
+        {"description": "Management Fee & Development Driver Service", "subtotal": "2304696"},
+        {"description": "Jumlah PPN (Pajak Pertambangan Nilai)", "subtotal": "253517"}]}
+    assert tax_service.is_vat_line("Jumlah PPN (Pajak Pertambangan Nilai)")
+    assert tax_service.is_vat_line("Total VAT") and not tax_service.is_vat_line("Jumlah barang PPN")
+    assert tax_service.default_base(data) == Decimal(8680329)  # Basic Fee + Management Fee, tanpa PPN

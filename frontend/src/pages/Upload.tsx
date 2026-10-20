@@ -116,7 +116,7 @@ export function Upload() {
       <div className="page-head">
         <div>
           <h1>Pembuatan voucher</h1>
-          <p>1–{MAX_FILES} file bukti (invoice, bon) berupa PDF atau foto JPG, PNG, WEBP untuk satu voucher, tiap file maksimal 5 halaman. Semua bukti ikut dilampirkan di voucher. Tinjau dulu di Preview sebelum dikirim.</p>
+          <p>1–{MAX_FILES} file bukti (invoice, bon) berupa PDF atau foto JPG, PNG, WEBP untuk satu voucher. Satu file boleh berisi invoice beserta Faktur Pajak dan timesheet (jumlah halaman tidak dibatasi; AI membaca halaman-halaman awal). Semua halaman ikut dilampirkan di voucher. Tinjau dulu di Preview sebelum dikirim.</p>
         </div>
       </div>
 
@@ -204,7 +204,7 @@ export function Upload() {
             <div style={{ marginTop: 6 }}>
               Seret file PDF atau foto invoice ke sini atau <b>klik untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
             </div>
-            <small className="muted">Bisa beberapa file sekaligus. PDF (maks. 5 halaman) atau foto JPG/PNG/WEBP, maks. {MAX_MB} MB per file</small>
+            <small className="muted">Bisa beberapa file sekaligus. PDF (berapa pun halamannya) atau foto JPG/PNG/WEBP, maks. {MAX_MB} MB per file</small>
           </div>
         )}
         <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(e) => add(e.target.files)} />

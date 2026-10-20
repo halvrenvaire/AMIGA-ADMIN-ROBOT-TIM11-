@@ -620,8 +620,6 @@ class AmigaBot:
         pages = count_pdf_pages(prepared.pdf)
         if pages is None:
             return f"{name}: file PDF rusak atau tidak bisa dibaca."
-        if pages > settings.max_pdf_pages:
-            return f"{name}: berisi {pages} halaman. Maksimal {settings.max_pdf_pages} halaman per file."
         media_type = file_conversion.IMAGE_TYPES[prepared.source_format] if prepared.converted else "application/pdf"
         if photo and not document:
             draft.compressed_photo = True

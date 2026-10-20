@@ -198,7 +198,7 @@ async def upload_document(
                                       description="Kategori: " + " / ".join(REQUEST_CATEGORIES))],
     channel: Annotated[Channel, Form(description="Asal pengajuan invoice")],
     submitted_date: Annotated[date, Form(description="Tanggal pengajuan")],
-    files: Annotated[list[UploadFile], File(description="1–10 invoice PDF untuk satu voucher, masing-masing maks. 5 halaman")],
+    files: Annotated[list[UploadFile], File(description="1–10 file bukti untuk satu voucher (Reimburse: sampai 20); jumlah halaman tidak dibatasi")],
     due_date: Annotated[date | None, Form(description="Tenggat (opsional)")] = None,
     signatory_ids: Annotated[str | None, Form(
         description="ID pemberi persetujuan (\"Disetujui oleh\") dipisah koma, berurutan. "
@@ -238,9 +238,6 @@ async def upload_document(
             pages = _count_pdf_pages(prepared.pdf)
         except HTTPException as e:
             raise HTTPException(e.status_code, f"{label}{e.detail}")
-        if pages > settings.max_pdf_pages:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                                f"{label}Invoice berisi {pages} halaman. Maksimal {settings.max_pdf_pages} halaman per file.")
         parts.append(_UploadPart(name, prepared.pdf, pages, data if prepared.converted else None,
                                  prepared.source_format))
 

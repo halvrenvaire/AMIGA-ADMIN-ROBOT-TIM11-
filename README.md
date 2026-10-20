@@ -44,7 +44,7 @@ AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi
 
 | Metrik | Target |
 | --- | --- |
-| Waktu ekstraksi per invoice (≤ 5 halaman) | ≤ 15 detik |
+| Waktu ekstraksi per invoice (AI membaca maks. 5 halaman pertama) | ≤ 15 detik |
 | Waktu muat antrean dan layar review | ≤ 2 detik |
 | Waktu pembuatan voucher | ≤ 3 detik |
 | Line items terbaca dan total benar | 100% di skenario uji |
@@ -145,7 +145,7 @@ Keterangan: ✅ selesai · 🔄 sebagian · ⏳ belum dikerjakan
 
 | Fitur (PRD §4) | Prioritas | Status | Keterangan |
 | --- | --- | --- | --- |
-| F1. Unggah invoice dan antrean | P0 | ✅ | `POST /documents`: PDF ≤ 5 halaman, field wajib termasuk saluran, Request ID, QUEUED, unggah atas nama PIC oleh Intake Support |
+| F1. Unggah invoice dan antrean | P0 | ✅ | `POST /documents`: PDF tanpa batas halaman (AI membaca 5 halaman pertama), field wajib termasuk saluran, Request ID, QUEUED, unggah atas nama PIC oleh Intake Support |
 | F2. Ekstraksi AI | P0 | ✅ | Nova Lite membaca PDF langsung (2–4 detik per invoice dummy). Gagal baca → dokumen tetap tersimpan, Finance Reviewer bisa proses ulang. Ekstraksi ulang memakai Request ID sama |
 | F3. Verifikasi otomatis oleh sistem | P0 | ✅ | Kelengkapan, angka, duplikasi (dinormalisasi). Kode + alasan berbahasa sederhana. Perbaikan PIC didahulukan atas hasil AI |
 | F4. Peninjauan oleh Finance Reviewer | P0 | ✅ | Koreksi data + verifikasi ulang, Setujui (kendala terbuka menahan persetujuan), Kembalikan ke PIC dengan alasan, cek SoD + pengalihan otomatis, tandai bukan duplikat |
@@ -361,7 +361,7 @@ Bot `@amiga_ro_bot` adalah program terpisah yang membaca pesan Telegram lalu mem
 | *(kalimat biasa)* | Dijawab Asisten AI (`/ask-agent`), termasuk pertanyaan data antrean |
 | *(kirim file PDF)* | Unggah invoice (PIC Klien / Intake Support), lihat di bawah |
 
-**Unggah invoice lewat bot** (SOP 6.4 & 7.1): kirim 1–10 file **PDF** (boleh sekaligus) → pilih perusahaan dan jenis permintaan lewat tombol → **Kirim ke AMIGA**. Bot memakai endpoint `POST /documents` yang sama dengan dashboard (saluran `Telegram`, tanggal hari ini, penanda tangan default klien), jadi semua aturan berlaku: maks. 5 halaman per file, hanya perusahaan yang ditugaskan, Request ID, ekstraksi AI, verifikasi, dan jejak audit. Setelah AI selesai (dipantau hingga 2 menit), bot mengabarkan **Siap ditinjau** atau **Ada kendala** beserta alasannya. Draft yang belum dikirim tersimpan di memori bot selama 30 menit (hilang bila bot di-restart).
+**Unggah invoice lewat bot** (SOP 6.4 & 7.1): kirim 1–10 file **PDF** (boleh sekaligus) → pilih perusahaan dan jenis permintaan lewat tombol → **Kirim ke AMIGA**. Bot memakai endpoint `POST /documents` yang sama dengan dashboard (saluran `Telegram`, tanggal hari ini, penanda tangan default klien), jadi semua aturan berlaku: jumlah halaman tidak dibatasi, hanya perusahaan yang ditugaskan, Request ID, ekstraksi AI, verifikasi, dan jejak audit. Setelah AI selesai (dipantau hingga 2 menit), bot mengabarkan **Siap ditinjau** atau **Ada kendala** beserta alasannya. Draft yang belum dikirim tersimpan di memori bot selama 30 menit (hilang bila bot di-restart).
 
 > ⚠️ File yang dikirim ke bot melewati server Telegram (chat bot tidak terenkripsi end-to-end). Untuk PoC memakai data dummy; untuk produksi perlu kajian UU PDP.
 
@@ -533,7 +533,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Pengalihan oleh Service Lead | Hanya dokumen READY_FOR_REVIEW, ke Finance Reviewer aktif yang bukan pihak pengaju | Pengalihan tidak boleh membuka celah SoD |
 | Asisten dan data antrean | `/ask-agent` memakai data antrean hanya bila pertanyaannya tentang antrean (mis. "dokumen apa yang tenggatnya dekat?"). Data dibangun di server dari klien yang ditugaskan; jawaban seperti ini **tidak disimpan** ke memori | Data cepat berubah, jadi tidak boleh menjadi referensi jawaban lain; hak akses sama dengan layar biasa |
 | Penanda tangan voucher | Nama + kotak tanda tangan basah (tanpa gambar atau e-sign). Disalin ke dokumen saat dipilih, sehingga voucher lama tidak berubah bila daftar diedit. "Diajukan oleh" = PIC Klien pengaju (nama, "PIC Klien, <perusahaan>"); "Disetujui oleh" 1 kotak default, maks. 5 | Keputusan owner 14–16 Okt 2026 |
-| Beberapa invoice per voucher | 1–10 PDF per pengajuan, masing-masing maks. 5 halaman dan 10 MB. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Beberapa vendor/rekening dalam satu voucher harus dikonfirmasi PIC dengan alasan (`VENDOR_MISMATCH`, feedback owner 20 Okt 2026) dan tampil sebagai "Pembayaran per rekening" untuk reviewer; duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
+| Beberapa invoice per voucher | 1–10 PDF per pengajuan (Reimburse: sampai 20), masing-masing maks. 10 MB; **jumlah halaman tidak dibatasi** karena satu berkas bisa berisi invoice, Faktur Pajak, dan timesheet (feedback owner 20 Okt 2026). AI hanya membaca 5 halaman pertama (`AI_MAX_PAGES`), semua halaman tetap dilampirkan di voucher. Nomor invoice digabung, total dijumlahkan, rincian diberi awalan nomor invoice. Beberapa vendor/rekening dalam satu voucher harus dikonfirmasi PIC dengan alasan (`VENDOR_MISMATCH`, feedback owner 20 Okt 2026) dan tampil sebagai "Pembayaran per rekening" untuk reviewer; duplikasi dicek per nomor invoice. PIC meninjau di halaman Preview sebelum mengirim | Koreksi owner 15 Okt 2026 |
 | Vendor per klien | Data vendor milik masing-masing klien (tidak dibagi lintas klien) | Data rekening vendor termasuk data sensitif dan mengikuti aturan isolasi klien |
 | Halaman awal | Dashboard metrik untuk semua peran selain System Admin | Permintaan owner: metrik utama terlihat pertama |
 | `POSSIBLE_DUPLICATE` | Tidak menahan draf; ikut terkirim dan **Setujui ditolak** sampai reviewer menandai bukan duplikat (atau mengembalikan ke PIC) | Alur draf (Tahap 3): keputusan duplikat ada di reviewer; target "0 duplikat lolos" tetap terjaga |
@@ -546,7 +546,7 @@ Hal-hal berikut belum diatur rinci di dokumen acuan dan **sudah disepakati tim**
 | Asisten AI | Satu fitur di dalam aplikasi (tombol chat di semua layar), hanya untuk peran internal | Data yang dijawab dibatasi hak akses pengguna, sama seperti layar biasa |
 | Memori tanya-jawab `/ask-agent` | Dipakai **sebagai referensi** (SOP tetap acuan utama); kemiripan minimal **0,70**; jawaban 👎 tidak dipakai, 👍 didahulukan; memori dari index SOP lama diabaikan setelah `/reindex`; pertanyaan lanjutan dan jawaban "tidak ada di dokumen" tidak disimpan | Diukur dengan Titan Embed v2: pertanyaan berbeda maksud bisa mencapai ~0,36 (mis. target waktu *ekstraksi* vs *voucher*), parafrase berkata mirip ~0,80. Batas 0,70 mencegah jawaban yang salah topik ikut menjadi referensi |
 | PPN, biaya, dan potongan di bawah tabel | AI wajib mencatat PPN/PPh, ongkir, materai, dan diskon di bagian ringkasan sebagai baris rincian. Bila jumlah rincian ≠ total, AI **membaca ulang** khusus mencari baris yang terlewat; hasilnya dipakai **hanya bila membuat hitungan pas persis**. Selisih yang sama dengan 11%/12% rincian diberi petunjuk "kemungkinan PPN" | Contoh nyata: faktur PT Sukanda Djaya (855.000 + PPN 94.050 = 949.050) sempat keliru ditandai CALCULATION_DISCREPANCY. Sistem tidak pernah menghitung atau mengarang angka sendiri; pembacaan ulang menambah ~3–4 detik hanya saat ada selisih |
-| Format foto invoice | Foto JPG/PNG/WEBP **dikonversi ke PDF di pintu masuk**; Word/Excel tetap ditolak (SOP 1.3) | Seluruh alur (batas 5 halaman, layar peninjauan, penggabungan voucher, ekstraksi AI) tetap memakai PDF, jadi tidak ada bagian lain yang berubah. PRD FR-1.1/1.5 menyebut PDF saja dan menaruh format lain di luar cakupan: **perlu dikonfirmasi ke mentor** |
+| Format foto invoice | Foto JPG/PNG/WEBP **dikonversi ke PDF di pintu masuk**; Word/Excel tetap ditolak (SOP 1.3) | Seluruh alur (layar peninjauan, penggabungan voucher, ekstraksi AI) tetap memakai PDF, jadi tidak ada bagian lain yang berubah. PRD FR-1.1/1.5 menyebut PDF saja dan menaruh format lain di luar cakupan: **perlu dikonfirmasi ke mentor** |
 | Unggah invoice lewat Telegram | Diizinkan lewat **bot resmi** dari chat pribadi akun yang terhubung (saluran `Telegram`); kirim ke WhatsApp/Email/grup tetap tidak diproses (SOP 1.2) | Bot memakai endpoint unggah yang sama dengan dashboard, jadi validasi, hak akses, dan audit identik. Disetujui tim 16/10/2026; perlu dikonfirmasi ke mentor karena PRD menaruh penarikan otomatis dari WhatsApp/Email di luar cakupan |
 
 ---
@@ -569,5 +569,5 @@ Perlu dijawab klien / tim Keuangan AMIGA (PRD v2 §8):
 - Persetujuan dan pembayaran oleh klien, serta portal untuk Client Approver.
 - Integrasi ke ERP, akuntansi, internet banking, atau payment gateway.
 - Penarikan invoice otomatis dari WhatsApp/Email (saluran hanya dicatat sebagai metadata).
-- Format selain PDF dan foto JPG/PNG/WEBP (mis. Word, Excel), serta invoice lebih dari 5 halaman.
+- Format selain PDF dan foto JPG/PNG/WEBP (mis. Word, Excel).
 - Validasi Faktur Pajak ke sistem DJP.

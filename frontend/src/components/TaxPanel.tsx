@@ -14,8 +14,9 @@ export interface TaxLine {
   pph?: string | null; vat?: boolean | null; kind?: "item" | "vat" | null;
 }
 
-// Sama dengan backend (tax_service.VAT_LINE): hanya baris yang diawali kata pajak, mis. "PPN 11%"
-export const VAT_LINE = /^\s*(\[[^\]]*\]\s*)?(ppn|vat|pajak pertambahan|pb\s?1|pajak restoran)\b/i;
+// Sama dengan backend (tax_service.VAT_LINE): hanya baris yang diawali kata pajak, mis. "PPN 11%",
+// "Jumlah PPN (Pajak Pertambahan Nilai)", "Total VAT"
+export const VAT_LINE = /^\s*(\[[^\]]*\]\s*)?((jumlah|total|nilai)\s+)?(ppn|vat|pajak pertambahan|pb\s?1|pajak restoran)\b/i;
 
 export const isVatLine = (l: { description: string; kind?: "item" | "vat" | null }) =>
   l.kind ? l.kind === "vat" : VAT_LINE.test(l.description);
