@@ -20,7 +20,7 @@ from app.config import settings
 from app.main import app
 from app.models import AuditLog, Client
 from app.routers import documents as documents_router
-from app.services import access_rules, document_processing
+from app.services import access_rules, document_processing, storage
 from app.services.extraction_service import ExtractedInvoice, ExtractedLine, ExtractionError
 from tests.auth_helpers import auth_header
 
@@ -272,19 +272,51 @@ def test_same_invoice_at_other_client_is_not_a_duplicate(extractor):
     assert doc["status"] == "READY_FOR_REVIEW"
 
 
-def test_extraction_failure_keeps_document_and_reviewer_can_reprocess(extractor):
+def test_ai_failure_becomes_manual_draft_and_pic_can_retry(extractor):
     extractor.result = ExtractionError("Bedrock tidak tersedia")
     doc = detail(upload().json()["id"])
-    assert doc["status"] == "EXCEPTION"
-    assert codes(doc) == [("EXTRACTION_FAILED", None)]
+    # Dokumen tidak tampak rusak: draf kosong yang diisi PIC secara manual, dengan pesan yang jelas
+    assert doc["status"] == "DRAFT"
+    assert doc["ai_manual"]["status"] == "failed" and doc["ai_manual"]["files"] == ["invoice.pdf"]
+    assert "Isi data invoice secara manual" in doc["ai_manual"]["message"]
+    assert "Bedrock" not in doc["ai_manual"]["message"]  # pesan teknis hanya di log/riwayat
+    assert "EXTRACTION_FAILED" not in {c for c, _ in codes(doc)}
+    assert doc["files"][0]["data"]["tax_suggestion"]  # saran pajak berbasis aturan tetap ada
+    # Data kosong tetap menahan pengiriman ke reviewer
+    assert api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/submit").status_code == 409
 
     assert api("lead@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 403
     extractor.result = invoice()
     # PIC bisa meminta AI membaca ulang dari draf
     assert api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 200
     again = detail(doc["id"])
-    assert again["status"] == "DRAFT"
+    assert again["status"] == "DRAFT" and again["ai_manual"] is None
     assert again["request_id"] == doc["request_id"]
+    assert again["extraction"]["vendor_name"] == "PT Vendor Jaya"
+
+
+def test_ai_switched_off_skips_extraction(extractor, monkeypatch):
+    monkeypatch.setattr(settings, "ai_extraction_enabled", False)
+    doc = detail(upload().json()["id"])
+    assert extractor.calls == 0
+    assert doc["status"] == "DRAFT" and doc["ai_manual"]["status"] == "off" and doc["ai_enabled"] is False
+    assert "dimatikan" in doc["ai_manual"]["message"]
+    assert api("pic.alpha@amiga.test").post(f"/documents/{doc['id']}/reprocess").status_code == 409
+
+
+def test_unexpected_ai_error_does_not_leave_document_processing(extractor):
+    extractor.result = RuntimeError("respons aneh")
+    doc = detail(upload().json()["id"])
+    assert doc["status"] == "DRAFT" and doc["ai_manual"]["status"] == "failed"
+
+
+def test_missing_file_in_storage_is_still_an_extraction_failure(extractor, monkeypatch):
+    def broken(_key):
+        raise storage.StorageError("hilang")
+    monkeypatch.setattr(storage, "load", broken)
+    doc = detail(upload().json()["id"])
+    assert doc["status"] == "EXCEPTION"
+    assert codes(doc) == [("EXTRACTION_FAILED", None)]
 
 
 def test_reprocess_only_for_failed_extraction(extractor):

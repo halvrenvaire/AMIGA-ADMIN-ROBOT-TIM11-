@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { AlertTriangle, Ban, CheckCircle2, FileQuestion, Receipt, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { api } from "../api";
 import { FIELD_LABEL, ISSUE_LABEL, rupiah, tanggal } from "../format";
@@ -15,8 +15,9 @@ const CLASS_TONE: Record<DocClass, string> = { INVOICE: "ok", RECEIPT: "warn", I
 
 const DRAFT_FIELDS = ["vendor_name", "invoice_no", "invoice_date", "total", "bank_name", "account_no", "account_name"] as const;
 
-/** Status rekening tujuan dibanding data vendor yang diverifikasi Finance Reviewer. */
-export function AccountCheckBox({ check }: { check: AccountCheck }) {
+/** Status rekening tujuan dibanding data vendor yang diverifikasi Finance Reviewer. `actions`: tombol pintas,
+ *  mis. daftarkan rekening vendor (PIC) atau verifikasi rekening (Finance Reviewer). */
+export function AccountCheckBox({ check, actions }: { check: AccountCheck; actions?: ReactNode }) {
   const meta = {
     VERIFIED: { icon: ShieldCheck, tone: "ok", title: "Rekening terverifikasi" },
     MISMATCH: { icon: ShieldAlert, tone: "bad", title: "Rekening tidak cocok dengan data terverifikasi" },
@@ -33,6 +34,7 @@ export function AccountCheckBox({ check }: { check: AccountCheck }) {
         <b>{meta.title}</b>
         <span>{check.message}</span>
         <small>Sumber nomor rekening: {check.source === "PIC" ? "diisi PIC" : "dibaca AI dari dokumen"}</small>
+        {actions && <div className="account-actions">{actions}</div>}
       </div>
     </div>
   );

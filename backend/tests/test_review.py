@@ -170,8 +170,9 @@ def test_uat7_pic_edit_per_invoice_is_audited_and_reverified(extractor):
     assert "Rina" in log.actor_label
 
     lines = r.json()["files"][0]["data"]["line_items"]
-    lines[2]["subtotal"] = "150000"
+    lines[2]["unit_price"] = "7500"  # 20 × 7.500: subtotal dihitung sistem
     r = edit_file(doc["id"], line_items=lines)
+    assert r.json()["files"][0]["data"]["line_items"][2]["subtotal"] == "150000"
     assert r.json()["issues"] == [] and r.json()["status"] == "DRAFT"
     assert Decimal(r.json()["extraction"]["total"]) == Decimal(950000)
     sent = send(doc["id"])
@@ -256,3 +257,21 @@ def test_history_visible_to_assigned_users_and_admin_only(extractor):
     assert actions[0] == "DOCUMENT_UPLOADED"
     assert api("admin@amiga.test").get(f"/documents/{doc['id']}/history").status_code == 200
     assert api("pic.beta@amiga.test").get(f"/documents/{doc['id']}/history").status_code == 403
+
+
+def test_subtotal_is_qty_times_price_unless_lump_sum(extractor):
+    doc_id = upload(submit=False).json()["id"]
+    lines = detail(doc_id)["files"][0]["data"]["line_items"]
+    lines[0].update(qty="3", unit_price="1250.5", subtotal="1")  # subtotal dikirim salah: dihitung ulang sistem
+    lines[1].update(qty=None, unit_price=None, subtotal="300000")  # borongan: subtotal manual
+    saved = edit_file(doc_id, line_items=lines).json()["files"][0]["data"]["line_items"]
+    assert [li["subtotal"] for li in saved] == ["3751.50", "300000", "100000"]
+
+
+@pytest.mark.parametrize("qty, price, expected", [
+    ("2", "1000", "2000"), ("3", "33333.333", "100000"), ("1.5", "10.01", "15.02"), (None, "5", None), ("2", "", None),
+])
+def test_line_subtotal(qty, price, expected):
+    from app.services.document_processing import line_subtotal
+    result = line_subtotal(qty, price)
+    assert (None if result is None else str(result)) == expected

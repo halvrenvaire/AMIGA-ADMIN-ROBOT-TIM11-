@@ -338,6 +338,29 @@ class DocumentDetail(DocumentSummary):
     account_check: dict | None = None
     # Total tagihan, potongan pajak, dan nilai bersih yang dibayarkan voucher (Tahap 4)
     tax_summary: "TaxSummaryOut | None" = None
+    # Isi manual: AI dimatikan/gagal membaca sebagian atau semua invoice ({status, files, message})
+    ai_manual: dict | None = None
+    ai_enabled: bool = True  # AI_EXTRACTION_ENABLED; false = tombol baca ulang dengan AI disembunyikan
+    # Rekening tujuan per vendor (beberapa invoice dengan vendor+rekening sama digabung)
+    payees: list["PayeeOut"] = []
+    # Peringatan yang sudah dikonfirmasi PIC dan masih berlaku: {kode: {reason, by, at}}
+    acknowledgements: dict[str, dict] = {}
+
+
+class PayeeOut(BaseModel):
+    vendor_name: str | None
+    bank_name: str | None
+    account_no: str | None
+    account_name: str | None
+    invoices: list[int]
+    gross: Decimal
+    net: Decimal
+    state: str
+    message: str
+    source: str
+    vendor_id: str | None = None
+    vendor_verified: bool = False
+    reference_matches: bool = False
 
 
 class TaxLineOut(BaseModel):
@@ -347,6 +370,16 @@ class TaxLineOut(BaseModel):
     npwp: bool
     base: Decimal
     amount: Decimal
+    detail: str | None = None  # PPh per baris: uraian baris yang dipotong
+
+
+class VatLineOut(BaseModel):
+    invoice_no: str | None
+    mode: Literal["separate", "included", "none"]
+    rate: Decimal
+    amount: Decimal  # PPN yang termasuk di total tagihan
+    show: bool  # rincian PPN dicetak di voucher
+    warning: str | None = None  # PPN invoice berbeda dengan hitungan sistem (tidak memblokir)
 
 
 class TaxSummaryOut(BaseModel):
@@ -354,13 +387,33 @@ class TaxSummaryOut(BaseModel):
     tax_total: Decimal
     net: Decimal | None
     lines: list[TaxLineOut] = []
+    vat: list[VatLineOut] = []
+
+
+class TaxLineChoice(BaseModel):
+    """Pengaturan pajak satu baris rincian (indeks mulai 0)."""
+    index: int = Field(ge=0, lt=300)
+    pph: str | None = Field(None, max_length=20)  # mode per baris; kosong/NONE = tidak dipotong
+    vat: bool | None = None  # baris kena PPN
+    kind: Literal["item", "vat"] | None = None  # jenis baris bila PIC mengoreksi tebakan sistem
+
+
+class VatChoice(BaseModel):
+    """PPN satu invoice: terpisah di bawah barang, sudah termasuk harga, atau tidak ada."""
+    mode: Literal["separate", "included", "none"]
+    rate: Decimal = Field(Decimal(11), gt=0, le=100)
+    show: bool = False  # cetak rincian PPN di voucher (bawaan: PPN dilebur ke nilai barang)
 
 
 class TaxChoice(BaseModel):
-    """Pilihan pajak PIC untuk satu invoice. `base` kosong = DPP otomatis dari rincian (tanpa baris PPN)."""
-    code: str = Field(max_length=20)
+    """Pilihan pajak PIC untuk satu invoice. `base` kosong = DPP otomatis dari rincian (tanpa baris PPN).
+    `mode` "line": PPh dipilih per baris lewat `lines` (DPP otomatis per baris; `code` dan `base` diabaikan)."""
+    code: str = Field("NONE", max_length=20)
     npwp: bool = True
     base: Decimal | None = Field(None, ge=0)
+    mode: Literal["invoice", "line"] = "invoice"
+    lines: list[TaxLineChoice] = Field(default_factory=list, max_length=300)
+    vat: VatChoice | None = None
 
 
 class TaxRateOut(BaseModel):
@@ -398,6 +451,10 @@ class LineItemIn(BaseModel):
     qty: Decimal | None = None
     unit_price: Decimal | None = None
     subtotal: Decimal | None = None
+    # Pengaturan pajak baris (diatur di panel pajak; ikut dikirim ulang saat data invoice disimpan)
+    pph: str | None = Field(None, max_length=20)
+    vat: bool | None = None
+    kind: Literal["item", "vat"] | None = None
 
 
 class FileDataUpdate(BaseModel):
@@ -433,6 +490,10 @@ class ClassificationDecision(BaseModel):
 
 class ReasonRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=1000)
+
+
+class AcknowledgeRequest(ReasonRequest):
+    code: IssueCode  # peringatan yang dikonfirmasi, mis. VENDOR_MISMATCH
 
 
 class AuditItem(BaseModel):

@@ -19,7 +19,7 @@ from app.routers.documents import _detail, _get_document
 from app.schemas.schemas import (
     ApproveRequest, AuditItem, ClassificationDecision, DocumentDetail, ReasonRequest,
 )
-from app.services.account_check import MISMATCH, UNVERIFIED, VERIFIED, check_account
+from app.services.account_check import MISMATCH, UNVERIFIED, VERIFIED, check_account, payee_checks
 from app.services import audit_service, storage
 from app.services.access_rules import can_access_client
 from app.services.document_processing import (
@@ -103,8 +103,10 @@ def approve(document_id: uuid.UUID, body: ApproveRequest | None = None, user: Us
                             "(mis. konfirmasi langsung ke vendor), lalu centang konfirmasi pengecekan rekening.")
 
     if account.state == UNVERIFIED:
+        # Konfirmasi mencakup semua rekening tujuan voucher yang belum terverifikasi
+        accounts = ", ".join(p.account_no or "-" for p in payee_checks(db, doc) if p.check.state == UNVERIFIED)
         audit_service.record(db, user, "ACCOUNT_CONFIRMED_BY_REVIEWER", document_id=doc.id, client_id=doc.client_id,
-                             field="account_no", new_value=doc.extraction.account_no if doc.extraction else None,
+                             field="account_no", new_value=accounts or (doc.extraction.account_no if doc.extraction else None),
                              note=(body.account_note or "").strip() or "Rekening dicek manual oleh Finance Reviewer")
     started = time.monotonic()
     set_status(db, doc, DocStatus.AMIGA_REVIEWED, "Disetujui Finance Reviewer")

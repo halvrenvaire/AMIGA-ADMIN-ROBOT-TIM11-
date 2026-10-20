@@ -33,6 +33,8 @@ ACTION_LABEL = {
     "DOCUMENT_CANCELLED": "Pengajuan dibatalkan", "E_SIGNATURE_APPLIED": "Tanda tangan elektronik dibubuhkan",
     "CLASSIFICATION_DECIDED": "Klasifikasi diputuskan reviewer",
     "ACCOUNT_CONFIRMED_BY_REVIEWER": "Rekening dikonfirmasi reviewer",
+    "TAX_AI_SUGGESTED": "Rekomendasi AI PPh per baris",
+    "AI_UNAVAILABLE": "AI tidak membaca invoice; diisi manual", "WARNING_ACKNOWLEDGED": "Peringatan dikonfirmasi PIC",
 }
 ROLE_LABEL = {
     Role.PIC_KLIEN: "PIC Klien", Role.INTAKE_SUPPORT: "Intake Support", Role.FINANCE_REVIEWER: "Finance Reviewer",

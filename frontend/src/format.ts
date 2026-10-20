@@ -86,3 +86,30 @@ export const todayIso = () => {
 
 /** Angka untuk input: "900000.00" → "900000". */
 export const plainNumber = (v: string | null) => (v === null ? "" : String(Number(v)));
+
+/** Angka desimal dari input ("12", "1250.5") sebagai bilangan bulat berskala, supaya perkalian tidak terkena
+ *  pembulatan floating point. */
+function scaled(v: string): [bigint, number] | null {
+  const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(v.trim());
+  if (!m || (!m[2] && !m[3])) return null;
+  const frac = m[3] ?? "";
+  return [BigInt(`${m[1]}${m[2] || "0"}${frac}`), frac.length];
+}
+
+/** Subtotal baris = qty × harga satuan, dibulatkan 2 desimal (sama dengan backend). null bila salah satunya
+ *  kosong: subtotal diisi manual (borongan). */
+export function lineSubtotal(qty: string, price: string): string | null {
+  const a = scaled(qty), b = scaled(price);
+  if (!a || !b) return null;
+  let cents = a[0] * b[0];
+  const scale = a[1] + b[1];
+  if (scale > 2) {
+    const div = 10n ** BigInt(scale - 2);
+    const abs = cents < 0n ? -cents : cents;
+    const q = abs / div + ((abs % div) * 2n >= div ? 1n : 0n);
+    cents = cents < 0n ? -q : q;
+  } else cents *= 10n ** BigInt(2 - scale);
+  const abs = cents < 0n ? -cents : cents;
+  const rest = abs % 100n;
+  return `${cents < 0n ? "-" : ""}${abs / 100n}${rest ? `.${rest.toString().padStart(2, "0").replace(/0$/, "")}` : ""}`;
+}

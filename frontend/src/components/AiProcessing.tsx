@@ -22,7 +22,7 @@ export function AiProcessingCard({ doc }: { doc: DocumentDetail }) {
       ),
       state: queued ? "todo" : allRead ? "done" : "active",
     },
-    { icon: ShieldCheck, title: "Verifikasi sistem", detail: "Hitungan, kelengkapan, duplikasi, satu penerima", state: allRead && !queued ? "active" : "todo" },
+    { icon: ShieldCheck, title: "Verifikasi sistem", detail: "Hitungan, kelengkapan, duplikasi, rekening penerima", state: allRead && !queued ? "active" : "todo" },
     { icon: UserCheck, title: "Siap ditinjau", detail: "Ditugaskan ke Finance Reviewer", state: "todo" },
   ];
 
@@ -62,11 +62,13 @@ const CHECKS: { code: IssueCode; label: string }[] = [
   { code: "MISSING_EVIDENCE", label: "Data wajib lengkap (vendor, nomor, rekening)" },
   { code: "CALCULATION_DISCREPANCY", label: "Total cocok dengan rincian barang" },
   { code: "POSSIBLE_DUPLICATE", label: "Bukan invoice yang pernah diajukan" },
-  { code: "VENDOR_MISMATCH", label: "Satu vendor dan satu rekening tujuan" },
+  { code: "VENDOR_MISMATCH", label: "Satu vendor dan satu rekening tujuan (atau dikonfirmasi PIC)" },
 ];
 
 /** Ringkasan hasil kerja AI dan verifikasi sistem setelah selesai. */
-export function AiResultCard({ doc, onClose }: { doc: DocumentDetail; onClose?: () => void }) {
+/** `onJump`: pemeriksaan yang gagal bisa diklik untuk langsung ke bagian yang perlu diperbaiki
+ *  ("ACCOUNT" untuk pemeriksaan rekening). */
+export function AiResultCard({ doc, onClose, onJump }: { doc: DocumentDetail; onClose?: () => void; onJump?: (code: string) => void }) {
   const ex = doc.extraction;
   if (!ex) return null;
   const codes = new Set(doc.issues.map((i) => i.code));
@@ -91,7 +93,7 @@ export function AiResultCard({ doc, onClose }: { doc: DocumentDetail; onClose?: 
       <div className="ai-stats">
         <div><b>{seconds ?? "-"}<small> dtk</small></b><span>waktu baca AI</span></div>
         <div><b>{ex.line_items.length}</b><span>baris barang</span></div>
-        <div><b>{doc.files.length || 1}</b><span>file dibaca</span></div>
+        <div><b>{(doc.files.length || 1) - (doc.ai_manual?.files.length ?? 0)}</b><span>file dibaca</span></div>
         <div><b className="ai-money">{rupiah(ex.total)}</b><span>total tagihan</span></div>
       </div>
       {ex.vendor_name && <p className="ai-found"><FileSearch size={14} /> Vendor terbaca: <b>{ex.vendor_name}</b>{ex.invoice_no && <> · No. {ex.invoice_no}</>}</p>}
@@ -102,7 +104,10 @@ export function AiResultCard({ doc, onClose }: { doc: DocumentDetail; onClose?: 
           const skipped = notInvoice && code !== "NOT_AN_INVOICE";
           return (
             <li key={code} className={failed ? "fail" : skipped ? "skip" : "pass"} >
-              <span>{failed ? <X /> : skipped ? "–" : <Check />}</span>{label}
+              <span>{failed ? <X /> : skipped ? "–" : <Check />}</span>
+              {failed && onJump
+                ? <button type="button" className="link-btn" onClick={() => onJump(code)} title="Lihat bagian yang perlu diperbaiki">{label}</button>
+                : label}
               {skipped && <small className="muted"> · dilewati</small>}
             </li>
           );
@@ -110,7 +115,9 @@ export function AiResultCard({ doc, onClose }: { doc: DocumentDetail; onClose?: 
         {account && account.state !== "NOT_APPLICABLE" && !notInvoice && (
           <li className={account.state === "VERIFIED" ? "pass" : account.state === "MISMATCH" ? "fail" : "skip"}>
             <span>{account.state === "VERIFIED" ? <Check /> : account.state === "MISMATCH" ? <X /> : "?"}</span>
-            Rekening cocok dengan data vendor terverifikasi
+            {account.state !== "VERIFIED" && onJump
+              ? <button type="button" className="link-btn" onClick={() => onJump("ACCOUNT")}>Rekening cocok dengan data vendor terverifikasi</button>
+              : "Rekening cocok dengan data vendor terverifikasi"}
             {account.state === "UNVERIFIED" && <small className="muted"> · belum terverifikasi</small>}
           </li>
         )}

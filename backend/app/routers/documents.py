@@ -24,16 +24,18 @@ from app.models import (
 )
 from app.schemas.schemas import (
     CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ExtractionOut, FileDataUpdate,
-    FixRequest, IssueItem, ReasonRequest, SignersUpdate, TaxChoice, TaxSummaryOut, VoucherOut,
+    AcknowledgeRequest, FixRequest, IssueItem, ReasonRequest, SignersUpdate, TaxChoice, TaxSummaryOut, VoucherOut,
 )
 from app.services import (
     audit_service, file_conversion, signer_service, storage, tax_service, voucher_attachments, voucher_service,
 )
 from app.services.access_rules import accessible_client_ids
-from app.services.account_check import check_account
+from app.services.bedrock_client import BedrockError
+from app.services.account_check import check_account, payee_checks
 from app.services.document_processing import (
-    BLOCKING, DATA_FIELDS, PIC_FIELDS, classification, file_data, parse_pic_value, process_document, rebuild_from_files,
-    run_verification, send_to_review, set_status, settle_status,
+    ACKNOWLEDGEABLE, BLOCKING, DATA_FIELDS, PIC_FIELDS, acknowledgement, classification, file_data, line_subtotal,
+    manual_entry, parse_pic_value, payee_fingerprint, process_document, rebuild_from_files, run_verification,
+    send_to_review, set_status, settle_status,
 )
 
 router = APIRouter(prefix="/documents", tags=["Dokumen Invoice"])
@@ -88,17 +90,44 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         voucher=VoucherOut.model_validate(doc.voucher) if doc.voucher else None,
         vendor=ClientRef(id=doc.vendor.id, name=doc.vendor.name) if doc.vendor else None,
         signers=doc.signers or [],
-        files=[DocumentFileOut.model_validate(f).model_copy(update={"data": file_data(doc, f)}) for f in doc.files],
+        files=[DocumentFileOut.model_validate(f).model_copy(update={"data": _with_suggestions(doc, file_data(doc, f))})
+               for f in doc.files],
         cancellation=_cancellation(db, doc),
         classification=classification(doc.extraction),
         account_check=vars(check_account(db, doc)) if doc.extraction else None,
         tax_summary=_tax_summary(doc) if doc.extraction else None,
+        ai_manual=_manual_info(doc), ai_enabled=settings.ai_extraction_enabled,
+        payees=[_payee_out(p) for p in payee_checks(db, doc)] if doc.extraction else [],
+        acknowledgements={c.value: {k: ack[k] for k in ("reason", "by", "at")}
+                          for c in ACKNOWLEDGEABLE if (ack := acknowledgement(doc.extraction, c))},
     )
+
+
+def _payee_out(p) -> dict:
+    return {**{k: getattr(p, k) for k in ("vendor_name", "bank_name", "account_no", "account_name", "invoices", "gross",
+                                          "net", "vendor_id", "vendor_verified", "reference_matches")},
+            "state": p.check.state, "message": p.check.message, "source": p.check.source}
+
+
+def _manual_info(doc: Document) -> dict | None:
+    info = manual_entry(doc.extraction)
+    if info is None:
+        return None
+    # Pesan teknis (mis. kredensial AWS) hanya di log dan riwayat, bukan di layar
+    return {"status": info.get("status"), "files": info.get("files") or [], "message": info.get("message")}
 
 
 def _tax_summary(doc: Document) -> TaxSummaryOut:
     t = tax_service.summary(doc)
-    return TaxSummaryOut(gross=t.gross, tax_total=t.tax_total, net=t.net, lines=[vars(line) for line in t.lines])
+    return TaxSummaryOut(gross=t.gross, tax_total=t.tax_total, net=t.net, lines=[vars(line) for line in t.lines],
+                         vat=[vars(v) for v in t.vat])
+
+
+def _with_suggestions(doc: Document, data: dict) -> dict:
+    """Saran PPh per baris untuk layar (aturan kata kunci, atau hasil AI yang tersimpan); tidak disimpan."""
+    if not data.get("line_items"):
+        return data
+    return {**data, "line_suggestions": tax_service.line_suggestions(data, doc.request_type == CATEGORY_REIMBURSE)}
 
 
 def _cancellation(db: Session, doc: Document) -> CancellationOut | None:
@@ -364,6 +393,16 @@ def _fmt(value) -> str | None:
     return None if value in (None, "") else str(value)
 
 
+def _line_in(li) -> dict:
+    # Qty dan harga satuan terisi → subtotal dihitung sistem (qty × harga); selain itu subtotal diisi manual
+    subtotal = line_subtotal(li.qty, li.unit_price)
+    line = {"description": (li.description or "").strip() or None, "qty": _fmt(li.qty),
+            "unit_price": _fmt(li.unit_price), "subtotal": _fmt(li.subtotal if subtotal is None or subtotal == li.subtotal else subtotal)}
+    # Pengaturan pajak baris (dari panel pajak) ikut disimpan bila dikirim
+    line.update({k: v for k, v in (("pph", li.pph), ("vat", li.vat), ("kind", li.kind)) if v is not None})
+    return line
+
+
 @router.put("/{document_id}/files/{position}/data", response_model=DocumentDetail)
 def update_file_data(document_id: uuid.UUID, position: int, body: FileDataUpdate,
                      user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
@@ -381,8 +420,7 @@ def update_file_data(document_id: uuid.UUID, position: int, body: FileDataUpdate
            "invoice_date": body.invoice_date.isoformat() if body.invoice_date else None, "total": _fmt(body.total),
            "bank_name": (body.bank_name or "").strip() or None, "account_no": (body.account_no or "").strip() or None,
            "account_name": (body.account_name or "").strip() or None,
-           "line_items": [{"description": (li.description or "").strip() or None, "qty": _fmt(li.qty),
-                           "unit_price": _fmt(li.unit_price), "subtotal": _fmt(li.subtotal)} for li in body.line_items]}
+           "line_items": [_line_in(li) for li in body.line_items]}
     label = f"Bukti {position} ({part.original_filename})"
     changes = [(k, _fmt(old.get(k)), _fmt(new[k])) for k in DATA_FIELDS
                if (_fmt(old.get(k)) or "") != (_fmt(new[k]) or "")]
@@ -399,6 +437,7 @@ def update_file_data(document_id: uuid.UUID, position: int, body: FileDataUpdate
     part.data = new
     if any(f == "account_no" for f, _, _ in changes):
         doc.pic_overrides = {**(doc.pic_overrides or {}), "account_no": new["account_no"] or ""}
+        new["account_by_pic"] = True  # cek rekening per invoice: nomor ini diisi PIC, bukan dibaca dari dokumen
     rebuild_from_files(db, doc)
     issues = run_verification(db, doc)
     settle_status(db, doc, issues, "Data diperbarui PIC")
@@ -416,19 +455,71 @@ def set_file_tax(document_id: uuid.UUID, position: int, body: TaxChoice,
     if doc.status not in EDITABLE:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Pajak hanya bisa diubah saat Draf atau Ada kendala (sekarang {doc.status.value}).")
-    rate = db.get(TaxRate, body.code)
-    if rate is None or not rate.is_active:
+    table = tax_service.rates(db)
+    active = {code for code, r in table.items() if r.is_active}
+    rate = table.get(body.code)
+    if body.mode == "invoice" and (rate is None or not rate.is_active):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Jenis pajak tidak dikenal.")
+    unknown = {c.pph for c in body.lines if c.pph and c.pph not in active}
+    if body.mode == "line" and unknown:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Jenis pajak tidak dikenal: {', '.join(sorted(unknown))}.")
     part = _file(doc, position)
     data = dict(file_data(doc, part))
+    lines = [dict(li) for li in data.get("line_items") or []]
+    if any(c.index >= len(lines) for c in body.lines):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Baris rincian tidak ditemukan. Muat ulang halaman.")
+    for c in body.lines:
+        li = lines[c.index]
+        if c.kind is not None:
+            li["kind"] = c.kind
+        if c.vat is not None:
+            li["vat"] = c.vat
+        if body.mode == "line":
+            if c.pph and c.pph != tax_service.NONE:
+                li["pph"] = c.pph
+            else:
+                li.pop("pph", None)
+    data["line_items"] = lines
     old = data.get("tax")
-    new = tax_service.build(rate, body.npwp, body.base, body.base is None, data)
-    if old and {k: old.get(k) for k in ("code", "npwp", "rate", "base")} == {k: new[k] for k in ("code", "npwp", "rate", "base")}:
+    vat = body.vat.model_dump(mode="json") if body.vat else (old or {}).get("vat")
+    new = tax_service.build(rate, body.npwp, body.base, body.base is None, data, mode=body.mode, table=table, vat=vat)
+    old_lines = (file_data(doc, part).get("line_items") or [])
+    skip = ("source",)
+    if old and {k: v for k, v in old.items() if k not in skip} == {k: v for k, v in new.items() if k not in skip} \
+            and old_lines == lines:
         return _detail(db, doc)
     audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
                          field=f"Bukti {position} ({part.original_filename}).pajak",
                          old_value=tax_service.label(old) if old else None, new_value=tax_service.label(new))
     part.data = {**data, "tax": new}
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.post("/{document_id}/files/{position}/tax/ai-suggest", response_model=DocumentDetail)
+def suggest_line_taxes_ai(document_id: uuid.UUID, position: int, request: Request,
+                          user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """Rekomendasi PPh per baris dari AI, atas permintaan PIC. Hanya saran: disimpan sebagai saran dan baru
+    berlaku setelah PIC menerapkan pajak. Bila AI tidak tersedia, saran berbasis aturan tetap dipakai."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Pajak hanya bisa diubah saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    part = _file(doc, position)
+    data = dict(file_data(doc, part))
+    if not tax_service.item_lines(data):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Belum ada baris rincian untuk dianalisis.")
+    valid = {code for code, r in tax_service.rates(db).items() if r.is_active}
+    try:
+        items = tax_service.suggest_lines_ai(request.app.state.bedrock, data, valid)
+    except (BedrockError, AttributeError) as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Layanan AI sedang tidak tersedia. Saran berbasis aturan tetap dapat Anda gunakan, "
+                            "atau pilih jenis PPh secara manual.") from e
+    part.data = {**data, "line_suggestions_ai": {"key": tax_service.descriptions_key(data), "items": items}}
+    audit_service.record(db, user, "TAX_AI_SUGGESTED", document_id=doc.id, client_id=doc.client_id,
+                         note=f"Rekomendasi AI PPh per baris untuk bukti {position}")
     db.commit()
     return _detail(db, doc)
 
@@ -450,6 +541,10 @@ def submit_to_review(document_id: uuid.UUID, user: User = Depends(uploader_roles
     if blocking:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Masih ada kendala yang harus dilengkapi dulu: {', '.join(blocking)}.")
+    if any(i.code in ACKNOWLEDGEABLE for i in open_issues):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Invoice dalam pengajuan ini memiliki vendor atau rekening yang berbeda. Konfirmasi "
+                            "perbedaan itu beserta alasannya dulu.")
     # PIC wajib memilih pajak sendiri untuk setiap bukti (termasuk "Tanpa potongan"); AI hanya menyarankan
     no_tax = [str(f.position) for f in doc.files if not file_data(doc, f).get("tax")]
     if no_tax:
@@ -461,6 +556,38 @@ def submit_to_review(document_id: uuid.UUID, user: User = Depends(uploader_roles
     audit_service.record(db, user, "SUBMITTED_TO_REVIEW", document_id=doc.id, client_id=doc.client_id,
                          status_before=doc.status.value, status_after=DocStatus.READY_FOR_REVIEW.value)
     send_to_review(db, doc, "Dikirim PIC ke Finance Reviewer")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.post("/{document_id}/acknowledge", response_model=DocumentDetail)
+def acknowledge_warning(document_id: uuid.UUID, body: AcknowledgeRequest, user: User = Depends(uploader_roles),
+                        db: Session = Depends(get_db)):
+    """PIC mengonfirmasi peringatan beserta alasannya (mis. beberapa vendor/rekening dalam satu voucher).
+    Tercatat di riwayat dan tampil untuk reviewer, tidak dicetak di voucher. Konfirmasi gugur bila daftar
+    vendor/rekening berubah."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Peringatan hanya bisa dikonfirmasi saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    if body.code not in ACKNOWLEDGEABLE:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Kendala ini tidak bisa dikonfirmasi; perbaiki datanya.")
+    open_codes = set(db.scalars(select(ValidationIssue.code).where(
+        ValidationIssue.document_id == doc.id, ValidationIssue.resolved.is_(False))))
+    if body.code not in open_codes:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Peringatan ini sudah tidak ada atau sudah dikonfirmasi.")
+    ex = doc.extraction
+    raw = dict(ex.raw_json or {}) if isinstance(ex.raw_json, dict) else {}
+    reason = body.reason.strip()
+    raw["acknowledged"] = {**(raw.get("acknowledged") or {}), body.code.value: {
+        "reason": reason, "by": user.full_name, "at": datetime.now(timezone.utc).isoformat(),
+        "fingerprint": payee_fingerprint(ex)}}
+    ex.raw_json = raw
+    audit_service.record(db, user, "WARNING_ACKNOWLEDGED", document_id=doc.id, client_id=doc.client_id,
+                         field=body.code.value, note=reason)
+    issues = run_verification(db, doc)
+    settle_status(db, doc, issues, "Peringatan dikonfirmasi PIC")
     db.commit()
     return _detail(db, doc)
 
@@ -555,20 +682,25 @@ def reprocess_document(
     user: User = Depends(require_roles(Role.PIC_KLIEN, Role.INTAKE_SUPPORT, Role.FINANCE_REVIEWER)),
     db: Session = Depends(get_db),
 ):
-    """Proses ulang dokumen yang gagal dibaca AI (FR-2.5), oleh PIC dari draf atau oleh Finance Reviewer."""
+    """Proses ulang dokumen yang gagal dibaca AI (FR-2.5), oleh PIC dari draf atau oleh Finance Reviewer.
+    Pada draf isi manual (AI sempat bermasalah), hanya invoice yang belum terbaca AI yang dibaca ulang."""
     doc = _get_document(db, user, document_id)
     failed = db.scalar(select(ValidationIssue.id).where(
         ValidationIssue.document_id == doc.id, ValidationIssue.resolved.is_(False),
         ValidationIssue.code == IssueCode.EXTRACTION_FAILED))
     if Role.FINANCE_REVIEWER not in user.roles:
         ensure_submit_access(db, user, doc.client_id)
-    if doc.status != DocStatus.EXCEPTION or failed is None:
+    manual = doc.status in EDITABLE and manual_entry(doc.extraction) is not None
+    if not (doc.status == DocStatus.EXCEPTION and failed is not None) and not manual:
         raise HTTPException(status.HTTP_409_CONFLICT, "Proses ulang hanya untuk dokumen yang gagal dibaca AI.")
+    if not settings.ai_extraction_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Pembacaan otomatis oleh AI sedang dimatikan. Isi data invoice secara manual.")
     audit_service.record(db, user, "REPROCESS_REQUESTED", document_id=doc.id, client_id=doc.client_id)
     set_status(db, doc, DocStatus.PROCESSING, f"Diproses ulang oleh {user.full_name}")
     db.commit()
 
-    background.add_task(process_document, doc.id, request.app.state.extractor)
+    background.add_task(process_document, doc.id, request.app.state.extractor, manual)
     return _detail(db, doc)
 
 
