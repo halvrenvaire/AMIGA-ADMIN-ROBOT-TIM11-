@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3, Bot, Building2, ClipboardCheck, FileBarChart, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
-  Percent, Upload, Users,
+  Menu, Percent, Upload, Users, X,
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { ROLE_LABEL } from "../format";
@@ -51,6 +51,9 @@ export function Layout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [q, setQ] = useState("");
+  // HP: menu samping menjadi laci yang dibuka tombol ☰ dan tertutup sendiri setelah pindah halaman
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
   if (!user) return null;
 
   const visible = (items: NavItem[]) => items.filter((i) => has(...i.roles));
@@ -63,7 +66,9 @@ export function Layout() {
 
   return (
     <div className="shell">
-      <aside className="side" aria-label="Navigasi utama">
+      {menuOpen && <div className="side-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
+      <aside className={`side${menuOpen ? " open" : ""}`} aria-label="Navigasi utama">
+        <button className="btn ghost sm icon-btn side-close" onClick={() => setMenuOpen(false)} aria-label="Tutup menu"><X /></button>
         <div className="brand">
           <Logo height={36} />
           <span className="brand-sub">Robot Admin</span>
@@ -107,7 +112,9 @@ export function Layout() {
 
       <div className="main">
         <header className="top">
-          <div className="crumb">Beranda / <b>{title}</b></div>
+          <button className="btn ghost sm icon-btn menu-btn" onClick={() => setMenuOpen(true)} aria-label="Buka menu"
+                  aria-expanded={menuOpen}><Menu /></button>
+          <div className="crumb"><span className="crumb-home">Beranda /</span> <b>{title}</b></div>
           {canSearch && (
             <form className="search" onSubmit={search} role="search">
               <Search size={16} />

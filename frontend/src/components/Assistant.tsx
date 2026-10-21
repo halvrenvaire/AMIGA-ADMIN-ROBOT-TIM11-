@@ -267,7 +267,7 @@ export function Assistant() {
         </section>
       )}
       <button className={`fab${open ? " open" : ""}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        {open ? <X size={18} /> : <Sparkles size={18} />} {open ? "Tutup" : "Tanya Asisten"}
+        {open ? <X size={18} /> : <Sparkles size={18} />} <span className="fab-label">{open ? "Tutup" : "Tanya Asisten"}</span>
       </button>
     </>
   );
