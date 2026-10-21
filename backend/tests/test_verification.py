@@ -20,10 +20,11 @@ def test_complete_and_correct_invoice_has_no_issue():
     assert verify(_data()) == []
 
 
-def test_missing_account_number_is_missing_evidence():
-    issues = verify(_data(account_no=None))
-    assert [(i.code, i.field) for i in issues] == [(IssueCode.MISSING_EVIDENCE, "account_no")]
-    assert "Nomor rekening" in issues[0].message
+def test_account_is_optional_but_date_is_required():
+    assert verify(_data(bank_name=None, account_no=None, account_name=None)) == []
+    issues = verify(_data(invoice_date=None))
+    assert [(i.code, i.field) for i in issues] == [(IssueCode.MISSING_EVIDENCE, "invoice_date")]
+    assert "Tanggal invoice" in issues[0].message
 
 
 def test_line_sum_differs_from_total():

@@ -108,7 +108,7 @@ def test_pic_uploads_invoice_and_gets_processing_result(bot):
 
 
 def test_exception_result_lists_issues(bot, extractor):  # noqa: F811
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     chat = _link(bot, "pic.alpha@amiga.test")
     _send_pdf(bot, chat)
     _choose(bot, chat)

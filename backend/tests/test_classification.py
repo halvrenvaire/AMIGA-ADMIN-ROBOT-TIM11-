@@ -84,7 +84,7 @@ def test_receipt_becomes_draft_with_missing_data_and_no_voucher(extractor):
     found = {c for c, _ in codes(doc)}
     assert "RECEIPT_NOT_INVOICE" in found and "MISSING_EVIDENCE" in found
     missing = {f for c, f in codes(doc) if c == "MISSING_EVIDENCE"}
-    assert {"invoice_no", "account_no", "bank_name"} <= missing
+    assert "invoice_no" in missing and "account_no" not in missing  # rekening opsional
     # Data transaksi tetap tersimpan sebagai draft untuk Preview
     assert doc["extraction"]["total"] is not None and doc["extraction"]["line_items"][0]["description"] == "Gula pasir"
     assert doc["classification"]["doc_class"] == "RECEIPT"
@@ -149,7 +149,7 @@ def test_reviewer_can_reject_uncertain_document_as_irrelevant(extractor):
 
 
 def test_classification_decision_only_for_receipt_or_uncertain(extractor):
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     doc = detail(upload().json()["id"])
     r = api("reviewer1@amiga.test").post(f"/documents/{doc['id']}/classification",
                                          json={"decision": "INVOICE", "reason": "alasan apa saja"})
@@ -171,9 +171,11 @@ def test_unverified_account_needs_explicit_reviewer_confirmation(extractor):
 
 
 def test_account_entered_by_pic_is_not_trusted(extractor):
-    extractor.result = invoice(account_no=None)
-    doc = detail(upload().json()["id"])
-    fixed = api(PIC).post(f"/documents/{doc['id']}/fix", json={"fields": {"account_no": "1234567890"}})
+    from tests.test_review import edit_file
+    extractor.result = invoice(account_no=None)  # rekening opsional: tetap Draf
+    doc = detail(upload(submit=False).json()["id"])
+    assert doc["status"] == "DRAFT" and doc["account_check"]["state"] == "MISSING"
+    fixed = edit_file(doc["id"], account_no="1234567890")
     assert fixed.status_code == 200, fixed.text
     after = detail(doc["id"])
     assert after["account_check"]["source"] == "PIC" and after["account_check"]["state"] == "UNVERIFIED"

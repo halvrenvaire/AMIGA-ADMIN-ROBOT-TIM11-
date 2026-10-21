@@ -15,10 +15,9 @@ REQUIRED_FIELDS = {
     "invoice_no": "Nomor invoice",
     "invoice_date": "Tanggal invoice",
     "total": "Total invoice",
-    "bank_name": "Nama bank",
-    "account_no": "Nomor rekening",
-    "account_name": "Nama penerima",
 }
+# Rekening tujuan (nama bank, nomor rekening, nama penerima) TIDAK wajib (feedback 21 Okt 2026): tidak ada proses
+# transfer di sistem. Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (account_check).
 
 
 @dataclass
