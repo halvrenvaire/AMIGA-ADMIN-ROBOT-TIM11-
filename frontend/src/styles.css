@@ -505,10 +505,8 @@ textarea.input { height: auto; min-height: 80px; padding: 8px 10px; resize: vert
   .status-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 860px) {
-  .shell { grid-template-columns: 64px minmax(0, 1fr); }
-  .brand div, .nav a span, .nav-label, .side-foot { display: none; }
-  .nav a { justify-content: center; }
-  .user > div:last-child, .search { display: none; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .search { display: none; }
   .login { grid-template-columns: 1fr; }
   .login-art { display: none; }
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
@@ -992,3 +990,53 @@ small.block { display: block; }
 .payee-mini { margin: 0 0 8px; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
 .payee-mini li { display: block; }
 .unsaved-hint { font-size: 13px; font-weight: 600; color: var(--amber); align-self: center; margin-right: auto; }
+
+/* --- Tampilan HP (≤ 860 px): menu jadi laci, topbar ringkas, tombol & tabel tidak bertabrakan --- */
+.menu-btn, .side-close { display: none; }
+@media (max-width: 860px) {
+  .shell { overflow-x: clip; }  /* clip, bukan hidden: tidak membuat area gulir baru (scroll & sticky tetap normal) */
+  .side {
+    position: fixed; inset: 0 auto 0 0; width: min(280px, 84vw); height: 100%; z-index: 60; overflow-y: auto;
+    transform: translateX(-105%); transition: transform 0.2s ease; box-shadow: var(--shadow-pop);
+  }
+  .side.open { transform: none; }
+  .side-backdrop { position: fixed; inset: 0; z-index: 55; background: rgba(15, 23, 42, 0.42); }
+  .side-close { display: inline-flex; position: absolute; top: 14px; right: 10px; }
+  .menu-btn { display: inline-flex; flex: none; margin-left: -6px; }
+  .top { padding: 0 10px; gap: 6px; }
+  .crumb { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .crumb-home { display: none; }
+  .user { padding-left: 8px; gap: 4px; }
+  .user-link { padding: 2px; }
+  .user-link > div:last-child { display: none; }
+  .content { padding: 14px 12px 96px; gap: 14px; }
+  .panel { padding: 14px; }
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-head .actions { flex-wrap: wrap; }
+  .page-head h1 { font-size: 21px; }
+  /* Tombol keputusan di bawah: satu baris yang bisa turun, tidak tertutup tombol Asisten */
+  /* Dua kolom: Simpan | Simulasi, lalu tombol utama (Kirim/Setujui) selebar penuh */
+  .decision, .decision.sec-anchor { display: grid; grid-template-columns: 1fr 1fr; margin: 0 -14px -14px; padding: 10px 64px 10px 12px; gap: 6px; }
+  .decision .btn { padding: 7px 8px; font-size: 12.5px; justify-content: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .decision > .btn:last-child { grid-column: 1 / -1; }
+  .unsaved-hint { grid-column: 1 / -1; font-size: 12px; }
+  /* Tombol Asisten: bulat, hanya ikon */
+  .fab { width: 48px; height: 48px; padding: 0; justify-content: center; right: 12px; bottom: 12px; }
+  .fab-label { display: none; }
+  .chat { left: 8px; right: 8px; width: auto; bottom: 68px; height: calc(100dvh - 84px); border-radius: 16px; }
+  /* Tabel: geser ke samping, bukan terpotong */
+  .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table th, .table td { white-space: nowrap; }
+  .table td .muted, .table td small { white-space: normal; }
+  .table td.muted { white-space: normal; min-width: 220px; }  /* keterangan panjang tetap turun baris */
+  .table th:first-child, .table td:first-child { padding-left: 12px; }
+  .table th:last-child, .table td:last-child { padding-right: 12px; }
+  .table.compact { min-width: 620px; display: table; }
+  .kpi-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modal { padding: 14px; }
+  .modal.wide { width: calc(100vw - 16px); height: calc(100dvh - 16px); }
+  .backdrop { padding: 8px; }
+  .sim-toolbar .muted { display: none; }
+}
