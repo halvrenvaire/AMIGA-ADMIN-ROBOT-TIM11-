@@ -26,10 +26,10 @@ def test_cases_are_split_evenly_across_all_reviewers(extractor):
 def test_dual_role_user_who_fixed_the_data_cannot_review_it(extractor):
     """Yoga (Intake Support + Finance Reviewer) memperbaiki data invoice PIC, lalu tidak boleh
     menjadi reviewer, menandai bukan duplikat, ataupun menyetujuinya."""
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     doc = upload().json()  # diunggah PIC Alpha → MISSING_EVIDENCE
     yoga = api("multi@amiga.test")
-    r = yoga.post(f"/documents/{doc['id']}/fix", json={"fields": {"account_no": "1234567890"}})
+    r = yoga.post(f"/documents/{doc['id']}/fix", json={"fields": {"invoice_date": "2026-10-01"}})
     assert r.status_code == 200
     extractor.result = invoice()
     assert detail(doc["id"])["status"] == "DRAFT"
@@ -45,11 +45,11 @@ def test_dual_role_user_who_fixed_the_data_cannot_review_it(extractor):
 
 def test_dual_role_user_who_fixed_cannot_dismiss_duplicate(extractor):
     upload()
-    extractor.result = invoice(account_no=None)  # nomor invoice sama → duplikat + data kurang
+    extractor.result = invoice(invoice_date=None)  # nomor invoice sama → duplikat + data kurang
     doc = upload().json()
     yoga = api("multi@amiga.test")
     extractor.result = invoice()
-    assert yoga.post(f"/documents/{doc['id']}/fix", json={"fields": {"account_no": "1234567890"}}).status_code == 200
+    assert yoga.post(f"/documents/{doc['id']}/fix", json={"fields": {"invoice_date": "2026-10-01"}}).status_code == 200
     assert [i["code"] for i in detail(doc["id"])["issues"]] == ["POSSIBLE_DUPLICATE"]
     assert send(doc["id"], "multi@amiga.test").status_code == 200
     r = yoga.post(f"/documents/{doc['id']}/dismiss-duplicate", json={"reason": "nomor sudah diganti"})

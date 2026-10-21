@@ -24,7 +24,7 @@ def docs(extractor):
     tomorrow, yesterday = date.today() + timedelta(days=1), date.today() - timedelta(days=1)
     extractor.result = invoice(invoice_no="INV-A1", vendor_name="PT Alfa Makmur")
     a_ready = upload(due_date=tomorrow.isoformat()).json()
-    extractor.result = invoice(invoice_no="INV-A2", account_no=None)
+    extractor.result = invoice(invoice_no="INV-A2", invoice_date=None)
     a_problem = upload(due_date=yesterday.isoformat()).json()
     extractor.result = invoice(invoice_no="INV-B1")
     b_ready = upload(email="pic.beta@amiga.test", client="PT Klien Beta").json()

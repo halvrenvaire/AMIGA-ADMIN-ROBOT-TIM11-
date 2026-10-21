@@ -45,12 +45,12 @@ def test_editing_one_invoice_rebuilds_the_voucher_data(extractor):
 
 
 def test_blocking_issue_moves_to_exception_and_back_to_draft(extractor):
-    extractor.result = [invoice(account_no=None)]
+    extractor.result = [invoice(invoice_date=None)]
     doc = upload_draft([make_pdf()])
     assert doc["status"] == "EXCEPTION"
     r = api(PIC).post(f"/documents/{doc['id']}/submit")
     assert r.status_code == 409 and "MISSING_EVIDENCE" in r.json()["detail"]
-    r = edit_file(doc["id"], account_no="1234567890")
+    r = edit_file(doc["id"], invoice_date="2026-10-01")
     assert r.json()["status"] == "DRAFT" and r.json()["issues"] == []
     assert send(doc["id"]).json()["status"] == "READY_FOR_REVIEW"
 

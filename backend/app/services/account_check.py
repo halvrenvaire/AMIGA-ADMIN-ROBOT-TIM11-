@@ -5,7 +5,7 @@ vendor di Data Referensi yang sudah DIVERIFIKASI Finance Reviewer (bukan oleh pe
 - VERIFIED   : rekening sama dengan rekening vendor terverifikasi;
 - MISMATCH   : vendor terverifikasi tetapi rekeningnya berbeda → kendala ACCOUNT_MISMATCH, voucher tertahan;
 - UNVERIFIED : vendor belum terdaftar/terverifikasi → reviewer wajib mengonfirmasi pengecekan saat menyetujui;
-- MISSING    : rekening tidak ada (sudah tercatat sebagai MISSING_EVIDENCE).
+- MISSING    : rekening tidak diisi (opsional, tidak menghalangi apa pun).
 """
 import re
 from dataclasses import dataclass
@@ -40,7 +40,7 @@ def check_payee(db, vendor: Vendor | None, account_no: str | None, source: str) 
     account = digits(account_no)
     by_pic = " Nomor rekening ini diisi PIC, bukan dibaca dari dokumen." if source == "PIC" else ""
     if not account:
-        return AccountCheck(MISSING, "Nomor rekening tujuan belum ada.", source)
+        return AccountCheck(MISSING, "Rekening tidak diisi (opsional; tidak dicetak di voucher).", source)
     if vendor is None:
         return AccountCheck(UNVERIFIED, "Vendor belum terdaftar di Data Referensi, jadi rekening belum bisa dicocokkan "
                                         "dengan sumber tepercaya." + by_pic, source)
@@ -123,15 +123,16 @@ def check_account(db, doc: Document) -> AccountCheck:
         return AccountCheck(NOT_APPLICABLE, "Reimburse dibayarkan ke karyawan; rekening vendor tidak dicek.", "AI")
     payees = payee_checks(db, doc)
     if not payees:
-        return AccountCheck(MISSING, "Nomor rekening tujuan belum ada.", "AI")
+        return AccountCheck(MISSING, "Rekening tidak diisi (opsional; tidak dicetak di voucher).", "AI")
     if len(payees) == 1:
         return payees[0].check
     source = "PIC" if any(p.check.source == "PIC" for p in payees) else "AI"
     label = lambda p: f"{p.vendor_name or 'vendor tanpa nama'} ({p.account_no or '-'})"  # noqa: E731
-    for state in (MISMATCH, MISSING):
-        bad = [p for p in payees if p.check.state == state]
-        if bad:
-            return AccountCheck(state, " ".join(f"{label(p)}: {p.check.message}" for p in bad), source)
+    bad = [p for p in payees if p.check.state == MISMATCH]
+    if bad:
+        return AccountCheck(MISMATCH, " ".join(f"{label(p)}: {p.check.message}" for p in bad), source)
+    if all(p.check.state == MISSING for p in payees):
+        return AccountCheck(MISSING, "Rekening tidak diisi (opsional; tidak dicetak di voucher).", source)
     unverified = [p for p in payees if p.check.state == UNVERIFIED]
     if unverified:
         return AccountCheck(UNVERIFIED, f"{len(unverified)} dari {len(payees)} rekening tujuan belum terverifikasi: "

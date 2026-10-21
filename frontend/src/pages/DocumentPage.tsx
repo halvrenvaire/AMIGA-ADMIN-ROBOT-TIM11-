@@ -315,8 +315,9 @@ function navSections(d: DocumentDetail, o: { filePos: number; canEdit: boolean; 
     if (d.request_type !== "Voucher Pengeluaran Reimburse") {
       const empty = PAYMENT_FIELDS.filter((k) => isEmpty(data?.[k] ?? null)).length;
       const mismatch = d.issues.some((i) => i.code === "ACCOUNT_MISMATCH");
-      list.push({ id: "pembayaran", label: "Data pembayaran" + tag, state: mismatch ? "block" : empty ? "fix" : "ok",
-                  note: mismatch ? "rekening tidak cocok" : empty ? `${empty} kolom kosong`
+      // Rekening opsional (tidak ada proses transfer): kolom kosong tidak perlu diisi
+      list.push({ id: "pembayaran", label: "Data pembayaran" + tag, state: mismatch ? "block" : "ok",
+                  note: mismatch ? "rekening tidak cocok" : empty ? "opsional"
                     : d.account_check?.state === "UNVERIFIED" ? "rekening belum terverifikasi" : undefined });
     }
     const noTax = d.files.filter((f) => !f.data?.tax).map((f) => f.position);
@@ -576,9 +577,9 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
 
       {!reimburse && (
         <Anchor id="pembayaran">
-          <div className="section-title">Data pembayaran</div>
+          <div className="section-title">Data pembayaran <span className="muted" style={{ textTransform: "none", letterSpacing: 0 }}>· opsional</span></div>
           <div className="grid-2">{PAYMENT_FIELDS.map(fieldInput)}</div>
-          <small className="muted">Rekening tidak dicetak di voucher, tetapi tetap dicek sistem terhadap data referensi vendor.</small>
+          <small className="muted">Boleh dikosongkan: rekening tidak dicetak di voucher. Bila diisi, sistem mencocokkannya dengan rekening vendor terverifikasi untuk mencegah rekening palsu.</small>
           <PaymentChecks doc={doc} file={file} editing onChange={onChange} disabled={busy || dataDirty} />
         </Anchor>
       )}
@@ -593,9 +594,10 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
 
       <div className="decision sec-anchor" id="sec-kirim">
         {dataDirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
-        <button className="btn" disabled={busy || !dataDirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
+        {dataDirty && <span className="unsaved-hint">Ada perubahan yang belum disimpan</span>}
+        <button className={`btn${dataDirty ? " primary" : ""}`} disabled={busy || !dataDirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
         <SimulationButton docId={doc.id} disabled={busy || dirty} />
-        <button className="btn primary" onClick={submit} disabled={busy || dirty || blocking.length > 0 || noTax.length > 0 || pendingAck}
+        <button className={`btn${dataDirty ? "" : " primary"}`} onClick={submit} disabled={busy || dirty || blocking.length > 0 || noTax.length > 0 || pendingAck}
                 title={dirty ? "Simpan perubahan (data atau pajak) dulu" : blocking.length ? "Bereskan kendala dulu"
                   : noTax.length ? `Pilih pajak untuk bukti ${noTax.join(", ")}`
                   : pendingAck ? "Konfirmasi perbedaan vendor/rekening dulu (bagian Kendala)" : undefined}>

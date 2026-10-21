@@ -48,7 +48,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 | EXCEPTION | Sistem menemukan kendala, atau reviewer mengembalikan dokumen; PIC Klien perlu memperbaikinya |
 | AMIGA_REVIEWED | Disetujui Finance Reviewer; voucher sudah dibuat |
 | SENT_TO_CLIENT | Voucher sudah diunduh PIC Klien |
-| MISSING_EVIDENCE | Kendala: data wajib tidak ada, misalnya nomor rekening |
+| MISSING_EVIDENCE | Kendala: data wajib tidak ada, misalnya tanggal atau total invoice |
 | CALCULATION_DISCREPANCY | Kendala: jumlah rincian barang tidak sama dengan total invoice |
 | POSSIBLE_DUPLICATE | Kendala: ada invoice lain dengan nomor dan vendor yang sama |
 | RETURNED_BY_REVIEWER | Kendala: Finance Reviewer mengembalikan dokumen ke PIC Klien disertai alasan |
@@ -115,10 +115,10 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
    - **Dokumen meragukan atau tidak lengkap** → ditandai **NEEDS_MANUAL_REVIEW** untuk diperiksa Finance Reviewer.
 3. AI **hanya mengekstrak** data yang tertulis: vendor, nomor dan tanggal invoice, rincian barang, total, bank, nomor rekening, dan nama penerima. Data yang tidak ada dibiarkan kosong, **tidak ditebak**. Target waktunya **≤ 15 detik** per dokumen. AI tidak memverifikasi dan tidak menyetujui.
 4. **Sistem** (bukan AI) menjalankan verifikasi:
-   - data wajib ada, termasuk nomor rekening → bila tidak, **MISSING_EVIDENCE**;
+   - data wajib ada (vendor, nomor, tanggal, total; reimburse: tanggal dan total) → bila tidak, **MISSING_EVIDENCE**. Rekening tujuan **tidak wajib** karena tidak ada proses transfer di sistem;
    - jumlah rincian sama dengan total → bila tidak, **CALCULATION_DISCREPANCY**;
    - tidak ada invoice lain dengan nomor dan vendor yang sama → bila ada, **POSSIBLE_DUPLICATE**;
-   - nomor rekening dicocokkan dengan rekening **vendor terverifikasi** di Data Referensi → bila berbeda, **ACCOUNT_MISMATCH**. Rekening dari invoice maupun isian PIC tidak dianggap benar dengan sendirinya.
+   - bila rekening diisi, nomor rekening dicocokkan dengan rekening **vendor terverifikasi** di Data Referensi → bila berbeda, **ACCOUNT_MISMATCH**. Rekening dari invoice maupun isian PIC tidak dianggap benar dengan sendirinya.
 5. Jika semua lolos, status menjadi **READY_FOR_REVIEW**. Jika ada kendala, status menjadi **EXCEPTION** dan sistem menampilkan kode kendala beserta alasannya.
 6. Jika AI gagal membaca, dokumen tetap tersimpan. Finance Reviewer dapat memproses ulang atau mengisi data secara manual.
 
@@ -130,7 +130,7 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 
    | Kode | Tindakan PIC Klien |
    | --- | --- |
-   | MISSING_EVIDENCE | Isi data yang kosong, misalnya nomor rekening vendor, lalu klik **Kirim perbaikan** |
+   | MISSING_EVIDENCE | Isi data yang kosong di editor draf (mis. tanggal atau total invoice), lalu klik **Simpan bukti** |
    | CALCULATION_DISCREPANCY | Konfirmasi ke vendor apakah total atau rinciannya yang benar. Bila perlu, minta invoice revisi lalu unggah ulang |
    | POSSIBLE_DUPLICATE | Periksa apakah tagihan ini memang sudah pernah diajukan. Jika ya, beri tahu Finance Reviewer agar dokumen tidak diproses |
    | RETURNED_BY_REVIEWER | Ikuti alasan yang ditulis Finance Reviewer, lalu klik **Kirim perbaikan** |
@@ -149,7 +149,7 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
    - nama vendor dan nomor invoice;
    - setiap baris barang: uraian, qty, dan harga;
    - total invoice;
-   - bank, nomor rekening, dan nama penerima. **Nomor rekening dicek digit per digit.**
+   - bank, nomor rekening, dan nama penerima bila diisi (opsional). **Nomor rekening dicek digit per digit.**
 4. Jika ada yang salah, koreksi kolomnya lalu klik **Simpan & verifikasi ulang**. Setiap perubahan tercatat otomatis (nilai awal → nilai baru, nama, waktu).
 5. Ambil keputusan:
    - **Setujui** — hanya bila status **READY_FOR_REVIEW** dan semua data sudah sesuai dengan PDF.

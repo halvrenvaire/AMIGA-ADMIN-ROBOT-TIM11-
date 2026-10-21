@@ -247,12 +247,20 @@ def test_reviewer_with_fewest_pending_is_assigned(extractor):
 
 # --- F2/F3: ekstraksi dan verifikasi ---
 
-def test_uat3_missing_account_number(extractor):
-    extractor.result = invoice(account_no=None)
+def test_uat3_missing_required_data(extractor):
+    extractor.result = invoice(invoice_date=None)
     doc = detail(upload().json()["id"])
     assert doc["status"] == "EXCEPTION"
-    assert codes(doc) == [("MISSING_EVIDENCE", "account_no")]
-    assert "Nomor rekening" in doc["issues"][0]["message"]
+    assert codes(doc) == [("MISSING_EVIDENCE", "invoice_date")]
+    assert "Tanggal invoice" in doc["issues"][0]["message"]
+
+
+def test_account_number_is_optional(extractor):
+    # Feedback 21 Okt 2026: tidak ada proses transfer di sistem, rekening boleh kosong
+    extractor.result = invoice(bank_name=None, account_no=None, account_name=None)
+    doc = detail(upload(submit=False).json()["id"])
+    assert doc["status"] == "DRAFT" and doc["issues"] == []
+    assert doc["account_check"]["state"] == "MISSING" and "opsional" in doc["account_check"]["message"]
 
 
 def test_calculation_discrepancy(extractor):
@@ -333,26 +341,26 @@ def test_reprocess_only_for_failed_extraction(extractor):
 # --- Perbaikan PIC (UAT 8) ---
 
 def test_uat8_pic_fix_reextracts_with_same_request_id_and_keeps_pic_value(extractor):
-    extractor.result = invoice(account_no=None)  # PDF memang tidak memuat nomor rekening
+    extractor.result = invoice(invoice_date=None)  # PDF memang tidak memuat tanggal
     first = detail(upload().json()["id"])
     assert first["status"] == "EXCEPTION"
 
     r = api("pic.alpha@amiga.test").post(f"/documents/{first['id']}/fix",
-                                         json={"fields": {"account_no": "9876543210"}})
+                                         json={"fields": {"invoice_date": "2026-10-01"}})
     assert r.status_code == 200
     assert r.json()["status"] == "PROCESSING"
 
     doc = detail(first["id"])
     assert doc["request_id"] == first["request_id"]
     assert doc["status"] == "DRAFT"  # PIC memeriksa lalu mengirim sendiri ke reviewer
-    assert doc["extraction"]["account_no"] == "9876543210"  # tidak ditimpa hasil AI yang kosong
-    assert doc["pic_overrides"] == {"account_no": "9876543210"}
+    assert doc["extraction"]["invoice_date"] == "2026-10-01"  # tidak ditimpa hasil AI yang kosong
+    assert doc["pic_overrides"] == {"invoice_date": "2026-10-01"}
     assert extractor.calls == 2
 
     with db_module.SessionLocal() as db:
         log = db.scalar(select(AuditLog).where(AuditLog.action == "FIXED_BY_PIC")
                         .order_by(AuditLog.id.desc()).limit(1))
-    assert (log.field, log.old_value, log.new_value) == ("account_no", None, "9876543210")
+    assert (log.field, log.old_value, log.new_value) == ("invoice_date", None, "2026-10-01")
 
 
 def test_fix_only_when_exception(extractor):
@@ -368,7 +376,7 @@ def test_fix_only_when_exception(extractor):
     ({}, "minimal satu"),
 ])
 def test_invalid_fix_is_rejected(extractor, fields, message):
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     doc_id = upload().json()["id"]
     r = api("pic.alpha@amiga.test").post(f"/documents/{doc_id}/fix", json={"fields": fields})
     assert r.status_code == 422
@@ -376,7 +384,7 @@ def test_invalid_fix_is_rejected(extractor, fields, message):
 
 
 def test_reviewer_cannot_send_pic_fix(extractor):
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     doc_id = upload().json()["id"]
     r = api("reviewer1@amiga.test").post(f"/documents/{doc_id}/fix", json={"fields": {"account_no": "1"}})
     assert r.status_code == 403
@@ -403,7 +411,7 @@ def test_assigned_users_can_download_original_pdf(extractor):
 
 def test_list_filters_by_status(extractor):
     upload()
-    extractor.result = invoice(invoice_no="INV-009", account_no=None)
+    extractor.result = invoice(invoice_no="INV-009", invoice_date=None)
     upload()
     pic = api("pic.alpha@amiga.test")
     assert [d["status"] for d in pic.get("/documents", params={"status": "EXCEPTION"}).json()] == ["EXCEPTION"]

@@ -59,7 +59,7 @@ export function AiProcessingCard({ doc }: { doc: DocumentDetail }) {
 
 const CHECKS: { code: IssueCode; label: string }[] = [
   { code: "NOT_AN_INVOICE", label: "Dokumen adalah invoice vendor" },
-  { code: "MISSING_EVIDENCE", label: "Data wajib lengkap (vendor, nomor, rekening)" },
+  { code: "MISSING_EVIDENCE", label: "Data wajib lengkap (vendor, nomor, tanggal, total)" },
   { code: "CALCULATION_DISCREPANCY", label: "Total cocok dengan rincian barang" },
   { code: "POSSIBLE_DUPLICATE", label: "Bukan invoice yang pernah diajukan" },
   { code: "VENDOR_MISMATCH", label: "Satu vendor dan satu rekening tujuan (atau dikonfirmasi PIC)" },

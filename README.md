@@ -101,7 +101,7 @@ Catatan alur:
 
 | Aturan | Kode | Kapan muncul | Akibat |
 | --- | --- | --- | --- |
-| Kelengkapan | `MISSING_EVIDENCE` | Data wajib tidak ditemukan, misalnya nomor rekening | EXCEPTION |
+| Kelengkapan | `MISSING_EVIDENCE` | Data wajib tidak ditemukan (vendor, nomor, tanggal, total). Rekening tujuan opsional | EXCEPTION |
 | Angka / perhitungan | `CALCULATION_DISCREPANCY` | Jumlah subtotal line items ≠ total invoice | EXCEPTION |
 | Duplikasi | `POSSIBLE_DUPLICATE` | Ada invoice lain dengan nomor invoice dan vendor yang sama | EXCEPTION |
 | Dikembalikan reviewer | `RETURNED_BY_REVIEWER` | Finance Reviewer memilih "Kembalikan ke PIC" | EXCEPTION |
@@ -187,12 +187,12 @@ PoC dinyatakan siap demo bila **8 skenario** di bawah lulus semua dan target wak
 | --- | --- | --- | --- | --- |
 | 1 | Alur normal | Unggah → ekstraksi → lolos verifikasi → disetujui | Voucher terunduh, status SENT_TO_CLIENT | ✅ lulus E2E (Cypress) |
 | 2 | Multi-line item | Invoice dengan ≥ 3 jenis barang | Semua baris terbaca, total benar | ✅ lulus E2E (Cypress) |
-| 3 | Missing evidence | Invoice tanpa nomor rekening | MISSING_EVIDENCE, status EXCEPTION | ✅ lulus E2E (Cypress) |
+| 3 | Rekening opsional | Invoice tanpa nomor rekening | Tetap Draf, tanpa kendala (feedback 21 Okt 2026); data wajib lain yang kosong tetap MISSING_EVIDENCE | ✅ lulus E2E (Cypress) |
 | 4 | Duplikasi | Nomor dan vendor sama dengan invoice sebelumnya | POSSIBLE_DUPLICATE | ✅ lulus E2E (Cypress) |
 | 5 | Segregation of Duties | User A unggah, lalu User A coba menyetujui | Ditolak sistem, dokumen otomatis dialihkan ke reviewer lain | ✅ lulus E2E (Cypress) |
 | 6 | Isolasi klien | User klien A membuka dokumen klien B | Akses ditolak | ✅ lulus E2E (Cypress) |
 | 7 | Jejak audit | Reviewer tidak bisa mengedit dan mengembalikan ke PIC; PIC mengubah nominal | Tercatat nilai awal, nilai baru, nama, waktu | ✅ lulus E2E (Cypress) |
-| 8 | Perbaikan setelah EXCEPTION | PIC melengkapi nomor rekening pada dokumen MISSING_EVIDENCE di editor draf | Diverifikasi ulang dengan Request ID sama → Draf, lalu dikirim → READY_FOR_REVIEW | ✅ lulus E2E (Cypress) |
+| 8 | Perbaikan PIC di draf | PIC mengisi nomor rekening di editor draf, menyimpan (tombol Simpan menyala saat ada perubahan) | Diverifikasi ulang dengan Request ID sama → Draf, lalu dikirim → READY_FOR_REVIEW | ✅ lulus E2E (Cypress) |
 
 Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD v2, tetapi tetap diuji dengan test otomatis.
 
@@ -201,7 +201,7 @@ Aturan `CALCULATION_DISCREPANCY` tidak lagi punya skenario UAT tersendiri di PRD
 | File | Untuk | Hasil yang diharapkan |
 | --- | --- | --- |
 | `01_normal_3_baris.pdf` | UAT 1, 2 | READY_FOR_REVIEW, 3 baris terbaca |
-| `02_tanpa_rekening.pdf` | UAT 3, 8 | MISSING_EVIDENCE (nomor rekening) |
+| `02_tanpa_rekening.pdf` | UAT 3, 8 | Draf tanpa kendala (rekening opsional) |
 | `03_duplikat_dari_01.pdf` | UAT 4 (unggah setelah 01, klien sama) | POSSIBLE_DUPLICATE |
 | `04_selisih_total.pdf` | Aturan angka | CALCULATION_DISCREPANCY |
 | `05_normal_jasa.pdf` | UAT 5, 7 | READY_FOR_REVIEW |

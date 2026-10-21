@@ -177,7 +177,7 @@ def test_voucher_list_filters(extractor):
 def test_metrics_cover_status_trend_speed_quality_and_value(extractor):
     a = detail(upload(due_date=(date.today() + timedelta(days=3)).isoformat()).json()["id"])
     approve(a)
-    extractor.result = invoice(invoice_no="INV-M2", account_no=None)
+    extractor.result = invoice(invoice_no="INV-M2", invoice_date=None)
     upload()
     m = api("lead@amiga.test").get("/dashboard/metrics", params={"days": 7}).json()
     assert m["received"] == 2 and m["approved"] == 1

@@ -110,7 +110,7 @@ def test_only_finance_reviewer_can_approve(extractor, email):
 
 
 def test_cannot_approve_exception_document(extractor):
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     doc_id = upload().json()["id"]
     assert api("reviewer1@amiga.test").post(f"/documents/{doc_id}/approve", json={"account_confirmed": True}).status_code == 409
 
@@ -189,10 +189,11 @@ def test_edit_rejects_invalid_values_and_only_in_draft(extractor):
     assert edit_file(doc_id, total="1").status_code == 409  # sudah dikirim ke reviewer
 
 
-def test_clearing_account_number_flags_missing_evidence(extractor):
+def test_clearing_account_number_is_allowed(extractor):
     doc_id = upload(submit=False).json()["id"]
-    r = edit_file(doc_id, account_no=None)
-    assert [(i["code"], i["field"]) for i in r.json()["issues"]] == [("MISSING_EVIDENCE", "account_no")]
+    r = edit_file(doc_id, account_no=None)  # rekening opsional
+    assert r.json()["issues"] == [] and r.json()["status"] == "DRAFT"
+    assert r.json()["account_check"]["state"] == "MISSING"
 
 
 # --- Kembalikan ke PIC ---

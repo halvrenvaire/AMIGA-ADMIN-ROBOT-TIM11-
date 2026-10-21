@@ -101,19 +101,20 @@ describe("UAT AMIGA Robot Admin", () => {
     cy.contains(".issue", "POSSIBLE_DUPLICATE").should("contain.text", docs.normal.requestId);
   });
 
-  it("UAT 3 — missing evidence: tanpa nomor rekening → MISSING_EVIDENCE, EXCEPTION", () => {
+  it("UAT 3 — tanpa nomor rekening tetap Draf: rekening opsional (feedback 21 Okt 2026)", () => {
     upload("pic.alpha@amiga.test", "02_tanpa_rekening.pdf", "missing");
-    waitStatus("Ada kendala");
-    cy.contains(".issue", "MISSING_EVIDENCE").should("contain.text", "Nomor rekening");
+    waitStatus("Draf");
+    cy.contains(".section-title", "Data pembayaran").should("contain.text", "opsional");
+    cy.contains(".issue", "Nomor rekening").should("not.exist");
   });
 
-  it("UAT 8 — perbaikan PIC: lengkapi data di draf dengan Request ID sama → READY_FOR_REVIEW", () => {
+  it("UAT 8 — perbaikan PIC: ubah data di draf dengan Request ID sama → READY_FOR_REVIEW", () => {
     cy.visitAs("pic.alpha@amiga.test", `/dokumen/${docs.missing.id}`);
     // Halaman memuat data vendor & penanda tangan secara asinkron: tunggu field siap sebelum mengetik
     cy.contains("section", "Penanda tangan voucher");
-    cy.contains(".decision button", "Kirim ke reviewer").should("be.disabled");
     cy.get("#f-account_no").should("be.enabled").click().type("8890012345");
-    cy.contains(".decision button", "Simpan bukti 1").click();
+    cy.contains(".unsaved-hint", "Ada perubahan yang belum disimpan");
+    cy.contains(".decision button", "Simpan bukti 1").should("have.class", "primary").click();
     cy.contains(".alert", "Tersimpan dan lolos verifikasi ulang");
     submitDraft();
     waitStatus("Siap ditinjau");

@@ -30,6 +30,7 @@ _Terakhir diperbarui: 21 Okt 2026_
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
 | 12 | Berkas invoice banyak halaman (invoice + Faktur Pajak + timesheet) | Kecil | 2/2 | ✅ |
+| 13 | Feedback uji coba 21 Okt: rekening opsional, alur simpan lebih jelas | Kecil | 2/2 | ✅ |
 
 ---
 
@@ -113,7 +114,7 @@ _Terakhir diperbarui: 21 Okt 2026_
 | --- | --- | --- | --- |
 | T8.1 | Perbarui BPMN: alur draf (PIC edit → simulasi → kirim), reviewer tanpa edit | [ ] | BPMN v2 masih alur lama (reviewer mengoreksi) |
 | T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4, dan pengaturan PPN/PPh per baris T9.1–T9.6); satu voucher boleh beberapa vendor/rekening setelah dikonfirmasi PIC (T10.3); format voucher Tahap 11 | [ ] | |
-| T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner; batas 5 halaman per file dihapus (T12.1) | [ ] | |
+| T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner; batas 5 halaman per file dihapus (T12.1); rekening tidak wajib (T13.1) | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
 | T8.6 | Buku panduan pengguna PDF v3.0 (15 bab, 28 gambar dari aplikasi terbaru, mencakup Tahap 1–10 dan 12) | [x] | [`readme/Buku_Panduan_AMIGA_Robot_Admin_v3.0.pdf`](../readme/Buku_Panduan_AMIGA_Robot_Admin_v3.0.pdf); Bab 8 (voucher) perlu diperbarui setelah Tahap 11 |
@@ -182,6 +183,17 @@ invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga ba
 | T12.1 | Batas halaman per file dihapus (dashboard, API, Telegram); batas 10 MB per file tetap. AI hanya membaca 5 halaman pertama (`AI_MAX_PAGES`), semua halaman tetap dilampirkan di voucher. Diuji dengan berkas invoice pertama contoh 1702 (8 halaman): total Rp 8.933.846 terbaca tepat | [x] | `1210ba3` |
 | T12.2 | Baris PPN berlabel "Jumlah PPN …", "Total PPN", "Nilai PPN" (format Faktur DSS) dikenali sebagai baris PPN, tidak jadi barang atau dasar PPh | [x] | `1210ba3` |
 
+## Tahap 13 — Feedback uji coba 21 Okt 2026
+
+Sumber: uji coba tim di dashboard online. Mengisi rekening mengganggu karena sering tidak ada di invoice, sementara owner
+sebelumnya menyatakan rekening tidak perlu (tidak ada proses transfer di sistem). Setelah mengisi data juga tidak jelas
+harus menekan apa.
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku) | [x] | belum di-commit |
+| T13.2 | Tombol **Simpan bukti** menjadi tombol utama dan muncul "Ada perubahan yang belum disimpan" setiap ada isian yang belum disimpan | [x] | belum di-commit |
+
 ---
 
 ## Riwayat pembaruan
@@ -197,3 +209,4 @@ invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga ba
 | 21 Okt 2026 | T8.6 ditambahkan dan selesai: buku panduan pengguna PDF v3.0 di `readme/` |
 | 21 Okt 2026 | T8.7 ditambahkan (deploy publik): backend FastAPI Cloud + Neon AS sudah berjalan, Vercel menyusul |
 | 21 Okt 2026 | T8.7 selesai: frontend Vercel tersambung ke backend FastAPI Cloud (CORS) |
+| 21 Okt 2026 | Tahap 13 ditambahkan dan selesai (T13.1–T13.2): rekening opsional, tombol Simpan lebih jelas; `docs/sop.md` ikut diperbarui |

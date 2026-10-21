@@ -442,7 +442,9 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.contains("section", "Penanda tangan voucher").within(() => {
         cy.contains("button", "Ubah").click();
         cy.contains("button", "Tambah kotak tanda tangan").click();
-        cy.get(".approver-row select").last().should("be.enabled").select("Dian Pratama · Bendahara");
+        // Tunggu daftar penanda tangan selesai dimuat (pilihan sempat dinonaktifkan saat dimuat ulang)
+        cy.get(".approver-row select").last().find("option").should("contain.text", "Dian Pratama");
+        cy.get(".approver-row select").last().should("not.be.disabled").select("Dian Pratama · Bendahara");
         cy.contains("button", "Simpan").click();
       });
       cy.contains(".alert", "Penanda tangan voucher diperbarui");

@@ -7,7 +7,7 @@ REASON = {"reason": "Salah unggah, ini struk belanja."}
 
 
 def test_pic_cancels_problem_document(extractor):
-    extractor.result = invoice(account_no=None)
+    extractor.result = invoice(invoice_date=None)
     doc = upload().json()
     r = api(PIC).post(f"/documents/{doc['id']}/cancel", json=REASON)
     assert r.status_code == 200

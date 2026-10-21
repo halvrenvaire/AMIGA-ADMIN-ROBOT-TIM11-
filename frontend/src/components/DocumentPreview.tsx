@@ -22,7 +22,7 @@ export function AccountCheckBox({ check, actions }: { check: AccountCheck; actio
     VERIFIED: { icon: ShieldCheck, tone: "ok", title: "Rekening terverifikasi" },
     MISMATCH: { icon: ShieldAlert, tone: "bad", title: "Rekening tidak cocok dengan data terverifikasi" },
     UNVERIFIED: { icon: ShieldQuestion, tone: "warn", title: "Rekening belum terverifikasi" },
-    MISSING: { icon: ShieldQuestion, tone: "gray", title: "Rekening belum ada" },
+    MISSING: { icon: ShieldQuestion, tone: "gray", title: "Rekening tidak diisi (opsional)" },
   }[check.state as string];
   // Reimburse (NOT_APPLICABLE) tidak dicek rekeningnya; status yang tidak dikenal juga tidak ditampilkan
   if (!meta) return null;
