@@ -73,6 +73,14 @@ export function Layout() {
           <Logo height={36} />
           <span className="brand-sub">Robot Admin</span>
         </div>
+        {canSearch && (
+          // HP: kotak cari topbar tidak muat, jadi tersedia di laci menu
+          <form className="search side-search" onSubmit={search} role="search">
+            <Search size={16} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari Request ID atau vendor…"
+                   aria-label="Cari dokumen dari menu" enterKeyHint="search" />
+          </form>
+        )}
         {visible(NAV).length > 0 && (
           <nav>
             <div className="nav-label">Menu</div>
