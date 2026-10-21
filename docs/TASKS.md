@@ -191,8 +191,8 @@ harus menekan apa.
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku) | [x] | belum di-commit |
-| T13.2 | Tombol **Simpan bukti** menjadi tombol utama dan muncul "Ada perubahan yang belum disimpan" setiap ada isian yang belum disimpan | [x] | belum di-commit |
+| T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku) | [x] | `d89897d` |
+| T13.2 | Tombol **Simpan bukti** menjadi tombol utama dan muncul "Ada perubahan yang belum disimpan" setiap ada isian yang belum disimpan | [x] | `d89897d` |
 
 ---
 
