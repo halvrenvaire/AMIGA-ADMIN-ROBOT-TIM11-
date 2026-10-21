@@ -159,8 +159,28 @@ describe("System Testing AMIGA Robot Admin", () => {
   it("TS-012 Pencarian Request ID di top bar", () => {
     cy.then(() => {
       cy.visitAs("lead@amiga.test", "/antrean");
-      cy.get("form[role=search] input").type(`${docs.a.requestId}{enter}`);
+      cy.get(".top form[role=search] input").type(`${docs.a.requestId}{enter}`);
       cy.location("pathname").should("eq", "/cari");
+      cy.get("table.docs tbody tr").should("have.length", 1).and("contain.text", docs.a.requestId);
+    });
+  });
+
+  it("TS-047 Tampilan HP: menu laci dan pencarian Request ID dari laci", () => {
+    cy.viewport(390, 844);
+    cy.then(() => {
+      cy.visitAs("lead@amiga.test", "/antrean");
+      cy.get(".side").should("not.be.visible");
+      // browser tes headless tidak menjalankan animasi CSS; matikan agar laci langsung terbuka
+      cy.document().then((d) => {
+        const st = d.createElement("style");
+        st.textContent = "*, *::before, *::after { transition: none !important; }";
+        d.head.appendChild(st);
+      });
+      cy.get("button[aria-label='Buka menu']").click();
+      cy.get(".side.open").should("be.visible").and("contain.text", "Dashboard Antrean");
+      cy.get(".side .side-search input").should("be.visible").type(`${docs.a.requestId}{enter}`);
+      cy.location("pathname").should("eq", "/cari");
+      cy.get(".side.open").should("not.exist");  // laci tertutup setelah pindah halaman
       cy.get("table.docs tbody tr").should("have.length", 1).and("contain.text", docs.a.requestId);
     });
   });

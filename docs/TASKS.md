@@ -10,7 +10,7 @@ Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD
 - Saat tugas selesai: centang, isi kolom commit, perbarui ringkasan progres, lalu commit dan push.
 - Nomor `#1`–`#12` merujuk ke nomor masukan owner di dokumen ringkasan.
 
-_Terakhir diperbarui: 21 Okt 2026_
+_Terakhir diperbarui: 22 Okt 2026_
 
 ---
 
@@ -30,7 +30,7 @@ _Terakhir diperbarui: 21 Okt 2026_
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
 | 12 | Berkas invoice banyak halaman (invoice + Faktur Pajak + timesheet) | Kecil | 2/2 | ✅ |
-| 13 | Feedback uji coba 21 Okt: rekening opsional, alur simpan lebih jelas, tampilan HP | Sedang | 3/3 | ✅ |
+| 13 | Feedback uji coba 21 Okt: rekening opsional, alur simpan lebih jelas, tampilan HP | Sedang | 4/4 | ✅ |
 
 ---
 
@@ -194,6 +194,7 @@ harus menekan apa.
 | T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku) | [x] | `d89897d` |
 | T13.2 | Tombol **Simpan bukti** menjadi tombol utama dan muncul "Ada perubahan yang belum disimpan" setiap ada isian yang belum disimpan | [x] | `d89897d` |
 | T13.3 | Tampilan HP (≤ 860 px): menu samping jadi laci (tombol ☰), topbar ringkas, tombol Asisten bulat, tabel bisa digeser ke samping, rincian barang tetap terbaca, tombol keputusan dua kolom, simulasi voucher layar penuh | [x] | `0353ad4` |
+| T13.4 | Di HP, kotak **pencarian** (Request ID / vendor) ada di dalam laci menu ☰; laci tertutup otomatis setelah mencari | [x] | belum di-commit |
 
 ---
 
@@ -212,3 +213,4 @@ harus menekan apa.
 | 21 Okt 2026 | T8.7 selesai: frontend Vercel tersambung ke backend FastAPI Cloud (CORS) |
 | 21 Okt 2026 | Tahap 13 ditambahkan dan selesai (T13.1–T13.2): rekening opsional, tombol Simpan lebih jelas; `docs/sop.md` ikut diperbarui |
 | 21 Okt 2026 | T13.3 ditambahkan dan selesai: dashboard nyaman dipakai di HP |
+| 22 Okt 2026 | T13.4 ditambahkan dan selesai: pencarian tersedia di laci menu HP |

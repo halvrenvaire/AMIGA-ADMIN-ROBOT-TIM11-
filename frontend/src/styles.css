@@ -992,16 +992,19 @@ small.block { display: block; }
 .unsaved-hint { font-size: 13px; font-weight: 600; color: var(--amber); align-self: center; margin-right: auto; }
 
 /* --- Tampilan HP (≤ 860 px): menu jadi laci, topbar ringkas, tombol & tabel tidak bertabrakan --- */
-.menu-btn, .side-close { display: none; }
+.menu-btn, .side-close, .search.side-search { display: none; }
 @media (max-width: 860px) {
   .shell { overflow-x: clip; }  /* clip, bukan hidden: tidak membuat area gulir baru (scroll & sticky tetap normal) */
   .side {
     position: fixed; inset: 0 auto 0 0; width: min(280px, 84vw); height: 100%; z-index: 60; overflow-y: auto;
-    transform: translateX(-105%); transition: transform 0.2s ease; box-shadow: var(--shadow-pop);
+    transform: translateX(-105%); box-shadow: var(--shadow-pop);
+    /* Tertutup: juga disembunyikan dari keyboard dan pembaca layar (visibility berubah setelah animasi) */
+    visibility: hidden; transition: transform 0.2s ease, visibility 0s linear 0.2s;
   }
-  .side.open { transform: none; }
+  .side.open { transform: none; visibility: visible; transition: transform 0.2s ease; }
   .side-backdrop { position: fixed; inset: 0; z-index: 55; background: rgba(15, 23, 42, 0.42); }
   .side-close { display: inline-flex; position: absolute; top: 14px; right: 10px; }
+  .search.side-search { display: flex; flex: none; width: 100%; max-width: none; margin: -6px 0 0; }
   .menu-btn { display: inline-flex; flex: none; margin-left: -6px; }
   .top { padding: 0 10px; gap: 6px; }
   .crumb { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
