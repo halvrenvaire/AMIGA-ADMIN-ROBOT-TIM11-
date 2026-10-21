@@ -25,7 +25,7 @@ _Terakhir diperbarui: 21 Okt 2026_
 | 5 | Konfirmasi tarif pajak | Kecil | 1/2 | ❓ PPh 26 |
 | 6 | Feedback owner 19–20 Okt (kop voucher, PPN, tabel voucher) | Sedang | 4/4 | ✅ |
 | 7 | Pertanyaan terbuka ke owner | — | 0/4 | ❓ |
-| 8 | Dokumen & rilis (BRD, PRD, BPMN, buku panduan, deploy) | Sedang | 1/6 | ⏳ |
+| 8 | Dokumen & rilis (BRD, PRD, BPMN, buku panduan, deploy) | Sedang | 1/7 | 🔄 deploy publik |
 | 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ |
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
@@ -117,6 +117,7 @@ _Terakhir diperbarui: 21 Okt 2026_
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
 | T8.6 | Buku panduan pengguna PDF v3.0 (15 bab, 28 gambar dari aplikasi terbaru, mencakup Tahap 1–10 dan 12) | [x] | [`readme/Buku_Panduan_AMIGA_Robot_Admin_v3.0.pdf`](../readme/Buku_Panduan_AMIGA_Robot_Admin_v3.0.pdf); Bab 8 (voucher) perlu diperbarui setelah Tahap 11 |
+| T8.7 | Deploy publik: database Neon (aws-us-east-1), backend FastAPI Cloud (`https://amiga-robot-admin.fastapicloud.dev`, file di S3), frontend Vercel | 🔄 | Backend & database selesai (migrasi, akun demo dengan password baru, CORS lewat `CORS_ORIGINS`, Bedrock retry adaptif, Asisten hanya membaca `sop.md`); tinggal Vercel lalu isi `CORS_ORIGINS` dan `FRONTEND_URL` |
 
 ## Tahap 9 — Pajak per baris & navigasi cepat (feedback owner 20 Okt 2026)
 
@@ -194,3 +195,4 @@ invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga ba
 | 20 Okt 2026 | Hash `707aef1` diisi untuk Tahap 9–10; Tahap 11 ditambahkan dari contoh voucher owner (No. 1702 & 1944) |
 | 20 Okt 2026 | Tahap 12 ditambahkan dan selesai (T12.1–T12.2, `1210ba3`): batas halaman per file dihapus, AI membaca 5 halaman pertama, label "Jumlah PPN" dikenali; `docs/sop.md` ikut diperbarui (perlu `POST /reindex` agar Asisten memakai isi baru) |
 | 21 Okt 2026 | T8.6 ditambahkan dan selesai: buku panduan pengguna PDF v3.0 di `readme/` |
+| 21 Okt 2026 | T8.7 ditambahkan (deploy publik): backend FastAPI Cloud + Neon AS sudah berjalan, Vercel menyusul |

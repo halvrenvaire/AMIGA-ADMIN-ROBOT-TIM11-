@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     qa_memory_min_score: float = 0.70
     qa_memory_top_k: int = 3
 
+    # Alamat frontend yang boleh memanggil API dari browser (CORS), dipisah koma.
+    # Produksi: alamat Vercel, mis. https://amiga-robot-admin.vercel.app
+    cors_origins: str = "http://localhost:5173"
+
     # Bot Telegram (backend/bot/telegram_bot.py)
     telegram_bot_token: str = ""
     telegram_bot_username: str = "amiga_ro_bot"

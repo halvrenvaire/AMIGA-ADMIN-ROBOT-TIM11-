@@ -2,6 +2,7 @@
 import json
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
@@ -17,9 +18,12 @@ class BedrockClient:
             aws_access_key_id=settings.aws_access_key or None,
             aws_secret_access_key=settings.aws_secret_access_key or None,
         )
-        # Embedding dan LLM berada di region berbeda (lihat app/config.py)
-        self.embed_runtime = session.client("bedrock-runtime", region_name=settings.embed_region)
-        self.llm_runtime = session.client("bedrock-runtime", region_name=settings.llm_region)
+        # Embedding dan LLM berada di region berbeda (lihat app/config.py). Percobaan ulang adaptif: saat dibatasi
+        # AWS (ThrottlingException, mis. membangun index SOP paralel saat server baru menyala) permintaan diulang
+        # dengan jeda bertahap, bukan langsung gagal.
+        retry = Config(retries={"max_attempts": 8, "mode": "adaptive"})
+        self.embed_runtime = session.client("bedrock-runtime", region_name=settings.embed_region, config=retry)
+        self.llm_runtime = session.client("bedrock-runtime", region_name=settings.llm_region, config=retry)
 
     def embed(self, text: str) -> list[float]:
         body = {"inputText": text, "dimensions": settings.embed_dimension, "normalize": True}

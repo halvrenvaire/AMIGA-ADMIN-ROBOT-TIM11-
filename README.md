@@ -24,6 +24,7 @@ AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi
 5. [Skenario uji penerimaan (UAT)](#skenario-uji-penerimaan-uat)
 6. [Arsitektur](#arsitektur)
 7. [Menjalankan project](#menjalankan-project)
+   - [Deploy publik (Neon + FastAPI Cloud + Vercel)](#deploy-publik-neon--fastapi-cloud--vercel)
    - [Deploy ke EC2](#deploy-ke-ec2)
 8. [Endpoint API](#endpoint-api)
 9. [Keputusan desain](#keputusan-desain)
@@ -400,6 +401,29 @@ Test dokumen berjalan di dalam satu transaksi database yang di-rollback, sehingg
 File PDF yang diunggah disimpan di folder `storage/` (di root repo) atau di bucket S3 bila `STORAGE_BACKEND=s3`.
 
 ---
+
+## Deploy publik (Neon + FastAPI Cloud + Vercel)
+
+| Bagian | Layanan | Catatan |
+| --- | --- | --- |
+| Database | Neon PostgreSQL 18, project `amiga-robot-admin` (aws-us-east-1) | Satu region dengan FastAPI Cloud; beda region membuat tiap halaman 2–6 detik |
+| Backend | FastAPI Cloud, app `amiga-robot-admin` → `https://amiga-robot-admin.fastapicloud.dev` | `backend/pyproject.toml` (entrypoint `app.main:app`), deploy dari folder induk repo dengan direktori `backend` supaya `docs/sop.md` ikut |
+| File | Amazon S3 (`STORAGE_BACKEND=s3`) | Disk FastAPI Cloud tidak permanen |
+| Frontend | Vercel, Root Directory `frontend` | `frontend/vercel.json`; `VITE_API_URL` = alamat backend (frontend memanggil backend langsung, bukan lewat rewrite Vercel yang membatasi unggahan ±4,5 MB) |
+| Bot Telegram | Tetap di komputer demo | `BOT_API_BASE_URL` diarahkan ke alamat backend publik |
+
+Rahasia produksi disimpan di `backend/production.env` (diabaikan git, tidak ikut terunggah) dan di FastAPI Cloud sebagai *secret*.
+
+```bash
+# Migrasi dan seed ke Neon (nilai dari production.env, .env lokal tidak berubah)
+cd backend && python3 -c "import os,subprocess;e=dict(os.environ);e.update(dict(l.split('=',1) for l in open('production.env').read().splitlines() if '=' in l and not l.startswith('#')));subprocess.run(['.venv/bin/alembic','upgrade','head'],env=e,check=True)"
+
+# Deploy backend (dari folder induk repo; sekali saja: backend/.venv/bin/fastapi login)
+backend/.venv/bin/fastapi deploy .
+
+# Ubah variabel lingkungan (mis. CORS_ORIGINS = alamat Vercel), otomatis deploy ulang
+echo -n "https://<app>.vercel.app" | backend/.venv/bin/fastapi cloud env set CORS_ORIGINS --value-stdin --path .
+```
 
 ## Deploy ke EC2
 

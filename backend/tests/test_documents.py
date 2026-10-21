@@ -102,6 +102,8 @@ def tx(monkeypatch, tmp_path):
     # Data referensi (vendor, penanda tangan) dari seed/dev juga disembunyikan
     connection.execute(text("UPDATE vendors SET client_id = :c"), {"c": hidden})
     connection.execute(text("UPDATE signatories SET client_id = :c"), {"c": hidden})
+    # Logo klien dari sesi E2E/screenshot (database test dipakai bersama) tidak boleh memengaruhi test
+    connection.execute(text("UPDATE clients SET logo_png = NULL, logo_updated_at = NULL"))
     # Peran "semua perusahaan" (Finance Reviewer, Service Lead) tidak melihat klien tersembunyi itu
     real_all = access_rules.all_client_ids
     monkeypatch.setattr(access_rules, "all_client_ids", lambda db: real_all(db) - {hidden})
