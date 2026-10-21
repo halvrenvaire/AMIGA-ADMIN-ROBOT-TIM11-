@@ -193,7 +193,7 @@ harus menekan apa.
 | --- | --- | --- | --- |
 | T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku) | [x] | `d89897d` |
 | T13.2 | Tombol **Simpan bukti** menjadi tombol utama dan muncul "Ada perubahan yang belum disimpan" setiap ada isian yang belum disimpan | [x] | `d89897d` |
-| T13.3 | Tampilan HP (≤ 860 px): menu samping jadi laci (tombol ☰), topbar ringkas, tombol Asisten bulat, tabel bisa digeser ke samping, rincian barang tetap terbaca, tombol keputusan dua kolom, simulasi voucher layar penuh | [x] | belum di-commit |
+| T13.3 | Tampilan HP (≤ 860 px): menu samping jadi laci (tombol ☰), topbar ringkas, tombol Asisten bulat, tabel bisa digeser ke samping, rincian barang tetap terbaca, tombol keputusan dua kolom, simulasi voucher layar penuh | [x] | `0353ad4` |
 
 ---
 
