@@ -409,7 +409,7 @@ File PDF yang diunggah disimpan di folder `storage/` (di root repo) atau di buck
 | Database | Neon PostgreSQL 18, project `amiga-robot-admin` (aws-us-east-1) | Satu region dengan FastAPI Cloud; beda region membuat tiap halaman 2–6 detik |
 | Backend | FastAPI Cloud, app `amiga-robot-admin` → `https://amiga-robot-admin.fastapicloud.dev` | `backend/pyproject.toml` (entrypoint `app.main:app`), deploy dari folder induk repo dengan direktori `backend` supaya `docs/sop.md` ikut |
 | File | Amazon S3 (`STORAGE_BACKEND=s3`) | Disk FastAPI Cloud tidak permanen |
-| Frontend | Vercel, Root Directory `frontend` | `frontend/vercel.json`; `VITE_API_URL` = alamat backend (frontend memanggil backend langsung, bukan lewat rewrite Vercel yang membatasi unggahan ±4,5 MB) |
+| Frontend | Vercel, Root Directory `frontend` → `https://amiga-admin-robot-tim-11.vercel.app` | `frontend/vercel.json`; `VITE_API_URL` = alamat backend (frontend memanggil backend langsung, bukan lewat rewrite Vercel yang membatasi unggahan ±4,5 MB) |
 | Bot Telegram | Tetap di komputer demo | `BOT_API_BASE_URL` diarahkan ke alamat backend publik |
 
 Rahasia produksi disimpan di `backend/production.env` (diabaikan git, tidak ikut terunggah) dan di FastAPI Cloud sebagai *secret*.
