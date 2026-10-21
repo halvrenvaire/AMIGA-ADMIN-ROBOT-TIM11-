@@ -10,7 +10,7 @@ Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD
 - Saat tugas selesai: centang, isi kolom commit, perbarui ringkasan progres, lalu commit dan push.
 - Nomor `#1`–`#12` merujuk ke nomor masukan owner di dokumen ringkasan.
 
-_Terakhir diperbarui: 20 Okt 2026_
+_Terakhir diperbarui: 21 Okt 2026_
 
 ---
 
@@ -25,7 +25,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | 5 | Konfirmasi tarif pajak | Kecil | 1/2 | ❓ PPh 26 |
 | 6 | Feedback owner 19–20 Okt (kop voucher, PPN, tabel voucher) | Sedang | 4/4 | ✅ |
 | 7 | Pertanyaan terbuka ke owner | — | 0/4 | ❓ |
-| 8 | Dokumen & rilis (BRD, PRD, BPMN, deploy) | Sedang | 0/5 | ⏳ |
+| 8 | Dokumen & rilis (BRD, PRD, BPMN, buku panduan, deploy) | Sedang | 1/6 | ⏳ |
 | 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ |
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
@@ -116,6 +116,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner; batas 5 halaman per file dihapus (T12.1) | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
+| T8.6 | Buku panduan pengguna PDF v3.0 (15 bab, 28 gambar dari aplikasi terbaru, mencakup Tahap 1–10 dan 12) | [x] | [`readme/Buku_Panduan_AMIGA_Robot_Admin_v3.0.pdf`](../readme/Buku_Panduan_AMIGA_Robot_Admin_v3.0.pdf); Bab 8 (voucher) perlu diperbarui setelah Tahap 11 |
 
 ## Tahap 9 — Pajak per baris & navigasi cepat (feedback owner 20 Okt 2026)
 
@@ -192,3 +193,4 @@ invoice, rincian, Faktur Pajak, dan timesheet (4–8 halaman lebih), sehingga ba
 | 20 Okt 2026 | Tahap 10 ditambahkan dan selesai (T10.1–T10.6): isi manual saat AI bermasalah, subtotal otomatis, beberapa vendor per voucher, rekening per invoice, pintasan rekening vendor; T8.2–T8.4 mencakup Tahap 10 |
 | 20 Okt 2026 | Hash `707aef1` diisi untuk Tahap 9–10; Tahap 11 ditambahkan dari contoh voucher owner (No. 1702 & 1944) |
 | 20 Okt 2026 | Tahap 12 ditambahkan dan selesai (T12.1–T12.2, `1210ba3`): batas halaman per file dihapus, AI membaca 5 halaman pertama, label "Jumlah PPN" dikenali; `docs/sop.md` ikut diperbarui (perlu `POST /reindex` agar Asisten memakai isi baru) |
+| 21 Okt 2026 | T8.6 ditambahkan dan selesai: buku panduan pengguna PDF v3.0 di `readme/` |
