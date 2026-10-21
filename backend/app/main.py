@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
+from app.config import settings
 from app.routers import (
     admin, ask, ask_agent, auth, clients, dashboard, database, documents, health, reference, reindex, review, telegram,
     vouchers,
@@ -40,7 +41,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite dev server
+    # Vite dev server, atau alamat frontend produksi (CORS_ORIGINS di .env, dipisah koma)
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

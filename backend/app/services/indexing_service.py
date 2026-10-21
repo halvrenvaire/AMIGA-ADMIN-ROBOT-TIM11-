@@ -17,7 +17,7 @@ from app.services.vector_store import VectorStore
 
 log = logging.getLogger(__name__)
 
-EMBED_WORKERS = 8
+EMBED_WORKERS = 4  # dibatasi supaya tidak kena ThrottlingException Titan Embeddings
 
 
 def _dedupe(docs: list[dict]) -> list[dict]:

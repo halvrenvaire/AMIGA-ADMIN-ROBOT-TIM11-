@@ -9,6 +9,8 @@ log = logging.getLogger(__name__)
 
 TEXT_EXTENSIONS = (".md", ".txt")
 S3_EXTENSIONS = (".md", ".txt", ".pdf")
+# Catatan internal tim pengembang di docs/, bukan pengetahuan untuk Asisten AI
+NOT_KNOWLEDGE = {"TASKS.md"}
 
 
 def _pdf_to_text(data: bytes) -> str:
@@ -23,7 +25,7 @@ def load_local_docs(docs_path: str | Path) -> list[dict]:
         log.warning("Folder dokumen lokal tidak ditemukan: %s", root)
         return docs
     for path in sorted(root.iterdir()):
-        if path.suffix.lower() not in TEXT_EXTENSIONS:
+        if path.suffix.lower() not in TEXT_EXTENSIONS or path.name in NOT_KNOWLEDGE:
             continue
         try:
             content = path.read_text(encoding="utf-8")

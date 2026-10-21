@@ -1,0 +1,15 @@
+# Yang TIDAK ikut diunggah ke FastAPI Cloud (selain yang sudah diabaikan .gitignore, mis. .env, storage/, node_modules/).
+# docs/ sengaja ikut: berisi SOP untuk Asisten AI.
+frontend/
+samples/
+readme/
+scripts/
+backups/
+storage/
+storage-e2e/
+backend/tests/
+backend/scripts/
+backend/data/
+*.env
+.claude/
+Logo-AMIGA-2025.*

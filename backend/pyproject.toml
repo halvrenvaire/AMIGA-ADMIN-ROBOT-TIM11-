@@ -1,0 +1,38 @@
+# Dipakai untuk deploy ke FastAPI Cloud (`fastapi deploy` dari folder induk repo, direktori aplikasi: backend).
+# Untuk pengembangan lokal tetap memakai requirements.txt dan .venv (lihat README).
+[project]
+name = "amiga-robot-admin"
+version = "0.2.0"
+description = "AMIGA Robot Admin API (PoC MAIN Hackathon 2026, Kelompok 11)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]==0.118.0",
+    "uvicorn[standard]==0.37.0",
+    "sqlalchemy==2.0.43",
+    "alembic==1.16.5",
+    "psycopg[binary]==3.2.10",
+    "pydantic-settings==2.11.0",
+    "python-multipart==0.0.20",
+    "python-dotenv==1.1.1",
+    "boto3==1.40.45",
+    "pypdf==6.1.1",
+    "fpdf2==2.8.4",
+    "pyjwt==2.10.1",
+    "bcrypt==5.0.0",
+    "httpx==0.28.1",
+    "faiss-cpu==1.15.1",
+    "numpy==2.5.4",
+    "pillow==12.3.0",
+]
+
+[tool.fastapi]
+entrypoint = "app.main:app"
+
+# FastAPI Cloud memasang proyek secara editable (kode tetap dijalankan dari folder backend/).
+# Paket yang dipakai aplikasi: app dan bot; alembic/ hanya untuk migrasi yang dijalankan terpisah.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "bot*"]
