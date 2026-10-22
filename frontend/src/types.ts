@@ -19,7 +19,7 @@ export interface Classification {
 }
 /** Pemeriksaan rekening terhadap data vendor yang diverifikasi Finance Reviewer. */
 export interface AccountCheck {
-  state: "VERIFIED" | "MISMATCH" | "UNVERIFIED" | "MISSING" | "NOT_APPLICABLE";
+  state: "VERIFIED" | "MISMATCH" | "UNVERIFIED" | "MISSING" | "NOT_APPLICABLE" | "OFF";
   message: string; source: "AI" | "PIC"; vendor: string | null; verified_by: string | null;
 }
 
@@ -37,6 +37,8 @@ export interface Me {
   upload_clients?: ClientRef[];
   /** Spesimen tanda tangan elektronik (PIC Klien), null bila belum ada. */
   signature_updated_at?: string | null;
+  /** Profil "Diajukan oleh" terakhir: isian awal pengajuan berikutnya. companies: per id perusahaan. */
+  submitter_profile?: { name?: string; position?: string; companies?: Record<string, string> };
 }
 
 export interface AdminUser extends Me { is_active: boolean }
@@ -59,7 +61,13 @@ export interface DocumentSummary {
   total: string | null;
   created_at: string;
   updated_at: string;
+  /** Mode baca AI: TOTAL_ONLY = 1 baris voucher per invoice; ITEMIZED = 1 baris per barang/jasa. */
+  extraction_mode?: ExtractionMode;
+  /** Fitur tambahan: rekening tujuan diisi, dicek, dan dicetak di voucher. */
+  include_account?: boolean;
 }
+
+export type ExtractionMode = "TOTAL_ONLY" | "ITEMIZED";
 
 export interface Issue { code: IssueCode; field: string | null; message: string; created_at: string }
 
@@ -88,6 +96,8 @@ export interface FileData {
   vendor_name: string | null; invoice_no: string | null; invoice_date: string | null; total: string | null;
   bank_name: string | null; account_no: string | null; account_name: string | null;
   line_items: FileLine[];
+  /** Uraian transaksi (mode total saja): satu baris voucher per invoice. */
+  description?: string | null;
   /** Pilihan pajak PIC (Tahap 4); tarif disalin saat dipilih. */
   tax?: TaxChoice | null;
   /** Saran PPh tiap baris (aturan kata kunci, atau AI bila diminta PIC); null untuk baris PPN. */
@@ -113,7 +123,7 @@ export interface FileLine {
 export interface LineSuggestion { code: string; reason: string; source: "ai" | "aturan" }
 
 export type VatMode = "separate" | "included" | "none";
-export interface VatSetting { mode: VatMode; rate: string; show: boolean }
+export interface VatSetting { mode: VatMode; rate: string; show: boolean; /** PPN diisi manual (hitung otomatis mati). */ amount?: string | null }
 
 export interface TaxGroup { code: string; name: string; rate: string; base: string; amount: string; lines: number[] }
 
@@ -124,6 +134,8 @@ export interface TaxChoice {
   source: "ai" | "aturan" | "pic";
   groups?: TaxGroup[];
   vat?: VatSetting;
+  /** false = DPP, PPN, dan potongan PPh diisi manual oleh PIC (hitung otomatis dimatikan). */
+  calc?: boolean;
 }
 
 export interface TaxRate {
@@ -159,6 +171,8 @@ export interface DocumentDetail extends DocumentSummary {
   payees?: Payee[];
   /** Peringatan yang sudah dikonfirmasi PIC dan masih berlaku, per kode kendala. */
   acknowledgements?: Record<string, { reason: string; by: string; at: string }>;
+  /** Ada tanda tangan "Diajukan oleh" yang tersimpan di pengajuan ini. */
+  submitter_signature?: boolean;
 }
 
 export interface Payee {
@@ -262,7 +276,11 @@ export interface Signatory {
   signature_updated_at: string | null;
 }
 
-export interface Signer { kind: SignatoryKind; name: string; position: string }
+export interface Signer {
+  kind: SignatoryKind; name: string; position: string;
+  /** Profil pengaju: perusahaan/unit, dan apakah tanda tangan tersimpan di pengajuan ini. */
+  company?: string | null; signature?: boolean;
+}
 
 export interface VoucherRow {
   document_id: string;

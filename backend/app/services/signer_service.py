@@ -28,6 +28,23 @@ def pengaju(submitter: User, client: Client, name: str | None = None) -> dict:
             "user_id": str(submitter.id)}
 
 
+def default_profile(owner: User | None, client: Client) -> dict:
+    """Isian awal profil "Diajukan oleh" (Tahap 14): profil terakhir pemilik akun, selain itu nama PIC,
+    jabatan "PIC Klien", dan nama perusahaan klien."""
+    saved = (getattr(owner, "submitter_profile", None) or {}) if owner else {}
+    companies = saved.get("companies") or {}
+    return {"name": saved.get("name") or (owner.full_name if owner else ""),
+            "position": saved.get("position") if saved.get("position") is not None else "PIC Klien",
+            "company": companies.get(str(client.id)) or client.name}
+
+
+def pengaju_profile(name: str, position: str | None, company: str | None, signed: bool) -> dict:
+    """Kotak "Diajukan oleh" dari profil pengaju: nama, jabatan, perusahaan/unit, dan apakah ada spesimen tanda
+    tangan yang tersimpan di dokumen (`documents.submitter_signature_png`)."""
+    return {"kind": SignatoryKind.PENGAJU.value, "name": name.strip()[:200], "position": (position or "").strip()[:120],
+            "company": (company or "").strip()[:200], "signature": signed}
+
+
 def _approver(s: Signatory) -> dict:
     # id disimpan supaya spesimen tanda tangan elektronik bisa ditempel saat voucher terbit
     return {"kind": SignatoryKind.PENYETUJU.value, "name": s.full_name, "position": s.position,
@@ -35,11 +52,12 @@ def _approver(s: Signatory) -> dict:
 
 
 def resolve(db: Session, client_id: uuid.UUID, ids: list[uuid.UUID] | None,
-            submitter: User | None, submitter_name: str | None = None) -> list[dict]:
+            submitter: User | dict | None, submitter_name: str | None = None) -> list[dict]:
     """[PIC pengaju, penyetuju...] sesuai urutan pilihan PIC (urutan = urutan kotak di voucher).
-    `submitter` None = hanya kotak "Disetujui oleh" (dipakai saat mengganti penanda tangan)."""
+    `submitter`: akun PIC (format lama), kotak "Diajukan oleh" yang sudah jadi (dict, profil pengaju), atau None =
+    hanya kotak "Disetujui oleh" (dipakai saat mengganti penanda tangan)."""
     client = db.get(Client, client_id)
-    head = [pengaju(submitter, client, submitter_name)] if submitter else []
+    head = [submitter] if isinstance(submitter, dict) else [pengaju(submitter, client, submitter_name)] if submitter else []
     if ids is None:
         default = db.scalars(select(Signatory).where(
             Signatory.client_id == client_id, Signatory.kind == SignatoryKind.PENYETUJU,

@@ -107,14 +107,15 @@ def test_upload_signs_as_pic_with_one_default_approver(extractor):
     add_signatory("PENYETUJU", "Tidak Dipakai", "Komisaris", default=False)
     add_signatory("PENYETUJU", "Budi Santoso", "Direktur")
     doc = detail(upload().json()["id"])
-    assert [(s["kind"], s["name"], s["position"]) for s in doc["signers"]] == [
-        ("PENGAJU", PIC_ALPHA, f"PIC Klien, {ALPHA}"), ("PENYETUJU", "Budi Santoso", "Direktur")]
+    # Profil pengaju (Tahap 14): nama, jabatan, dan perusahaan/unit terpisah
+    assert [(s["kind"], s["name"], s["position"], s.get("company")) for s in doc["signers"]] == [
+        ("PENGAJU", PIC_ALPHA, "PIC Klien", ALPHA), ("PENYETUJU", "Budi Santoso", "Direktur", None)]
 
     approve(doc)
     pdf = api("pic.alpha@amiga.test").get(f"/documents/{doc['id']}/voucher").content
     text = re.sub(r"\s+", " ", " ".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages))
     assert "Diverifikasi oleh AMIGA" not in text
-    for expected in ("Diajukan oleh", PIC_ALPHA, f"PIC Klien, {ALPHA}", "Disetujui oleh", "Budi Santoso", "Direktur"):
+    for expected in ("Diajukan oleh", PIC_ALPHA, "PIC Klien", ALPHA, "Disetujui oleh", "Budi Santoso", "Direktur"):
         assert expected in text
     assert "Tidak Dipakai" not in text
 

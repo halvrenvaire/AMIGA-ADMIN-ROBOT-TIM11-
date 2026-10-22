@@ -90,6 +90,8 @@ def main() -> None:
             if user is None:
                 user = User(email=email, full_name=full_name, password_hash=hash_password(password))
                 db.add(user)
+            else:
+                user.password_hash = hash_password(password)
             for role in set(roles) - user.roles:
                 user.role_links.append(UserRole(role=role))
             users[email] = user

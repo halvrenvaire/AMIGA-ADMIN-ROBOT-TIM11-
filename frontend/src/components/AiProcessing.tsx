@@ -62,7 +62,7 @@ const CHECKS: { code: IssueCode; label: string }[] = [
   { code: "MISSING_EVIDENCE", label: "Data wajib lengkap (vendor, nomor, tanggal, total)" },
   { code: "CALCULATION_DISCREPANCY", label: "Total cocok dengan rincian barang" },
   { code: "POSSIBLE_DUPLICATE", label: "Bukan invoice yang pernah diajukan" },
-  { code: "VENDOR_MISMATCH", label: "Satu vendor dan satu rekening tujuan (atau dikonfirmasi PIC)" },
+  { code: "VENDOR_MISMATCH", label: "Satu vendor dalam satu voucher (pengingat, tidak menahan)" },
 ];
 
 /** Ringkasan hasil kerja AI dan verifikasi sistem setelah selesai. */
@@ -76,7 +76,10 @@ export function AiResultCard({ doc, onClose, onJump }: { doc: DocumentDetail; on
   // Struk/nota atau dokumen meragukan juga gagal di pemeriksaan "invoice vendor"
   const notOfficial = codes.has("RECEIPT_NOT_INVOICE") || codes.has("NEEDS_MANUAL_REVIEW");
   const account = doc.account_check;
-  const passed = !doc.issues.length && doc.status !== "EXCEPTION";
+  // Vendor/rekening berbeda hanya pengingat: tidak dihitung sebagai kendala
+  const open = doc.issues.filter((i) => i.code !== "VENDOR_MISMATCH" && i.code !== "ACCOUNT_MISMATCH");
+  const passed = !open.length && doc.status !== "EXCEPTION";
+  const totalOnly = doc.extraction_mode === "TOTAL_ONLY";
   const seconds = ex.duration_ms != null ? (ex.duration_ms / 1000).toFixed(1) : null;
 
   return (
@@ -85,21 +88,23 @@ export function AiResultCard({ doc, onClose, onJump }: { doc: DocumentDetail; on
         <span className={`ai-orb ${passed ? "ok" : "warn"}`} aria-hidden="true">{passed ? <CheckCircle2 /> : <AlertTriangle />}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <span className="ai-eyebrow">Hasil AMIGA AI Engine</span>
-          <h2>{passed ? "Lolos semua pemeriksaan" : `${doc.issues.length} kendala perlu ditindaklanjuti`}</h2>
+          <h2>{passed ? (doc.issues.length ? "Lolos, ada pengingat untuk dicek" : "Lolos semua pemeriksaan") : `${open.length} kendala perlu ditindaklanjuti`}</h2>
         </div>
         {onClose && <button className="btn ghost sm" onClick={onClose} aria-label="Tutup ringkasan"><X /></button>}
       </div>
 
       <div className="ai-stats">
         <div><b>{seconds ?? "-"}<small> dtk</small></b><span>waktu baca AI</span></div>
-        <div><b>{ex.line_items.length}</b><span>baris barang</span></div>
+        {totalOnly
+          ? <div><b>{doc.files.length || 1}</b><span>invoice (total saja)</span></div>
+          : <div><b>{ex.line_items.length}</b><span>baris barang</span></div>}
         <div><b>{(doc.files.length || 1) - (doc.ai_manual?.files.length ?? 0)}</b><span>file dibaca</span></div>
         <div><b className="ai-money">{rupiah(ex.total)}</b><span>total tagihan</span></div>
       </div>
       {ex.vendor_name && <p className="ai-found"><FileSearch size={14} /> Vendor terbaca: <b>{ex.vendor_name}</b>{ex.invoice_no && <> · No. {ex.invoice_no}</>}</p>}
 
       <ul className="ai-checks">
-        {CHECKS.map(({ code, label }) => {
+        {CHECKS.filter(({ code }) => !(totalOnly && code === "CALCULATION_DISCREPANCY")).map(({ code, label }) => {
           const failed = codes.has(code) || (code === "NOT_AN_INVOICE" && notOfficial);
           const skipped = notInvoice && code !== "NOT_AN_INVOICE";
           return (
@@ -112,13 +117,14 @@ export function AiResultCard({ doc, onClose, onJump }: { doc: DocumentDetail; on
             </li>
           );
         })}
-        {account && account.state !== "NOT_APPLICABLE" && !notInvoice && (
-          <li className={account.state === "VERIFIED" ? "pass" : account.state === "MISMATCH" ? "fail" : "skip"}>
-            <span>{account.state === "VERIFIED" ? <Check /> : account.state === "MISMATCH" ? <X /> : "?"}</span>
+        {account && account.state !== "NOT_APPLICABLE" && account.state !== "OFF" && !notInvoice && (
+          <li className={account.state === "VERIFIED" ? "pass" : "skip"}>
+            <span>{account.state === "VERIFIED" ? <Check /> : "?"}</span>
             {account.state !== "VERIFIED" && onJump
               ? <button type="button" className="link-btn" onClick={() => onJump("ACCOUNT")}>Rekening cocok dengan data vendor terverifikasi</button>
               : "Rekening cocok dengan data vendor terverifikasi"}
             {account.state === "UNVERIFIED" && <small className="muted"> · belum terverifikasi</small>}
+            {account.state === "MISMATCH" && <small className="muted"> · berbeda, pengingat untuk dicek</small>}
           </li>
         )}
       </ul>

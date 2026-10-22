@@ -15,7 +15,8 @@ PIC = "pic.alpha@amiga.test"
 def upload_draft(pdfs, **form):
     from tests.test_documents import client_id
     data = {"client_id": client_id("PT Klien Alpha"), "request_type": "Voucher Pengeluaran Vendor",
-            "channel": "Email", "submitted_date": "2026-10-19", **form}
+            "channel": "Email", "submitted_date": "2026-10-19", "extraction_mode": "ITEMIZED", "include_account": "true",
+            **form}
     files = [("files", (f"inv{i}.pdf", pdf, "application/pdf")) for i, pdf in enumerate(pdfs, start=1)]
     return detail(api(PIC).post("/documents", data=data, files=files).json()["id"])
 

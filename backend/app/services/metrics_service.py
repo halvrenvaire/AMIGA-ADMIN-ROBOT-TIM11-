@@ -11,7 +11,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Date, and_, cast, func, literal_column, select
 from sqlalchemy.orm import Session
 
-from app.models import AuditLog, Client, DocStatus, Document, Extraction, ValidationIssue, Voucher
+from app.config import settings
+from app.models import (
+    ITEMIZED, TOTAL_ONLY, AuditLog, Client, DocStatus, Document, DocumentFile, Extraction, ValidationIssue, Voucher,
+)
 
 WIB = ZoneInfo("Asia/Jakarta")
 DONE = (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED)
@@ -148,3 +151,33 @@ def compute(db: Session, client_ids: set[uuid.UUID], days: int, today: date | No
         total_value=value(v_in), total_value_prev=value(v_prev),
         value_by_client=by_client, top_vendors=top_vendors,
     )
+
+
+def ai_usage(db: Session, days: int, today: date | None = None) -> dict:
+    """Estimasi biaya AI pembaca invoice per mode (TOTAL_ONLY vs ITEMIZED) untuk dokumen yang masuk dalam periode.
+    Hanya dokumen yang token AI-nya tercatat (sejak Tahap 14); biaya = token x harga di pengaturan."""
+    today = today or datetime.now(WIB).date()
+    start_ts = datetime.combine(today - timedelta(days=days - 1), datetime.min.time(), WIB)
+    end_ts = datetime.combine(today + timedelta(days=1), datetime.min.time(), WIB)
+    files = (select(DocumentFile.document_id, func.count().label("n")).group_by(DocumentFile.document_id).subquery())
+    rows = db.execute(
+        select(Document.extraction_mode, func.count(), func.coalesce(func.sum(files.c.n), 0),
+               func.coalesce(func.sum(Extraction.ai_input_tokens), 0), func.coalesce(func.sum(Extraction.ai_output_tokens), 0))
+        .join(Extraction, Extraction.document_id == Document.id)
+        .outerjoin(files, files.c.document_id == Document.id)
+        .where(Document.created_at >= start_ts, Document.created_at < end_ts,
+               (Extraction.ai_input_tokens > 0) | (Extraction.ai_output_tokens > 0))
+        .group_by(Document.extraction_mode)).all()
+    price_in, price_out = settings.ai_price_input_per_1k_usd, settings.ai_price_output_per_1k_usd
+    modes = {}
+    for mode in (TOTAL_ONLY, ITEMIZED):
+        docs, invoices, tokens_in, tokens_out = next(((d, n, i, o) for m, d, n, i, o in rows if m == mode), (0, 0, 0, 0))
+        usd = tokens_in / 1000 * price_in + tokens_out / 1000 * price_out
+        modes[mode] = {"documents": docs, "invoices": int(invoices) or docs, "input_tokens": int(tokens_in),
+                       "output_tokens": int(tokens_out), "cost_usd": round(usd, 4),
+                       "cost_idr": round(usd * settings.usd_to_idr),
+                       "per_invoice_idr": round(usd * settings.usd_to_idr / (int(invoices) or docs)) if docs else None}
+    total_usd = sum(m["cost_usd"] for m in modes.values())
+    return {"period_days": days, "modes": modes, "total_usd": round(total_usd, 4),
+            "total_idr": round(total_usd * settings.usd_to_idr),
+            "price_input_per_1k_usd": price_in, "price_output_per_1k_usd": price_out, "usd_to_idr": settings.usd_to_idr}

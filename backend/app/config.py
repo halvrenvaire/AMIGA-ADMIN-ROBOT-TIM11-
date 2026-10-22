@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # dan timesheet. AI hanya membaca N halaman pertama (data invoice dan Faktur Pajak); semua halaman tetap
     # dilampirkan di voucher. Juga menjaga batas ukuran dokumen Amazon Bedrock (±4,5 MB).
     ai_max_pages: int = 5
+    # Estimasi biaya AI di Dasbor (System Admin & Service Lead): harga per 1.000 token model pembaca invoice (USD)
+    # dan kurs. Bawaan = harga publik Amazon Nova Lite; sesuaikan dengan tagihan AWS sebenarnya.
+    ai_price_input_per_1k_usd: float = 0.00006
+    ai_price_output_per_1k_usd: float = 0.00024
+    usd_to_idr: float = 16500
     max_upload_mb: int = 10  # per file
     max_upload_files: int = 10  # file invoice per voucher
     max_reimburse_files: int = 20  # bukti per Voucher Pengeluaran Reimburse (bon tol, parkir, dll.)

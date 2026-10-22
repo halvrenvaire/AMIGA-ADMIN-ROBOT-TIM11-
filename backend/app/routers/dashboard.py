@@ -51,6 +51,15 @@ def dashboard_metrics(
                             trend=[TrendPoint(**t) for t in m.trend])
 
 
+@router.get("/dashboard/ai-usage")
+def dashboard_ai_usage(days: int = Query(30, ge=7, le=365, description="Panjang periode (hari)"),
+                       user: User = Depends(require_roles(Role.SERVICE_LEAD, Role.SYSTEM_ADMIN)),
+                       db: Session = Depends(get_db)) -> dict:
+    """Estimasi biaya AI pembaca invoice per mode baca (total saja vs rincian), khusus System Admin dan Service Lead.
+    Dihitung dari token yang tercatat per pengajuan dan harga per 1.000 token di pengaturan server."""
+    return metrics_service.ai_usage(db, days)
+
+
 @router.get("/documents/{document_id}/reviewer-options", response_model=list[ReviewerLoadOut])
 def reviewer_options(document_id: uuid.UUID, user: User = Depends(require_roles(Role.SERVICE_LEAD)),
                      db: Session = Depends(get_db)):

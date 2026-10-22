@@ -30,7 +30,8 @@ _Terakhir diperbarui: 22 Okt 2026_
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
 | 12 | Berkas invoice banyak halaman (invoice + Faktur Pajak + timesheet) | Kecil | 2/2 | ✅ |
-| 13 | Feedback uji coba 21 Okt: rekening opsional, alur simpan lebih jelas, tampilan HP | Sedang | 4/4 | ✅ |
+| 13 | Feedback uji coba 21–22 Okt: rekening opsional, alur simpan jelas, tampilan HP, full fit layar lebar & hide sidebar desktop | Sedang | 6/6 | ✅ |
+| 14 | Mode AI total saja/rincian, rekening jadi fitur tambahan, pajak otomatis/manual, profil & tanda tangan pengaju, pratinjau voucher, estimasi biaya AI | Besar | 10/10 | ✅ (belum di-commit) |
 
 ---
 
@@ -43,7 +44,7 @@ _Terakhir diperbarui: 22 Okt 2026_
 | T1.3 | "Jenis permintaan" menjadi kategori (Vendor / Reimburse / Lainnya), divalidasi server, data lama dimigrasi | #10 | [x] | `2644eb8` |
 | T1.4 | Daftar kategori **bisa ditambah admin** (sekarang masih tetap di kode: `REQUEST_CATEGORIES`) | #10 | [ ] | — |
 | T1.5 | Kategori jadi filter di Dashboard Antrean, Voucher, dan Pengajuan Saya; tidak dicetak di PDF | #10 | [x] | `2644eb8` |
-| T1.6 | Rekening tujuan tidak dicetak di voucher; cek rekening palsu tetap jalan di sistem | #6 | [x] | `2644eb8` |
+| T1.6 | Rekening tujuan tidak dicetak di voucher; cek rekening palsu tetap jalan di sistem (bagian rekening **diganti oleh T14.3**: rekening dicetak bila fitur rekening diaktifkan) | #6 | [x] | `2644eb8` |
 | T1.7 | Nama "Diajukan oleh" diketik bebas (default nama PIC); spesimen PIC tidak dicetak bila nama lain | #8 | [x] | `2644eb8` |
 | T1.8 | Telegram: pilihan perusahaan juga muncul saat kirim foto; kategori lewat tombol | #5 | [x] | `2644eb8` |
 
@@ -55,7 +56,7 @@ _Terakhir diperbarui: 22 Okt 2026_
 | T2.2 | Beberapa bon digabung satu halaman (reimburse 4 per halaman, lainnya 1 per halaman) | #7 | [x] | `18cfe86` |
 | T2.3 | Reimburse sampai 20 bukti; kategori lain tetap maks. 10 | #11 | [x] | `18cfe86` |
 | T2.4 | Reimburse: struk/nota sah, boleh banyak vendor (aturan satu vendor/rekening tidak berlaku) | #11 | [x] | `18cfe86` |
-| T2.5 | Reimburse: wajib hanya tanggal dan total; rekening vendor tidak dicek (dibayar ke karyawan) | #11 | [x] | `18cfe86` |
+| T2.5 | Reimburse: wajib hanya tanggal dan total; rekening vendor tidak dicek (dibayar ke karyawan) (bagian rekening **diganti oleh T14.3**: rekening hanya diisi bila fitur rekening aktif) | #11 | [x] | `18cfe86` |
 | T2.6 | Test reimburse (lampiran, batas, aturan) | — | [x] | `18cfe86` |
 
 ## Tahap 3 — Alur draf (spesifikasi 2.C)
@@ -140,8 +141,8 @@ _Terakhir diperbarui: 22 Okt 2026_
 | T10.1 | Mode isi manual: `AI_EXTRACTION_ENABLED=false` di `.env`, atau AI gagal membaca (mis. kredensial), membuat bukti menjadi draf kosong dengan pesan "Isi data invoice secara manual", bukan dokumen "Ada kendala". Bukti lain yang terbaca AI tetap dipakai; saran pajak dari aturan tetap ada; tombol "Coba baca ulang dengan AI" hanya membaca ulang bukti yang gagal. File yang hilang di penyimpanan tetap `EXTRACTION_FAILED` | [x] | `707aef1` |
 | T10.2 | Subtotal otomatis = qty × harga satuan (2 desimal, tanda "otomatis") bila keduanya terisi; selain itu subtotal diisi manual (borongan). Juga dihitung ulang di backend saat disimpan. Tombol "Samakan total dengan jumlah rincian" | [x] | `707aef1` |
 | T10.3 | Beberapa vendor/rekening dalam satu voucher (`VENDOR_MISMATCH`) menjadi peringatan: dokumen tetap Draf, PIC mengonfirmasi dengan alasan (`POST /documents/{id}/acknowledge`, tercatat di riwayat, tidak dicetak di voucher). Konfirmasi gugur bila daftar vendor/rekening berubah | [x] | `707aef1` |
-| T10.4 | Rekening dicek per invoice: setiap rekening dicocokkan dengan vendornya masing-masing (`ACCOUNT_MISMATCH` tetap menghalangi). Reviewer melihat "Pembayaran per rekening" (vendor, rekening, nilai dibayarkan, status), dan konfirmasi rekening saat menyetujui mencakup semua rekening yang belum terverifikasi | [x] | `707aef1` |
-| T10.5 | Pintasan rekening vendor dari layar dokumen: PIC "Daftarkan rekening vendor" / "Perbarui rekening vendor" (diisi dari invoice; hanya pencatatan, pengajuan tetap berjalan), Finance Reviewer "Verifikasi rekening vendor ini" (SoD tetap berlaku). Formulir vendor dipindah ke `components/VendorForm.tsx`; `GET /vendors/{id}` ditambahkan | [x] | `707aef1` |
+| T10.4 | Rekening dicek per invoice: setiap rekening dicocokkan dengan vendornya masing-masing (`ACCOUNT_MISMATCH` tetap menghalangi; **diganti oleh T14.3**: kini hanya pengingat). Reviewer melihat "Pembayaran per rekening" (vendor, rekening, nilai dibayarkan, status), dan konfirmasi rekening saat menyetujui mencakup semua rekening yang belum terverifikasi | [x] | `707aef1` |
+| T10.5 | (**Diganti oleh T14.3**: pintasan hanya tampil bila fitur rekening aktif) Pintasan rekening vendor dari layar dokumen: PIC "Daftarkan rekening vendor" / "Perbarui rekening vendor" (diisi dari invoice; hanya pencatatan, pengajuan tetap berjalan), Finance Reviewer "Verifikasi rekening vendor ini" (SoD tetap berlaku). Formulir vendor dipindah ke `components/VendorForm.tsx`; `GET /vendors/{id}` ditambahkan | [x] | `707aef1` |
 | T10.6 | Test: `test_documents.py` (isi manual, AI dimatikan, error tak terduga, file hilang), `test_multi_invoice.py` (konfirmasi PIC, konfirmasi gugur, rekening per invoice, daftar & verifikasi vendor), `test_review.py` (subtotal otomatis) | [x] | `707aef1` |
 
 ## Tahap 11 — Format voucher sesuai contoh owner (20 Okt 2026)
@@ -160,7 +161,7 @@ Sumber: contoh voucher owner `samples/test_case_amiga/1702_…DSS Management Fee
 | T11.1 | Kop data voucher: Nomor, Nama (pengaju), **Peruntukan** (kolom baru diisi PIC, mis. "Pembayaran DSS Management Fee … Maret 2026"), Tanggal/Periode, Nominal (total dibayarkan) | [ ] | — |
 | T11.2 | Format nomor voucher `{urut}-{MM}-{YYYY}` (mis. 1702-04-2026); nomor urut tidak reset per bulan (1702 di April, 1944 di Oktober) | ❓ | — |
 | T11.3 | Kolom tabel NO · TANGGAL · KETERANGAN · JUMLAH · HARGA; tanggal = tanggal voucher | [ ] | — |
-| T11.4 | Satu baris per invoice (keterangan ringkas yang bisa diedit PIC, nilai = total invoice termasuk PPN), bukan per barang | ❓ | — |
+| T11.4 | Satu baris per invoice (keterangan ringkas yang bisa diedit PIC, nilai = total invoice termasuk PPN), bukan per barang — **diganti oleh T14.1/T14.5** (mode "Total saja") | [x] | belum di-commit |
 | T11.5 | Teks potongan `Potongan PPh 23 ( Rp DPP x 2% ) <keterangan>`, nilai negatif `-Rp…`; baris akhir `TOTAL` | [ ] | — |
 | T11.6 | Kotak tanda tangan ketiga **Diketahui oleh** (nama + jabatan, didaftarkan PIC seperti penanda tangan lain) | [ ] | — |
 | T11.7 | Gross-up PPh 21: contoh 1944 fee Rp 3.076.923 dipotong 2,5% agar bersih tepat Rp 3.000.000 | ❓ | — |
@@ -191,10 +192,31 @@ harus menekan apa.
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku) | [x] | `d89897d` |
+| T13.1 | Rekening tujuan (bank, nomor, nama penerima) **tidak wajib**: tidak lagi `MISSING_EVIDENCE`, navigasi menandainya "opsional". Bila diisi, tetap dicocokkan dengan rekening vendor terverifikasi (`ACCOUNT_MISMATCH` tetap berlaku; **diganti oleh T14.3**: rekening jadi fitur tambahan, perbedaan hanya pengingat) | [x] | `d89897d` |
 | T13.2 | Tombol **Simpan bukti** menjadi tombol utama dan muncul "Ada perubahan yang belum disimpan" setiap ada isian yang belum disimpan | [x] | `d89897d` |
 | T13.3 | Tampilan HP (≤ 860 px): menu samping jadi laci (tombol ☰), topbar ringkas, tombol Asisten bulat, tabel bisa digeser ke samping, rincian barang tetap terbaca, tombol keputusan dua kolom, simulasi voucher layar penuh | [x] | `0353ad4` |
 | T13.4 | Di HP, kotak **pencarian** (Request ID / vendor) ada di dalam laci menu ☰; laci tertutup otomatis setelah mencari | [x] | `27043ad` |
+| T13.5 | Dashboard & semua layar **full fit**: batas `max-width: 1440px` pada kontainer `.content` dicabut sehingga seluruh kartu metrik, grafik tren harian, tabel data, form, dan split-screen memanfaatkan 100% lebar layar kanan tanpa sisa space kosong | [x] | — |
+| T13.6 | Sidebar desktop bisa di-**minimize** (bukan menutup total): mengecil ke mode ikon (68 px) dengan animasi halus (cubic-bezier), teks keterangan menu muncul sebagai floating tooltip berpanah saat di-hover; tombol toggle panah (`ChevronLeft` / `ChevronRight`) terletak di kanan atas header sidebar (sejajar logo); preferensi tersimpan di `localStorage` (`amiga_side_collapsed`); drawer HP tetap terjaga | [x] | — |
+
+## Tahap 14 — Mode AI, rekening opsional, profil pengaju (feedback owner 22 Okt 2026)
+
+Sumber: permintaan owner 22 Okt 2026 beserta jawaban open question (rekening sebagai fitur tambahan, vendor berbeda hanya
+pengingat, pajak boleh dihitung manual, profil pengaju diingat per PIC). Data lama tetap aman: pengajuan lama otomatis
+mode "Rincian" tanpa fitur rekening, data rekeningnya tetap tersimpan, dan salinan penanda tangan lama tetap tercetak.
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T14.1 | Dua mode baca AI per pengajuan (`extraction_mode`): **Total saja** (bawaan; prompt ringkas: jenis dokumen, vendor, nomor, tanggal, total; 1 baris voucher per invoice) dan **Rincian barang/jasa** (1 baris per item). Pilihan di halaman Pembuatan Voucher; migrasi `a6e3c9d2f415` | [x] | belum di-commit |
+| T14.2 | Mode bisa diganti di halaman detail: Total → Rincian membaca ulang rincian dengan AI (data utama, uraian, pajak tetap); Rincian → Total menyembunyikan rincian, total tetap | [x] | belum di-commit |
+| T14.3 | Rekening tujuan jadi **fitur tambahan** (toggle "Perlu input rekening tujuan ke voucher", bawaan mati): bila aktif, rekening dibaca AI, diisi, dicek ke data vendor, dan dicetak di voucher. `VENDOR_MISMATCH` dan `ACCOUNT_MISMATCH` jadi **pengingat** yang tidak menahan pengajuan maupun persetujuan; rekening berbeda/belum terverifikasi tetap perlu konfirmasi reviewer saat menyetujui | [x] | belum di-commit |
+| T14.4 | Pajak mode Total saja: DPP otomatis dari total sesuai perlakuan PPN (terpisah/termasuk/tanpa + tarif), tetap bisa diubah; PPh di level dokumen. Opsi **"Hitung pajak otomatis"** (bawaan aktif); bila dimatikan, DPP, PPN, dan potongan PPh diisi manual | [x] | belum di-commit |
+| T14.5 | Uraian per invoice (bawaan "Invoice {nomor} - {vendor}", bisa diedit) dicetak sebagai satu baris voucher; wajib terisi sebelum diajukan | [x] | belum di-commit |
+| T14.6 | Profil **Diajukan oleh**: nama, jabatan, perusahaan/unit, tanda tangan (PNG/JPG/WEBP, maks. 2 MB). Disimpan per pengajuan dan diingat sebagai isian awal PIC; bisa diubah di halaman detail; dicetak di simulasi dan voucher final. Unggahan Telegram memakai mode Total saja dan profil tersimpan | [x] | belum di-commit |
+| T14.7 | Halaman 1 disusun ulang: Klien → Kategori → Tanggal → Diajukan oleh → Disetujui oleh → Mode AI → Fitur tambahan (saluran & tenggat, rekening) → File bukti, lalu **Simpan draf & lanjutkan** langsung ke halaman detail. Saluran & tenggat jadi opsional | [x] | belum di-commit |
+| T14.8 | Halaman 2: mode Total saja menampilkan formulir ringkas (data utama, uraian, total, pajak dokumen) tanpa tabel rincian; **pratinjau voucher** langsung di halaman (di HP lewat tombol buka di tab baru); tombol "Kirim ke reviewer" menjadi **Ajukan untuk Direview** (aktif setelah uraian dan pajak terisi) | [x] | belum di-commit |
+| T14.9 | **Estimasi biaya AI** per mode (token tercatat per pengajuan × harga di pengaturan) di Dashboard Service Lead dan halaman Pengguna System Admin; `GET /dashboard/ai-usage` | [x] | belum di-commit |
+| T14.10 | Cek ulang tampilan HP (390 px) untuk halaman unggah, detail, pajak, dan kartu biaya AI: tidak ada geser ke samping; test backend `tests/test_total_only.py` + test lama disesuaikan; Cypress disesuaikan dengan alur baru (belum dijalankan ulang) | [x] | belum di-commit |
 
 ---
 
@@ -214,3 +236,5 @@ harus menekan apa.
 | 21 Okt 2026 | Tahap 13 ditambahkan dan selesai (T13.1–T13.2): rekening opsional, tombol Simpan lebih jelas; `docs/sop.md` ikut diperbarui |
 | 21 Okt 2026 | T13.3 ditambahkan dan selesai: dashboard nyaman dipakai di HP |
 | 22 Okt 2026 | T13.4 ditambahkan dan selesai: pencarian tersedia di laci menu HP |
+| 22 Okt 2026 | Tahap 14 ditambahkan dan selesai (T14.1–T14.10, belum di-commit); T1.6, T2.5 (bagian rekening), T10.4, T10.5, T11.4, T13.1 ditandai diganti oleh T14.x |
+| 22 Okt 2026 | T13.5–T13.6 ditambahkan dan selesai: tampilan dashboard full fit ke kanan (hapus max-width 1440px) dan fitur minimizing sidebar desktop (ikon di header sidebar, transisi halus, mode mini 68px dengan hover tooltip berpanah) serta persistensi localStorage |

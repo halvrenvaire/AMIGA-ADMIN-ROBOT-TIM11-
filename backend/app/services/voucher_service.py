@@ -161,7 +161,16 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
         total.cell(_money(paid))
     pdf.ln(12)
 
-    # Rekening tujuan tidak dicetak (feedback owner): pengecekan rekening tetap berjalan di sistem
+    # Rekening tujuan hanya dicetak bila fitur rekening diaktifkan PIC untuk pengajuan ini (Tahap 14)
+    accounts = payee_accounts(doc) if getattr(doc, "include_account", False) else []
+    if accounts:
+        pdf.set_font("Helvetica", "B", 9.5)
+        pdf.cell(0, 5.5, "Rekening tujuan", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+        for bank, number, name in accounts:
+            text = " ".join(x for x in (bank, number) if x) + (f" a.n. {name}" if name else "")
+            pdf.multi_cell(0, 5, _t(text), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
     pdf.ln(2)
 
     # Catatan tanda tangan elektronik dan kotak batas otorisasi tidak dicetak (feedback owner 19 Okt 2026);
@@ -170,6 +179,22 @@ def render_voucher(doc: Document, voucher_no: str, approver: User, approved_at: 
     if simulation:
         _simulation_mark(pdf)
     return bytes(pdf.output())
+
+
+def payee_accounts(doc) -> list[tuple[str | None, str | None, str | None]]:
+    """Rekening tujuan unik di voucher (bank, nomor, atas nama), urut sesuai bukti."""
+    from app.services.document_processing import file_data  # hindari import melingkar
+
+    files = getattr(doc, "files", None) or []
+    rows = [file_data(doc, f) for f in files] if files else [vars(doc.extraction)] if doc.extraction else []
+    seen, out = set(), []
+    for data in rows:
+        number = (data.get("account_no") or "").strip()
+        if not number or number in seen:
+            continue
+        seen.add(number)
+        out.append((data.get("bank_name"), number, data.get("account_name")))
+    return out
 
 
 def _dec(value) -> Decimal | None:
@@ -245,8 +270,16 @@ def voucher_rows(doc) -> tuple[list[tuple[str, Decimal, bool]], Decimal]:
             for g in cuts_after.get(index, []):
                 what = tax_service.line_names(data, g["lines"])
                 rows.append((_cut_text(tax, g["name"], g["rate"], g["base"], what), _dec(g["amount"]), True))
-        if not items and total is not None:  # invoice tanpa rincian: satu baris total
-            rows.append((f"{tag}Invoice {data.get('invoice_no') or ''}".strip(), total, False))
+        if not items and total is not None:
+            # Invoice tanpa rincian / mode total saja: satu baris per invoice berisi uraian transaksinya
+            from app.services.document_processing import default_description  # hindari import melingkar
+            text = (data.get("description") or "").strip() or default_description(data) or "Invoice"
+            # Uraian sudah menyebut nomor invoice, jadi tanpa awalan [nomor]
+            if vat["show"] and vat_amount:
+                rows.append((text, total - vat_amount, False))
+                rows.append((f"{tag}PPN {_qty(Decimal(vat['rate']))}%", vat_amount, False))
+            else:
+                rows.append((text + (" (termasuk PPN)" if vat_amount else ""), total, False))
         if vat["show"] and items:
             vat_total = sum(shares, Decimal(0))
             if vat_total:
@@ -270,9 +303,13 @@ def _sign_boxes(doc: Document) -> list[tuple[str, str, list[str], bool]]:
     pengaju = [s for s in signers if s["kind"] == "PENGAJU"]
     penyetuju = [s for s in signers if s["kind"] == "PENYETUJU"]
     client_lines = lambda s: [_t(s["name"]), _t(s["position"]), f"Tanggal: {BLANK[:30]}"]  # noqa: E731
+    # Profil pengaju (Tahap 14): nama, jabatan, perusahaan/unit; baris kosong dilewati
+    profile_lines = lambda s: [_t(x) for x in (s["name"], s.get("position"), s.get("company")) if x] + [  # noqa: E731
+        f"Tanggal: {BLANK[:30]}"]
     # Diajukan oleh = perusahaan klien; nama penanda tangan ditulis tangan
     company_lines = lambda s: [_t(s["name"]), f"Nama: {BLANK[:26]}", f"Tanggal: {BLANK[:24]}"]  # noqa: E731
-    boxes = [("Diajukan oleh", "Tanda tangan & cap perusahaan" if p["position"] == COMPANY_POSITION else "Tanda tangan",
+    boxes = [("Diajukan oleh", "Tanda tangan", profile_lines(p), False) if "company" in p else
+             ("Diajukan oleh", "Tanda tangan & cap perusahaan" if p["position"] == COMPANY_POSITION else "Tanda tangan",
               (company_lines if p["position"] == COMPANY_POSITION else client_lines)(p), False) for p in pengaju] or [
         ("Diajukan oleh", "Tanda tangan", [f"Nama: {BLANK[:26]}", "Jabatan: PIC Klien", f"Tanggal: {BLANK[:24]}"], False)]
     boxes += [("Disetujui oleh", "Tanda tangan", client_lines(p), False) for p in penyetuju] or [
@@ -295,13 +332,17 @@ def _signature_blocks(pdf: FPDF, doc: Document, signatures: list[bytes | None], 
     Mengembalikan jumlah kotak yang ditandatangani secara elektronik."""
     boxes = _sign_boxes(doc)
     images = _box_images(doc, signatures)
+    pengaju_boxes = sum(1 for s in getattr(doc, "signers", None) or [] if s["kind"] == "PENGAJU") or 1
+    submitted = getattr(doc, "submitted_date", None)
+    # Tinggi kotak mengikuti jumlah baris keterangan terbanyak (profil pengaju bisa 4 baris)
+    block_h = max(SIGN_BLOCK_H, 31 + 4.6 * max(len(b[2]) for b in boxes))
     signed = 0
     # 2 atau 4 kotak → 2 per baris; selain itu maks. 3 per baris
     per_row = 2 if len(boxes) in (2, 4) else min(SIGN_MAX_PER_ROW, len(boxes))
     gap = 8
     width = (pdf.epw - gap * (per_row - 1)) / per_row
     for row_start in range(0, len(boxes), per_row):
-        if pdf.will_page_break(SIGN_BLOCK_H + 4):
+        if pdf.will_page_break(block_h + 4):
             pdf.add_page()
         top = pdf.get_y()
         for i, (title, hint, lines, optional) in enumerate(boxes[row_start:row_start + per_row]):
@@ -310,12 +351,16 @@ def _signature_blocks(pdf: FPDF, doc: Document, signatures: list[bytes | None], 
             if image:
                 signed += 1
                 hint = "Tanda tangan elektronik"
-                lines = lines[:-1] + [f"Ditandatangani: {signed_at.strftime('%d-%m-%Y %H:%M')} WIB"]
+                if row_start + i < pengaju_boxes and submitted:
+                    # Pengaju menandatangani saat mengajukan, bukan saat voucher disetujui
+                    lines = lines[:-1] + [f"Tanggal: {submitted.strftime('%d-%m-%Y')}"]
+                else:
+                    lines = lines[:-1] + [f"Ditandatangani: {signed_at.strftime('%d-%m-%Y %H:%M')} WIB"]
             pdf.set_line_width(0.3)
             pdf.set_draw_color(150, 160, 165)
             if optional:
                 pdf.set_dash_pattern(dash=1.2, gap=1)
-            pdf.rect(x, top, width, SIGN_BLOCK_H)
+            pdf.rect(x, top, width, block_h)
             pdf.set_dash_pattern()
 
             pdf.set_xy(x + 3, top + 2.5)
@@ -340,7 +385,7 @@ def _signature_blocks(pdf: FPDF, doc: Document, signatures: list[bytes | None], 
                 pdf.set_font("Helvetica", "B" if n == 0 and not text.startswith("Nama:") else "", 7.5)
                 pdf.set_x(x + 3)
                 pdf.cell(width - 6, 4.6, text[:48], new_x="LMARGIN", new_y="NEXT")
-        pdf.set_y(top + SIGN_BLOCK_H + 4)
+        pdf.set_y(top + block_h + 4)
     pdf.set_draw_color(*TEAL)
     return signed
 
@@ -350,7 +395,7 @@ def create_voucher(db: Session, doc: Document, approver: User) -> Voucher:
     voucher_no = next_voucher_no(db, now)
     file_key = f"vouchers/{voucher_no.replace('/', '-')}.pdf"
     signers = getattr(doc, "signers", None) or []
-    signatures = signature_service.for_signers(db, signers)
+    signatures = signature_service.for_signers(db, signers, doc)
     pdf = render_voucher(doc, voucher_no, approver, now, signatures)
     storage.save(file_key, voucher_attachments.append_attachments(pdf, doc, voucher_no))
     names = [s["name"] for s, img in zip(signers, signatures) if img]

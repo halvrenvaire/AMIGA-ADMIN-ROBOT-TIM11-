@@ -3,7 +3,8 @@
 Rekening yang terbaca AI atau diisi PIC tidak dianggap benar dengan sendirinya. Acuannya adalah data
 vendor di Data Referensi yang sudah DIVERIFIKASI Finance Reviewer (bukan oleh pendaftarnya):
 - VERIFIED   : rekening sama dengan rekening vendor terverifikasi;
-- MISMATCH   : vendor terverifikasi tetapi rekeningnya berbeda → kendala ACCOUNT_MISMATCH, voucher tertahan;
+- MISMATCH   : vendor terverifikasi tetapi rekeningnya berbeda → peringatan ACCOUNT_MISMATCH; reviewer wajib
+               mengonfirmasi pengecekan saat menyetujui (Tahap 14: tidak lagi menahan draf);
 - UNVERIFIED : vendor belum terdaftar/terverifikasi → reviewer wajib mengonfirmasi pengecekan saat menyetujui;
 - MISSING    : rekening tidak diisi (opsional, tidak menghalangi apa pun).
 """
@@ -20,6 +21,8 @@ from app.services.verification import normalize
 VERIFIED, MISMATCH, UNVERIFIED, MISSING = "VERIFIED", "MISMATCH", "UNVERIFIED", "MISSING"
 # Reimburse dibayarkan ke karyawan, bukan ke vendor di bon: rekening vendor tidak dicek
 NOT_APPLICABLE = "NOT_APPLICABLE"
+# Fitur rekening dimatikan untuk pengajuan ini (bawaan, Tahap 14): rekening tidak diisi, dicek, maupun dicetak
+OFF = "OFF"
 
 
 def digits(value: str | None) -> str:
@@ -40,7 +43,7 @@ def check_payee(db, vendor: Vendor | None, account_no: str | None, source: str) 
     account = digits(account_no)
     by_pic = " Nomor rekening ini diisi PIC, bukan dibaca dari dokumen." if source == "PIC" else ""
     if not account:
-        return AccountCheck(MISSING, "Rekening tidak diisi (opsional; tidak dicetak di voucher).", source)
+        return AccountCheck(MISSING, "Rekening tidak diisi.", source)
     if vendor is None:
         return AccountCheck(UNVERIFIED, "Vendor belum terdaftar di Data Referensi, jadi rekening belum bisa dicocokkan "
                                         "dengan sumber tepercaya." + by_pic, source)
@@ -85,7 +88,7 @@ def _vendor(db, client_id, name: str | None) -> Vendor | None:
 def payee_checks(db, doc: Document) -> list[PayeeCheck]:
     """Rekening per invoice (feedback owner: satu voucher boleh berisi beberapa vendor/rekening setelah PIC
     mengonfirmasi). Invoice dengan vendor dan rekening sama digabung menjadi satu baris."""
-    if doc.request_type == CATEGORY_REIMBURSE or doc.extraction is None:
+    if doc.request_type == CATEGORY_REIMBURSE or doc.extraction is None or not getattr(doc, "include_account", True):
         return []
     from app.services.document_processing import file_data  # hindari import melingkar
 
@@ -121,9 +124,11 @@ def check_account(db, doc: Document) -> AccountCheck:
     """Ringkasan pemeriksaan semua rekening tujuan voucher (satu rekening: hasil cek rekening itu)."""
     if doc.request_type == CATEGORY_REIMBURSE:
         return AccountCheck(NOT_APPLICABLE, "Reimburse dibayarkan ke karyawan; rekening vendor tidak dicek.", "AI")
+    if not getattr(doc, "include_account", True):
+        return AccountCheck(OFF, "Rekening tujuan tidak dicantumkan di voucher pengajuan ini.", "AI")
     payees = payee_checks(db, doc)
     if not payees:
-        return AccountCheck(MISSING, "Rekening tidak diisi (opsional; tidak dicetak di voucher).", "AI")
+        return AccountCheck(MISSING, "Rekening tidak diisi.", "AI")
     if len(payees) == 1:
         return payees[0].check
     source = "PIC" if any(p.check.source == "PIC" for p in payees) else "AI"
@@ -132,7 +137,7 @@ def check_account(db, doc: Document) -> AccountCheck:
     if bad:
         return AccountCheck(MISMATCH, " ".join(f"{label(p)}: {p.check.message}" for p in bad), source)
     if all(p.check.state == MISSING for p in payees):
-        return AccountCheck(MISSING, "Rekening tidak diisi (opsional; tidak dicetak di voucher).", source)
+        return AccountCheck(MISSING, "Rekening tidak diisi.", source)
     unverified = [p for p in payees if p.check.state == UNVERIFIED]
     if unverified:
         return AccountCheck(UNVERIFIED, f"{len(unverified)} dari {len(payees)} rekening tujuan belum terverifikasi: "

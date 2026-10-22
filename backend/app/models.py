@@ -87,6 +87,9 @@ class User(Base):
     # Spesimen tanda tangan elektronik PIC Klien (PNG transparan) untuk kotak "Diajukan oleh"
     signature_png: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
     signature_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Profil "Diajukan oleh" terakhir yang dipakai (isian awal pengajuan berikutnya):
+    # {"name", "position", "companies": {client_id: nama perusahaan/unit}}
+    submitter_profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
 
     assignments: Mapped[list["UserClientAssignment"]] = relationship(
         back_populates="user", foreign_keys="UserClientAssignment.user_id"
@@ -205,6 +208,12 @@ class TaxRate(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# Mode pembacaan AI per pengajuan (Tahap 14): TOTAL_ONLY = hanya total per invoice (1 baris voucher per invoice);
+# ITEMIZED = rincian barang/jasa (1 baris voucher per item). Dokumen lama = ITEMIZED.
+TOTAL_ONLY, ITEMIZED = "TOTAL_ONLY", "ITEMIZED"
+EXTRACTION_MODES = (TOTAL_ONLY, ITEMIZED)
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -226,6 +235,11 @@ class Document(Base):
     signers: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     submitted_date: Mapped[date | None] = mapped_column(Date)
     due_date: Mapped[date | None] = mapped_column(Date)
+    extraction_mode: Mapped[str] = mapped_column(String(20), default=ITEMIZED, server_default=ITEMIZED)
+    # Fitur tambahan: rekening tujuan diisi, dicek ke data vendor, dan dicetak di voucher. Bawaan mati.
+    include_account: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Spesimen tanda tangan "Diajukan oleh" yang diunggah/dipilih saat pengajuan (salinan, bukan rujukan)
+    submitter_signature_png: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
     status: Mapped[DocStatus] = mapped_column(Enum(DocStatus, name="doc_status"), index=True)
     assigned_reviewer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     file_key: Mapped[str] = mapped_column(String(500))
@@ -290,6 +304,9 @@ class Extraction(Base):
     raw_json: Mapped[dict | None] = mapped_column(JSONB)
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
+    # Token AI yang terpakai untuk membaca pengajuan ini (akumulasi termasuk baca ulang), untuk estimasi biaya
+    ai_input_tokens: Mapped[int | None] = mapped_column(Integer)
+    ai_output_tokens: Mapped[int | None] = mapped_column(Integer)
 
     document: Mapped[Document] = relationship(back_populates="extraction")
     line_items: Mapped[list["LineItem"]] = relationship(

@@ -13,12 +13,13 @@ from tests.test_review import NAMES, audit, edit_file
 PIC = "pic.alpha@amiga.test"
 
 
-def upload_many(pdfs, **form):
+def upload_many(pdfs, submit=True, **form):
     data = {"client_id": client_id("PT Klien Alpha"), "request_type": "Voucher Pengeluaran Vendor", "channel": "Email",
-            "submitted_date": "2026-10-15", **form}
+            "submitted_date": "2026-10-15", "extraction_mode": "ITEMIZED", "include_account": "true", **form}
     files = [("files", (f"inv{i}.pdf", pdf, "application/pdf")) for i, pdf in enumerate(pdfs, start=1)]
     r = api(PIC).post("/documents", data=data, files=files)
-    submit_draft(r)
+    if submit:
+        submit_draft(r)
     return r
 
 
@@ -59,13 +60,12 @@ def test_bad_file_in_batch_is_named(extractor):
     assert r.json()["detail"].startswith("inv2.pdf: ") and "rusak" in r.json()["detail"]
 
 
-def test_different_vendor_is_a_warning_the_pic_confirms(extractor):
+def test_different_vendor_is_a_soft_warning(extractor):
     extractor.result = [invoice(), second_invoice(vendor_name="CV Lain Sendiri", account_no="999")]
-    doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
-    # Peringatan, bukan kendala: tetap Draf, tetapi belum bisa dikirim sebelum dikonfirmasi PIC
+    doc = detail(upload_many([make_pdf(), make_pdf()], submit=False).json()["id"])
+    # Tahap 14: hanya pengingat; tetap Draf dan konfirmasi PIC tidak wajib (tetap bisa dicatat beserta alasan)
     assert doc["status"] == "DRAFT"
     assert ("VENDOR_MISMATCH", "vendor_name") in codes(doc)
-    assert api(PIC).post(f"/documents/{doc['id']}/submit").status_code == 409
 
     ack = lambda reason, code="VENDOR_MISMATCH", email=PIC: api(email).post(  # noqa: E731
         f"/documents/{doc['id']}/acknowledge", json={"code": code, "reason": reason})
@@ -92,9 +92,18 @@ def test_different_vendor_is_a_warning_the_pic_confirms(extractor):
     assert audit(doc["id"], "WARNING_ACKNOWLEDGED")[-1].note == "Dua vendor dalam satu proyek renovasi"
 
 
+def test_unconfirmed_vendor_warning_does_not_block_submit_or_approve(extractor):
+    extractor.result = [invoice(), second_invoice(vendor_name="CV Lain Sendiri", account_no="999")]
+    doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
+    assert doc["status"] == "READY_FOR_REVIEW" and ("VENDOR_MISMATCH", "vendor_name") in codes(doc)
+    reviewer = api(NAMES[doc["assigned_reviewer"]])
+    r = reviewer.post(f"/documents/{doc['id']}/approve", json={"account_confirmed": True})
+    assert r.status_code == 200 and r.json()["status"] == "AMIGA_REVIEWED"
+
+
 def test_confirmation_is_void_when_vendors_change(extractor):
     extractor.result = [invoice(), second_invoice(vendor_name="CV Lain Sendiri", account_no="999")]
-    doc_id = upload_many([make_pdf(), make_pdf()]).json()["id"]
+    doc_id = upload_many([make_pdf(), make_pdf()], submit=False).json()["id"]
     api(PIC).post(f"/documents/{doc_id}/acknowledge", json={"code": "VENDOR_MISMATCH", "reason": "Satu proyek"})
     r = edit_file(doc_id, position=2, vendor_name="CV Vendor Ketiga")
     assert ("VENDOR_MISMATCH", "vendor_name") in codes(r.json())
@@ -106,9 +115,10 @@ def test_account_is_checked_per_invoice(extractor):
     extractor.result = [second_invoice(vendor_name="CV Lain Sendiri", account_no="999"),
                         invoice(invoice_no="INV-003", account_no="5555")]
     doc = detail(upload_many([make_pdf(), make_pdf()]).json()["id"])
-    # Rekening invoice kedua berbeda dengan rekening terverifikasi PT Vendor Jaya, walau invoice pertama vendor lain
+    # Rekening invoice kedua berbeda dengan rekening terverifikasi PT Vendor Jaya, walau invoice pertama vendor lain.
+    # Tahap 14: peringatan untuk reviewer, bukan kendala yang menahan draf
     assert ("ACCOUNT_MISMATCH", "account_no") in codes(doc)
-    assert doc["status"] == "EXCEPTION"
+    assert doc["status"] == "READY_FOR_REVIEW"
     states = {p["vendor_name"]: p["state"] for p in doc["payees"]}
     assert states == {"CV Lain Sendiri": "UNVERIFIED", "PT Vendor Jaya": "MISMATCH"}
 

@@ -16,17 +16,28 @@ const stamp = Date.now();
 const NEW_USER = `qa.${stamp}@amiga.test`;
 const NEW_USER_PASSWORD = "QaAmiga2026!";
 
-function upload(email: string, fixture: string, key: string) {
-  cy.visitAs(email, "/unggah");
-  cy.get("main input[type=file]").selectFile(`cypress/fixtures/${fixture}`, { force: true });
-  cy.contains("button", "Preview").click();
-  cy.contains("button", "Kirim ke antrean").click();
-  cy.contains("Draf dibuat").find("b").invoke("text").then((requestId) => {
-    cy.contains("a", "Buka draf").click();
-    cy.location("pathname").should("match", /^\/dokumen\/[0-9a-f-]+$/).then((path) => {
+/** Skenario uji lama memakai mode rincian barang/jasa dan rekening tujuan (bawaan Tahap 14: total saja, tanpa rekening). */
+function itemizedWithAccount() {
+  cy.contains(".mode-card", "Rincian barang/jasa").click();
+  cy.contains("details.extras summary", "Fitur tambahan").click();
+  cy.contains(".extras label", "Perlu input rekening").find("input").check();
+}
+
+/** Simpan draf lalu catat ID dokumen dan Request ID dari halaman detail. */
+function saveDraft(key: string) {
+  cy.contains("button", "Simpan draf & lanjutkan").click();
+  cy.location("pathname", { timeout: 30_000 }).should("match", /^\/dokumen\/[0-9a-f-]+$/).then((path) => {
+    cy.get(".page-head h1 .mono").invoke("text").then((requestId) => {
       docs[key] = { id: path.split("/").pop()!, requestId };
     });
   });
+}
+
+function upload(email: string, fixture: string, key: string) {
+  cy.visitAs(email, "/unggah");
+  itemizedWithAccount();
+  cy.get("main input[type=file]").selectFile(`cypress/fixtures/${fixture}`, { force: true });
+  saveDraft(key);
 }
 
 const waitStatus = (label: string) => cy.contains(".page-head .badge", label, { timeout: 30_000 });
@@ -43,8 +54,8 @@ function submitDraft() {
       cy.contains(".alert", "diterapkan");
     }
   });
-  cy.contains(".decision button", "Kirim ke reviewer").click();
-  cy.contains(".alert", "Terkirim ke Finance Reviewer");
+  cy.contains(".decision button", "Ajukan untuk Direview").click();
+  cy.contains(".alert", "Diajukan ke Finance Reviewer");
 }
 const reviewer = () => meta("Finance Reviewer").invoke("text").then((n) => REVIEWER_EMAIL[n]);
 const password = () => cy.env(["SEED_PASSWORD"], { log: false }).then((e) => e.SEED_PASSWORD as string);
@@ -114,12 +125,10 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.get("main input[type=file]").selectFile("cypress/fixtures/enam_halaman.pdf", { force: true });
     cy.get(".file-list li").should("have.length", 1);
     cy.get("main .alert").should("not.exist");
-    cy.contains("button", "Preview").click();
-    cy.contains("h1", "Preview pengajuan");
-    cy.get("main .alert").should("not.exist");
+    cy.contains("button", "Simpan draf & lanjutkan").should("be.enabled");
   });
 
-  it("TS-009 Kategori voucher dan nama Diajukan oleh bisa dipilih", () => {
+  it("TS-009 Kategori voucher dan profil Diajukan oleh bisa diisi", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     cy.contains("h1", "Pembuatan voucher");
     cy.get("#type option").then((opts) => {
@@ -127,13 +136,11 @@ describe("System Testing AMIGA Robot Admin", () => {
         ["Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya"]);
     });
     cy.get("#type").select("Voucher Pengeluaran Reimburse");
-    cy.get("#submitter-name").should("have.value", "Rina (PIC Alpha)").clear().type("Andi Wijaya");
-    cy.get(".company-box").should("contain.text", "Andi Wijaya");
-    cy.get("main input[type=file]").selectFile("cypress/fixtures/sys_normal_b.pdf", { force: true });
-    cy.contains("button", "Preview").click();
-    cy.contains(".meta dt", "Kategori").next("dd").should("have.text", "Voucher Pengeluaran Reimburse");
-    cy.contains(".meta dt", "Diajukan oleh").next("dd").should("contain.text", "Andi Wijaya");
-    cy.contains("button", "Kembali ubah").click();
+    cy.get("#sub-name").should("have.value", "Rina (PIC Alpha)").clear().type("Andi Wijaya");
+    cy.get("#sub-position").clear().type("Staf Keuangan");
+    cy.contains(".aside .meta dt", "Diajukan oleh").next("dd").should("contain.text", "Andi Wijaya");
+    // Mode AI bawaan: total saja
+    cy.contains(".mode-card.on", "Total saja");
     // Filter kategori di Pengajuan Saya
     cy.visitAs("pic.alpha@amiga.test", "/pengajuan");
     cy.get("select[aria-label=Kategori]").select("Lainnya");
@@ -185,6 +192,23 @@ describe("System Testing AMIGA Robot Admin", () => {
     });
   });
 
+  it("TS-048 Tampilan Desktop: sidebar bisa di-minimize dan konten melebar full-fit", () => {
+    cy.viewport(1440, 900);
+    cy.visitAs("lead@amiga.test", "/dashboard");
+    cy.get(".side").should("be.visible");
+    cy.get(".shell").should("not.have.class", "side-collapsed");
+    // Klik tombol collapse di sidebar (panah kiri di header sidebar)
+    cy.get(".side button[aria-label='Perkecil menu samping']").click();
+    cy.get(".shell").should("have.class", "side-collapsed");
+    // Sidebar tetap visible (mode mini 68px)
+    cy.get(".side").should("be.visible");
+    // Konten mengambil lebar penuh (width: 100%, max-width none)
+    cy.get(".content").should("have.css", "max-width", "none");
+    // Klik tombol expand untuk memperluas kembali sidebar
+    cy.get(".side button[aria-label='Perluas menu samping']").click();
+    cy.get(".shell").should("not.have.class", "side-collapsed");
+  });
+
   // --- Peninjauan ---
   it("TS-013 Layar peninjauan split-screen PDF dan data", () => {
     cy.then(() => {
@@ -204,7 +228,7 @@ describe("System Testing AMIGA Robot Admin", () => {
       cy.contains(".decision button", "Simpan bukti 1").click();
       cy.contains(".issue", "CALCULATION_DISCREPANCY");
       waitStatus("Ada kendala");
-      cy.contains(".decision button", "Kirim ke reviewer").should("be.disabled");
+      cy.contains(".decision button", "Ajukan untuk Direview").should("be.disabled");
       // Kembalikan ke nilai semula: lolos lagi dan bisa dikirim
       cy.get("#f-total").clear().type(String(original));
       cy.contains(".decision button", "Simpan bukti 1").click();
@@ -487,7 +511,7 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.contains("tr.total-row", "Total");
   });
 
-  it("TS-038 Satu voucher dari beberapa invoice, ditinjau di Preview sebelum dikirim", () => {
+  it("TS-038 Satu voucher dari beberapa invoice, disimpan sebagai draf lalu diperiksa", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     // PIC hanya bisa memilih perusahaan yang ditugaskan kepadanya
     cy.get("#client option").should("have.length", 1).and("have.text", "PT Klien Alpha");
@@ -496,25 +520,8 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.get("main input[type=file]").selectFile(
       ["cypress/fixtures/sys_normal_a.pdf", "cypress/fixtures/sys_multi_d.pdf"], { force: true });
     cy.get(".file-list li").should("have.length", 2);
-    cy.contains("button", "Kirim ke antrean").should("not.exist");
-    cy.contains("button", "Preview").click();
-    cy.contains("h1", "Preview pengajuan");
-    cy.contains(".meta dt", "Perusahaan").next("dd").should("have.text", "PT Klien Alpha");
-    cy.contains(".meta dt", "Diajukan oleh").next("dd").should("contain.text", "Rina (PIC Alpha)");
-    cy.contains(".meta dt", "Disetujui oleh").next("dd").find("li").should("have.length", 2);
-    cy.contains(".meta dt", "Jumlah invoice").next("dd").should("have.text", "2 file");
-    cy.contains(".file-list.selectable button", "sys_multi_d.pdf").click();
-    cy.get(".pdf-preview iframe").should("have.attr", "title", "Preview sys_multi_d.pdf");
-    // URL PDF di iframe harus masih hidup (tidak dicabut sebelum dimuat)
-    cy.get(".pdf-preview iframe").invoke("attr", "src").then((src) =>
-      cy.window().then((win) => win.fetch(src as string).then((r) => expect(r.ok).to.eq(true))));
-    // Kembali ubah: isian dan file tetap ada
-    cy.contains("button", "Kembali ubah").click();
-    cy.get(".file-list li").should("have.length", 2);
-    cy.contains("button", "Preview").click();
-    cy.contains("button", "Kirim ke antrean").click();
-    cy.contains("Draf dibuat");
-    cy.contains("a", "Buka draf").click();
+    cy.contains(".aside .meta dt", "Disetujui oleh").next("dd").should("contain.text", ",");
+    saveDraft("multi");
     cy.contains(".pdf-head", "2 invoice");
     cy.contains(".meta dt", "File invoice").next("dd").should("contain.text", "sys_normal_a.pdf").and("contain.text", "sys_multi_d.pdf");
   });
@@ -597,9 +604,7 @@ describe("System Testing AMIGA Robot Admin", () => {
     cy.visitAs("pic.alpha@amiga.test", "/unggah");
     cy.get("#type").select("Voucher Pengeluaran Reimburse");
     cy.get("main input[type=file]").selectFile("cypress/fixtures/sys_normal_b.pdf", { force: true });
-    cy.contains("button", "Preview").click();
-    cy.contains("button", "Kirim ke antrean").click();
-    cy.contains("a", "Buka draf").click();
+    saveDraft("reimburse");
     submitDraft();
     waitStatus("Siap ditinjau");
     cy.reload();

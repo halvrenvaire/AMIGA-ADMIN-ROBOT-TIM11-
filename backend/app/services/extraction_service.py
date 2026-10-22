@@ -74,6 +74,34 @@ nilainya penjumlahan baris lain (mis. "Jumlah Harga Jual", "Subtotal", "DPP", "N
 Lewati baris tanpa nilai uang (mis. "PPN Free" tanpa angka).
 Pada invoice yang benar, jumlah subtotal semua baris selain "summary" sama dengan "total"."""
 
+# Mode TOTAL_ONLY (Tahap 14): prompt ringkas, hanya klasifikasi + data kepala invoice + total akhir. Rincian barang
+# tidak dibaca, sehingga jawaban AI pendek dan biaya token per invoice lebih kecil.
+TOTAL_SYSTEM_PROMPT = """Kamu staf keuangan yang membaca dokumen tagihan. Tentukan "document_class" dokumen PDF ini:
+"invoice" (tagihan vendor yang meminta pembayaran), "receipt" (struk/bon/nota/kuitansi yang sudah dibayar),
+"irrelevant" (bukan dokumen transaksi, mis. penawaran, PO, surat jalan, bukti transfer, kontrak, surat), atau
+"uncertain" (tidak bisa dipastikan). Lalu salin data yang TERLIHAT persis seperti tertulis; isi null bila tidak ada.
+Jangan menghitung, menebak, atau mengarang data."""
+
+TOTAL_INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain):
+{{
+  "document_class": "invoice"|"receipt"|"irrelevant"|"uncertain",
+  "document_type": string,
+  "not_invoice_reason": string|null,
+  "vendor_name": string|null,
+  "invoice_no": string|null,
+  "invoice_date": "YYYY-MM-DD"|null,
+  "total": string|null{account}
+}}
+"document_type": jenis dokumen dalam bahasa Indonesia (mis. "Invoice", "Struk kasir"). "vendor_name": nama penjual/
+penerbit tagihan, bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar (Grand
+Total / Total Bayar / Amount Due), ditulis persis seperti di dokumen sebagai teks (mis. "Rp 2.695.000").
+Tanggal dokumen Indonesia ditulis hari-bulan-tahun ("12-10-2026" = "2026-10-12")."""
+
+TOTAL_ACCOUNT_FIELDS = """,
+  "bank_name": string|null,
+  "account_no": string|null,
+  "account_name": string|null"""
+
 FOLLOWUP_SYSTEM_PROMPT = """Kamu memeriksa ulang satu invoice untuk bagian keuangan. Tugasmu HANYA mencari baris
 pajak, biaya, atau potongan yang terlewat pada pembacaan sebelumnya, lalu menyalinnya persis seperti tertulis.
 Jangan mengulang data lain, jangan mengklasifikasikan dokumen, dan jawab hanya dengan JSON yang diminta."""
@@ -137,6 +165,8 @@ class ExtractedInvoice:
     not_invoice_reason: str | None = None
     raw: dict = field(default_factory=dict)
     doc_class: str | None = None
+    # Token AI yang terpakai untuk membaca invoice ini: {"input_tokens", "output_tokens"}
+    usage: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.doc_class is None or (self.doc_class == INVOICE and not self.is_invoice):
@@ -368,21 +398,44 @@ def _followup_items(answer) -> list[dict]:
     return [item for item in found if isinstance(item, dict)]
 
 
+TOTAL_ONLY_MAX_TOKENS = 600  # jawaban mode total hanya beberapa field
+
+
 class InvoiceExtractor:
     def __init__(self, bedrock: BedrockClient):
         self.bedrock = bedrock
 
-    def extract(self, pdf_bytes: bytes) -> ExtractedInvoice:
+    def _read(self, system_prompt: str, pdf_bytes: bytes, instruction: str, max_tokens: int, usage: dict) -> str:
+        """Panggil AI dan tambahkan token yang terpakai ke `usage` (bila klien Bedrock melaporkannya).
+        `usage` dikirim per panggilan, bukan disimpan di objek: satu extractor dipakai bersama oleh proses paralel."""
+        reader = getattr(self.bedrock, "read_pdf_usage", None)
+        if reader is None:
+            return self.bedrock.read_pdf(system_prompt, pdf_bytes, instruction, max_tokens=max_tokens)
+        text, used = reader(system_prompt, pdf_bytes, instruction, max_tokens=max_tokens)
+        for key in ("input_tokens", "output_tokens"):
+            usage[key] = usage.get(key, 0) + int(used.get(key) or 0)
+        return text
+
+    def extract(self, pdf_bytes: bytes, mode: str = "ITEMIZED", include_account: bool = True) -> ExtractedInvoice:
+        """`mode`: "TOTAL_ONLY" = hanya total dan data kepala invoice (tanpa rincian); "ITEMIZED" = rincian lengkap."""
+        usage: dict = {}
         try:
-            text = self.bedrock.read_pdf(SYSTEM_PROMPT, pdf_bytes, INSTRUCTION,
-                                         max_tokens=settings.extraction_max_tokens)
+            if mode == "TOTAL_ONLY":
+                instruction = TOTAL_INSTRUCTION.format(account=TOTAL_ACCOUNT_FIELDS if include_account else "")
+                text = self._read(TOTAL_SYSTEM_PROMPT, pdf_bytes, instruction, TOTAL_ONLY_MAX_TOKENS, usage)
+            else:
+                text = self._read(SYSTEM_PROMPT, pdf_bytes, INSTRUCTION, settings.extraction_max_tokens, usage)
         except BedrockError as e:
             raise ExtractionError(str(e)) from e
         result = parse_response(text)
-        self._find_missing_charges(pdf_bytes, result)
+        if mode == "TOTAL_ONLY":
+            result.line_items = []
+        else:
+            self._find_missing_charges(pdf_bytes, result, usage)
+        result.usage = usage
         return result
 
-    def _find_missing_charges(self, pdf_bytes: bytes, result: ExtractedInvoice) -> None:
+    def _find_missing_charges(self, pdf_bytes: bytes, result: ExtractedInvoice, usage: dict | None = None) -> None:
         """Bila jumlah rincian tidak sama dengan total, minta AI sekali lagi mencari baris pajak/biaya/potongan
         yang terlewat (mis. PPN di bawah tabel). Hasilnya dipakai HANYA bila membuat hitungan pas persis."""
         lines, total = result.line_items, result.total
@@ -393,9 +446,9 @@ class InvoiceExtractor:
             return
         listing = "\n".join(f"- {line.description or '-'}: {line.subtotal}" for line in lines)
         try:
-            text = self.bedrock.read_pdf(
-                FOLLOWUP_SYSTEM_PROMPT, pdf_bytes,
-                FOLLOWUP_INSTRUCTION.format(lines=listing, line_sum=line_sum, total=total), max_tokens=800)
+            text = self._read(FOLLOWUP_SYSTEM_PROMPT, pdf_bytes,
+                              FOLLOWUP_INSTRUCTION.format(lines=listing, line_sum=line_sum, total=total), 800,
+                              {} if usage is None else usage)
             match = re.search(r"\{.*\}", text, re.DOTALL)
             answer = json.loads(match.group(0)) if match else {}
         except (BedrockError, json.JSONDecodeError):

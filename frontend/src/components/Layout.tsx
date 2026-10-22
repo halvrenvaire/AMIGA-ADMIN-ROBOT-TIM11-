@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  BarChart3, Bot, Building2, ClipboardCheck, FileBarChart, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
+  BarChart3, Bot, Building2, ChevronLeft, ChevronRight, ClipboardCheck, FileBarChart, FileClock, FileText, LayoutDashboard, LogOut, PenLine, Receipt, Search, Store,
   Menu, Percent, Upload, Users, X,
 } from "lucide-react";
 import { useAuth } from "../auth";
@@ -53,6 +53,27 @@ export function Layout() {
   const [q, setQ] = useState("");
   // HP: menu samping menjadi laci yang dibuka tombol ☰ dan tertutup sendiri setelah pindah halaman
   const [menuOpen, setMenuOpen] = useState(false);
+  // Desktop: sidebar bisa di-collapse/hide dengan tombol panah (<- tutup / -> buka), tersimpan di localStorage
+  const [sideCollapsed, setSideCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("amiga_side_collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleDesktopCollapse = () => {
+    setSideCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("amiga_side_collapsed", next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
   useEffect(() => { setMenuOpen(false); }, [pathname]);
   if (!user) return null;
 
@@ -65,13 +86,29 @@ export function Layout() {
   };
 
   return (
-    <div className="shell">
+    <div className={`shell${sideCollapsed ? " side-collapsed" : ""}`}>
       {menuOpen && <div className="side-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
       <aside className={`side${menuOpen ? " open" : ""}`} aria-label="Navigasi utama">
         <button className="btn ghost sm icon-btn side-close" onClick={() => setMenuOpen(false)} aria-label="Tutup menu"><X /></button>
-        <div className="brand">
-          <Logo height={36} />
-          <span className="brand-sub">Robot Admin</span>
+        <div className="side-head">
+          <div className="brand">
+            <div className="brand-full">
+              <Logo height={32} />
+              <span className="brand-sub">Robot Admin</span>
+            </div>
+            <div className="brand-mini" title="amiga · Robot Admin">
+              <Clover size={28} />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="side-toggle-btn"
+            onClick={toggleDesktopCollapse}
+            aria-label={sideCollapsed ? "Perluas menu samping" : "Perkecil menu samping"}
+            title={sideCollapsed ? "Perluas menu samping" : "Perkecil menu samping"}
+          >
+            {sideCollapsed ? <ChevronRight size={22} strokeWidth={2.5} /> : <ChevronLeft size={22} strokeWidth={2.5} />}
+          </button>
         </div>
         {canSearch && (
           // HP: kotak cari topbar tidak muat, jadi tersedia di laci menu
@@ -86,7 +123,7 @@ export function Layout() {
             <div className="nav-label">Menu</div>
             <ul className="nav">
               {visible(NAV).map(({ to, label, icon: Icon }) => (
-                <li key={to}><NavLink to={to}><Icon /><span>{label}</span></NavLink></li>
+                <li key={to}><NavLink to={to} data-tooltip={label}><Icon /><span className="nav-text">{label}</span></NavLink></li>
               ))}
             </ul>
           </nav>
@@ -96,7 +133,7 @@ export function Layout() {
             <div className="nav-label">Data Referensi</div>
             <ul className="nav">
               {visible(REFERENCE_NAV).map(({ to, label, icon: Icon }) => (
-                <li key={to}><NavLink to={to}><Icon /><span>{label}</span></NavLink></li>
+                <li key={to}><NavLink to={to} data-tooltip={label}><Icon /><span className="nav-text">{label}</span></NavLink></li>
               ))}
             </ul>
           </nav>
@@ -106,7 +143,7 @@ export function Layout() {
             <div className="nav-label">Administrasi</div>
             <ul className="nav">
               {visible(ADMIN_NAV).map(({ to, label, icon: Icon }) => (
-                <li key={to}><NavLink to={to}><Icon /><span>{label}</span></NavLink></li>
+                <li key={to}><NavLink to={to} data-tooltip={label}><Icon /><span className="nav-text">{label}</span></NavLink></li>
               ))}
             </ul>
           </nav>
@@ -120,8 +157,14 @@ export function Layout() {
 
       <div className="main">
         <header className="top">
-          <button className="btn ghost sm icon-btn menu-btn" onClick={() => setMenuOpen(true)} aria-label="Buka menu"
-                  aria-expanded={menuOpen}><Menu /></button>
+          <button
+            className="btn ghost sm icon-btn menu-btn"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Buka menu"
+            aria-expanded={menuOpen}
+          >
+            <Menu />
+          </button>
           <div className="crumb"><span className="crumb-home">Beranda /</span> <b>{title}</b></div>
           {canSearch && (
             <form className="search" onSubmit={search} role="search">

@@ -183,6 +183,8 @@ class MeResponse(BaseModel):
     clients: list[ClientRef]  # perusahaan yang datanya bisa dilihat (Finance Reviewer: semua)
     upload_clients: list[ClientRef] = []  # perusahaan yang boleh diajukan (penugasan System Admin)
     signature_updated_at: datetime | None = None  # spesimen tanda tangan elektronik (PIC Klien)
+    # Profil "Diajukan oleh" terakhir: {"name", "position", "companies": {client_id: perusahaan/unit}}
+    submitter_profile: dict = {}
 
 
 class ProfileUpdate(BaseModel):
@@ -262,6 +264,8 @@ class DocumentSummary(BaseModel):
     total: Decimal | None
     created_at: datetime
     updated_at: datetime
+    extraction_mode: Literal["TOTAL_ONLY", "ITEMIZED"] = "ITEMIZED"
+    include_account: bool = False  # rekening tujuan diisi, dicek, dan dicetak di voucher
 
 
 class IssueItem(BaseModel):
@@ -345,6 +349,8 @@ class DocumentDetail(DocumentSummary):
     payees: list["PayeeOut"] = []
     # Peringatan yang sudah dikonfirmasi PIC dan masih berlaku: {kode: {reason, by, at}}
     acknowledgements: dict[str, dict] = {}
+    # Ada spesimen tanda tangan "Diajukan oleh" yang tersimpan di pengajuan ini
+    submitter_signature: bool = False
 
 
 class PayeeOut(BaseModel):
@@ -414,6 +420,16 @@ class TaxChoice(BaseModel):
     mode: Literal["invoice", "line"] = "invoice"
     lines: list[TaxLineChoice] = Field(default_factory=list, max_length=300)
     vat: VatChoice | None = None
+    # Hitung pajak otomatis (bawaan). False: DPP (`base`), PPN (`vat_amount`), dan potongan PPh (`amount`) diisi manual
+    calc: bool = True
+    vat_amount: Decimal | None = Field(None, ge=0)
+    amount: Decimal | None = Field(None, ge=0)
+
+
+class OptionsUpdate(BaseModel):
+    """Pengaturan pengajuan di halaman detail (Tahap 14); field yang tidak dikirim = tetap."""
+    extraction_mode: Literal["TOTAL_ONLY", "ITEMIZED"] | None = None
+    include_account: bool | None = None
 
 
 class TaxRateOut(BaseModel):
@@ -458,6 +474,7 @@ class LineItemIn(BaseModel):
 
 
 class FileDataUpdate(BaseModel):
+    description: str | None = Field(None, max_length=500)  # uraian transaksi (mode total saja: 1 baris voucher)
     """Data satu invoice yang diedit PIC (feedback owner: edit per invoice). Menggantikan data file itu."""
     vendor_name: str | None = Field(None, max_length=300)
     invoice_no: str | None = Field(None, max_length=100)
@@ -597,7 +614,7 @@ class SignatoryOut(SignatoryIn):
 
 
 class SignatureIn(BaseModel):
-    """Gambar tanda tangan: data URL atau base64 PNG/JPEG (hasil canvas atau unggahan)."""
+    """Gambar tanda tangan: data URL atau base64 PNG/JPEG/WEBP (hasil canvas atau unggahan)."""
     image: str = Field(min_length=20, max_length=3_000_000)
 
 
@@ -606,10 +623,15 @@ class Signer(BaseModel):
     kind: SignatoryKind
     name: str
     position: str
+    company: str | None = None  # profil pengaju (Tahap 14): perusahaan/unit
+    signature: bool = False  # kotak "Diajukan oleh" memakai spesimen yang tersimpan di dokumen
 
 
 class SignersUpdate(BaseModel):
     signatory_ids: list[uuid.UUID]
+    # Profil "Diajukan oleh" (Tahap 14); tidak dikirim = tetap
+    submitter_position: str | None = Field(None, max_length=120)
+    submitter_company: str | None = Field(None, max_length=200)
     # Nama di kotak "Diajukan oleh"; None = tidak diubah, "" = kembali ke PIC pengaju
     submitter_name: str | None = Field(None, max_length=200)
 
