@@ -12,6 +12,7 @@ from pypdf import PdfReader, PdfWriter, Transformation
 
 from app.models import CATEGORY_REIMBURSE, Document
 from app.services import storage
+from app.services.invoice_split import base_name, upload_key
 
 A4_W, A4_H = 595.28, 841.89  # pt
 MARGIN, HEADER, CAPTION, GAP = 30, 44, 16, 14
@@ -24,7 +25,9 @@ def _t(text: str) -> str:
 
 def evidence_pages(doc: Document) -> list[tuple[str, object]]:
     """(label, halaman PDF) untuk setiap halaman bukti, berurutan seperti diunggah."""
-    sources = [(f.original_filename, f.file_key) for f in doc.files] or [(doc.original_filename, doc.file_key)]
+    # Satu PDF unggahan yang dipecah menjadi beberapa bukti (Tahap 15) dilampirkan sekali, utuh
+    sources = list({upload_key(f): (base_name(f.original_filename), upload_key(f)) for f in doc.files}.values()) \
+        or [(doc.original_filename, doc.file_key)]
     pages = []
     for i, (name, key) in enumerate(sources, start=1):
         reader = PdfReader(io.BytesIO(storage.load(key)))

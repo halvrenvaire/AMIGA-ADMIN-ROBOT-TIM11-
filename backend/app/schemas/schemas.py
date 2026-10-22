@@ -192,6 +192,9 @@ class ProfileUpdate(BaseModel):
     email: str | None = Field(None, min_length=3, max_length=200, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     # Wajib bila email diganti
     current_password: str | None = Field(None, max_length=200)
+    # Profil "Diajukan oleh" mode PIC (Tahap 15); kosong = "PIC Klien" / nama perusahaan klien
+    submitter_position: str | None = Field(None, max_length=120)
+    submitter_company: str | None = Field(None, max_length=200)
 
 
 class PasswordChange(BaseModel):
@@ -318,6 +321,23 @@ class DocumentFileOut(BaseModel):
     read_at: datetime | None = None  # selesai dibaca AI pada proses terakhir
     source_format: str | None = None  # "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF
     data: dict | None = None  # data invoice file ini (diedit PIC per invoice)
+    # Tahap 15: bukti = halaman page_from..page_to dari PDF unggahan (upload_pages halaman). None = seluruh file
+    page_from: int | None = None
+    page_to: int | None = None
+    upload_pages: int | None = None
+    upload_name: str | None = None  # nama file unggahan (tanpa keterangan halaman)
+
+
+class FilePagesUpdate(BaseModel):
+    """Rentang halaman satu bukti dari PDF unggahannya (Tahap 15)."""
+    page_from: int = Field(ge=1, le=10000)
+    page_to: int = Field(ge=1, le=10000)
+
+
+class FileAdd(FilePagesUpdate):
+    """Tambah bukti dari halaman PDF unggahan bukti lain (mis. invoice yang terlewat AI)."""
+    source_position: int = Field(ge=1)
+    read_ai: bool = True  # AI membaca bukti baru; False = diisi manual oleh PIC
 
 
 class CancellationOut(BaseModel):
@@ -344,6 +364,8 @@ class DocumentDetail(DocumentSummary):
     tax_summary: "TaxSummaryOut | None" = None
     # Isi manual: AI dimatikan/gagal membaca sebagian atau semua invoice ({status, files, message})
     ai_manual: dict | None = None
+    # Tahap 15: invoice dalam PDF melebihi batas per voucher: {"limit", "files": [{"file", "skipped"}]}
+    invoice_limit: dict | None = None
     ai_enabled: bool = True  # AI_EXTRACTION_ENABLED; false = tombol baca ulang dengan AI disembunyikan
     # Rekening tujuan per vendor (beberapa invoice dengan vendor+rekening sama digabung)
     payees: list["PayeeOut"] = []
@@ -381,7 +403,7 @@ class TaxLineOut(BaseModel):
 
 class VatLineOut(BaseModel):
     invoice_no: str | None
-    mode: Literal["separate", "included", "none"]
+    mode: Literal["excluded", "included", "none"]
     rate: Decimal
     amount: Decimal  # PPN yang termasuk di total tagihan
     show: bool  # rincian PPN dicetak di voucher
@@ -405,8 +427,8 @@ class TaxLineChoice(BaseModel):
 
 
 class VatChoice(BaseModel):
-    """PPN satu invoice: terpisah di bawah barang, sudah termasuk harga, atau tidak ada."""
-    mode: Literal["separate", "included", "none"]
+    """PPN satu invoice: harga belum termasuk PPN (ditambahkan), sudah termasuk PPN, atau tidak ada."""
+    mode: Literal["excluded", "included", "none", "separate"]  # "separate" = PPN terpisah (format lama) = "excluded"
     rate: Decimal = Field(Decimal(11), gt=0, le=100)
     show: bool = False  # cetak rincian PPN di voucher (bawaan: PPN dilebur ke nilai barang)
 
@@ -625,10 +647,13 @@ class Signer(BaseModel):
     position: str
     company: str | None = None  # profil pengaju (Tahap 14): perusahaan/unit
     signature: bool = False  # kotak "Diajukan oleh" memakai spesimen yang tersimpan di dokumen
+    source: Literal["PIC", "MANUAL"] | None = None  # Tahap 15: sumber kotak "Diajukan oleh"; None = data lama
 
 
 class SignersUpdate(BaseModel):
     signatory_ids: list[uuid.UUID]
+    # Sumber "Diajukan oleh" (Tahap 15): PIC = profil akun PIC Klien (dikunci), MANUAL = diisi manual
+    submitter_source: Literal["PIC", "MANUAL"] | None = None
     # Profil "Diajukan oleh" (Tahap 14); tidak dikirim = tetap
     submitter_position: str | None = Field(None, max_length=120)
     submitter_company: str | None = Field(None, max_length=200)

@@ -24,19 +24,20 @@ from app.models import (
 )
 from app.schemas.schemas import (
     CancellationOut, ClientRef, DocumentDetail, DocumentFileOut, DocumentSummary, ExtractionOut, FileDataUpdate,
-    AcknowledgeRequest, FixRequest, IssueItem, OptionsUpdate, ReasonRequest, SignatureIn, SignersUpdate, TaxChoice,
+    AcknowledgeRequest, FileAdd, FilePagesUpdate, FixRequest, IssueItem, OptionsUpdate, ReasonRequest, SignatureIn, SignersUpdate, TaxChoice,
     TaxSummaryOut, VoucherOut,
 )
 from app.services import (
-    audit_service, file_conversion, signature_service, signer_service, storage, tax_service, voucher_attachments,
+    audit_service, file_conversion, invoice_split, signature_service, signer_service, storage, tax_service, voucher_attachments,
     voucher_service,
 )
 from app.services.access_rules import accessible_client_ids
 from app.services.bedrock_client import BedrockError
+from app.services.extraction_service import ExtractedInvoice
 from app.services.account_check import check_account, payee_checks
 from app.services.document_processing import (
     ACKNOWLEDGEABLE, BLOCKING, DATA_FIELDS, PIC_FIELDS, acknowledgement, classification, default_description, file_data,
-    line_subtotal, manual_entry, parse_pic_value, payee_fingerprint, process_document, rebuild_from_files,
+    line_subtotal, manual_entry, parse_pic_value, part_to_data, payee_fingerprint, process_document, rebuild_from_files,
     run_verification, send_to_review, set_status, settle_status,
 )
 
@@ -93,13 +94,16 @@ def _detail(db: Session, doc: Document) -> DocumentDetail:
         voucher=VoucherOut.model_validate(doc.voucher) if doc.voucher else None,
         vendor=ClientRef(id=doc.vendor.id, name=doc.vendor.name) if doc.vendor else None,
         signers=doc.signers or [],
-        files=[DocumentFileOut.model_validate(f).model_copy(update={"data": _with_suggestions(doc, file_data(doc, f))})
-               for f in doc.files],
+        files=[DocumentFileOut.model_validate(f).model_copy(update={
+                   "data": _with_suggestions(doc, file_data(doc, f)),
+                   "upload_name": invoice_split.base_name(f.original_filename)}) for f in doc.files],
         cancellation=_cancellation(db, doc),
         classification=classification(doc.extraction),
         account_check=vars(check_account(db, doc)) if doc.extraction else None,
         tax_summary=_tax_summary(doc) if doc.extraction else None,
         ai_manual=_manual_info(doc), ai_enabled=settings.ai_extraction_enabled,
+        invoice_limit=(doc.extraction.raw_json or {}).get("invoice_limit")
+        if doc.extraction and isinstance(doc.extraction.raw_json, dict) else None,
         payees=[_payee_out(p) for p in payee_checks(db, doc)] if doc.extraction else [],
         acknowledgements={c.value: {k: ack[k] for k in ("reason", "by", "at")}
                           for c in ACKNOWLEDGEABLE if (ack := acknowledgement(doc.extraction, c))},
@@ -208,19 +212,21 @@ async def upload_document(
         "Mode baca AI: TOTAL_ONLY (bawaan) = hanya total per invoice, 1 baris voucher per invoice; "
         "ITEMIZED = rincian barang/jasa, 1 baris voucher per item"))] = TOTAL_ONLY,
     include_account: Annotated[bool, Form(description="Fitur tambahan: isi, cek, dan cetak rekening tujuan")] = False,
+    submitter_source: Annotated[Literal["PIC", "MANUAL"] | None, Form(description=(
+        "Sumber \"Diajukan oleh\": PIC = profil akun PIC Klien (dikunci, termasuk tanda tangan); MANUAL = nama, "
+        "jabatan, perusahaan, dan tanda tangan diisi di sini (tidak diingat). Tidak dikirim = MANUAL bila ada isian "
+        "nama/jabatan/perusahaan/tanda tangan, selain itu PIC"))] = None,
     submitter_position: Annotated[str | None, Form(max_length=120, description=(
-        "Jabatan di kotak \"Diajukan oleh\". Tidak dikirim = profil terakhir / \"PIC Klien\""))] = None,
+        "Mode MANUAL: jabatan di kotak \"Diajukan oleh\""))] = None,
     submitter_company: Annotated[str | None, Form(max_length=200, description=(
-        "Perusahaan/unit di kotak \"Diajukan oleh\". Kosong = profil terakhir / nama klien"))] = None,
+        "Mode MANUAL: perusahaan/unit di kotak \"Diajukan oleh\". Kosong = nama klien"))] = None,
     submitter_signature: Annotated[UploadFile | None, File(description=(
-        "Gambar tanda tangan \"Diajukan oleh\" (PNG/JPG/WEBP, maks. 2 MB); disimpan juga sebagai default"))] = None,
-    use_saved_signature: Annotated[bool, Form(description=(
-        "Tanpa unggahan: pakai tanda tangan tersimpan bila nama pengaju sama dengan profil tersimpan"))] = True,
+        "Mode MANUAL: gambar tanda tangan (PNG/JPG/WEBP, maks. 2 MB). Kosong = tanda tangan basah"))] = None,
     signatory_ids: Annotated[str | None, Form(
         description="ID pemberi persetujuan (\"Disetujui oleh\") dipisah koma, berurutan. "
                     "Tidak dikirim = 1 kotak default klien; kosong = tanpa pemberi persetujuan")] = None,
     submitter_name: Annotated[str | None, Form(max_length=200, description=(
-        "Nama di kotak \"Diajukan oleh\" (boleh karyawan lain). Kosong = PIC pengaju"))] = None,
+        "Mode MANUAL: nama di kotak \"Diajukan oleh\" (wajib)"))] = None,
     user: User = Depends(uploader_roles),
     db: Session = Depends(get_db),
 ):
@@ -263,29 +269,27 @@ async def upload_document(
         on_behalf_of = db.scalar(select(UserClientAssignment.delegated_by).where(
             UserClientAssignment.user_id == user.id, UserClientAssignment.client_id == client_id))
 
-    # "Diajukan oleh" di voucher (Tahap 14): profil pengaju (nama, jabatan, perusahaan/unit, tanda tangan). Isian awal =
-    # profil terakhir PIC Klien: pengunggah, atau PIC yang diwakili Intake Support
+    # "Diajukan oleh" di voucher (Tahap 15): mode PIC = profil akun PIC Klien (pengunggah, atau PIC yang diwakili
+    # Intake Support) beserta tanda tangannya; mode MANUAL = isian formulir ini, tidak diingat untuk pengajuan berikutnya
     submitter = db.get(User, on_behalf_of) if on_behalf_of else user
-    profile = signer_service.default_profile(submitter, db.get(Client, client_id))
-    name = (submitter_name or "").strip() or profile["name"]
-    position = profile["position"] if submitter_position is None else submitter_position.strip()
-    company = (submitter_company or "").strip() or profile["company"]
-    signature, uploaded = None, False
-    if submitter_signature is not None and submitter_signature.filename:
-        signature = signature_service.normalize_bytes(
-            await submitter_signature.read(signature_service.MAX_UPLOAD_BYTES + 1))
-        uploaded = True
-    elif use_saved_signature and submitter.signature_png and name == profile["name"]:
-        # Tanda tangan tersimpan hanya untuk nama pemiliknya, bukan untuk nama karyawan lain
+    has_upload = submitter_signature is not None and bool(submitter_signature.filename)
+    source = submitter_source or (signer_service.MANUAL if has_upload or any(
+        (v or "").strip() for v in (submitter_name, submitter_position, submitter_company)) else signer_service.PIC)
+    if source == signer_service.PIC:
+        profile = signer_service.default_profile(submitter, db.get(Client, client_id))
+        name, position, company = profile["name"], profile["position"], profile["company"]
         signature = submitter.signature_png
+    else:
+        name = (submitter_name or "").strip()
+        if not name:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Isi nama pengaju di bagian \"Diajukan oleh\".")
+        position = (submitter_position or "").strip()
+        company = (submitter_company or "").strip() or db.get(Client, client_id).name
+        signature = signature_service.normalize_bytes(
+            await submitter_signature.read(signature_service.MAX_UPLOAD_BYTES + 1)) if has_upload else None
     signers = signer_service.resolve(db, client_id, signer_service.parse_ids(signatory_ids),
-                                     signer_service.pengaju_profile(name, position, company, signature is not None))
-    if submitter.id == user.id:
-        # Diingat sebagai isian awal pengajuan berikutnya (perubahan profil tidak dicatat di jejak audit)
-        companies = {**((user.submitter_profile or {}).get("companies") or {}), str(client_id): company}
-        user.submitter_profile = {"name": name, "position": position, "companies": companies}
-        if uploaded:
-            user.signature_png, user.signature_updated_at = signature, datetime.now(timezone.utc)
+                                     signer_service.pengaju_profile(name, position, company, signature is not None,
+                                                                    source))
 
     request_id = _new_request_id(db)
     total_pages = sum(p.pages for p in parts)
@@ -485,6 +489,145 @@ def update_file_data(document_id: uuid.UUID, position: int, body: FileDataUpdate
     settle_status(db, doc, issues, "Data diperbarui PIC")
     db.commit()
     return _detail(db, doc)
+
+
+# --- Bukti per invoice dalam satu PDF (Tahap 15) ---
+
+def _editable_files(db: Session, user: User, document_id: uuid.UUID) -> Document:
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Bukti hanya bisa diubah saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    return doc
+
+
+def _upload_of(part: DocumentFile) -> tuple[str, bytes, int]:
+    """(key, isi, jumlah halaman) PDF unggahan asal bukti ini."""
+    key = invoice_split.upload_key(part)
+    try:
+        upload = storage.load(key)
+    except storage.StorageError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File PDF tidak ditemukan di penyimpanan.")
+    return key, upload, part.upload_pages or invoice_split.page_count(upload)
+
+
+def _check_range(first: int, last: int, pages: int) -> None:
+    if not 1 <= first <= last <= pages:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"Rentang halaman tidak valid. Pilih halaman 1 sampai {pages}, dan halaman awal tidak "
+                            "boleh setelah halaman akhir.")
+
+
+def _rekey_checks(doc: Document, renamed: dict[str, str], removed: str | None = None) -> None:
+    """Hasil cek jenis dokumen disimpan per nama bukti; ikut diperbarui bila nama berubah atau bukti dihapus."""
+    ex = doc.extraction
+    if ex is None or not isinstance(ex.raw_json, dict) or not ex.raw_json.get("document_checks"):
+        return
+    checks = [{**c, "file": renamed.get(c.get("file"), c.get("file"))}
+              for c in ex.raw_json["document_checks"] if removed is None or c.get("file") != removed]
+    ex.raw_json = {**ex.raw_json, "document_checks": checks}
+
+
+def _after_files_changed(db: Session, doc: Document) -> DocumentDetail:
+    rebuild_from_files(db, doc)
+    issues = run_verification(db, doc)
+    settle_status(db, doc, issues, "Bukti diperbarui PIC")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.put("/{document_id}/files/{position}/pages", response_model=DocumentDetail)
+def set_file_pages(document_id: uuid.UUID, position: int, body: FilePagesUpdate,
+                   user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """Ubah rentang halaman satu bukti dari PDF unggahannya (mis. invoice + Faktur Pajak + rincian). Data invoice yang
+    sudah terisi tetap; lampiran voucher tetap memuat PDF unggahan utuh."""
+    doc = _editable_files(db, user, document_id)
+    part = _file(doc, position)
+    key, upload, pages = _upload_of(part)
+    _check_range(body.page_from, body.page_to, pages)
+    before = invoice_split.pages_label(part.page_from or 1, part.page_to or pages)
+    after = invoice_split.pages_label(body.page_from, body.page_to)
+    if before == after and part.page_from is not None:
+        return _detail(db, doc)
+    try:
+        part.file_key = invoice_split.save_piece(upload, key, body.page_from, body.page_to, pages)
+    except storage.StorageError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "File gagal disimpan. Coba lagi beberapa saat lagi.")
+    audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
+                         field=f"Bukti {position} ({part.original_filename}).halaman", old_value=before, new_value=after)
+    part.upload_key, part.upload_pages = key, pages
+    part.page_from, part.page_to, part.page_count = body.page_from, body.page_to, body.page_to - body.page_from + 1
+    _rekey_checks(doc, invoice_split.rename_group(doc, key))
+    return _after_files_changed(db, doc)
+
+
+@router.post("/{document_id}/files", response_model=DocumentDetail, status_code=201)
+def add_file(document_id: uuid.UUID, body: FileAdd, request: Request, background: BackgroundTasks,
+             user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """Tambah bukti dari halaman PDF unggahan (invoice yang terlewat AI, atau beberapa struk dalam satu halaman).
+    `read_ai`: AI membaca bukti baru (bukti lain tetap); selain itu PIC mengisi datanya sendiri."""
+    doc = _editable_files(db, user, document_id)
+    if len(doc.files) >= settings.max_invoices_per_voucher:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"Satu voucher paling banyak {settings.max_invoices_per_voucher} invoice/bukti.")
+    source = _file(doc, body.source_position)
+    key, upload, pages = _upload_of(source)
+    _check_range(body.page_from, body.page_to, pages)
+    try:
+        piece = invoice_split.save_piece(upload, key, body.page_from, body.page_to, pages)
+    except storage.StorageError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "File gagal disimpan. Coba lagi beberapa saat lagi.")
+    if source.page_from is None:  # bukti lama/belum dipindai: seluruh file unggahan
+        source.upload_key, source.upload_pages, source.page_from, source.page_to = key, pages, 1, pages
+    read_ai = body.read_ai and settings.ai_extraction_enabled and request.app.state.extractor is not None
+    empty = part_to_data(ExtractedInvoice())
+    new = DocumentFile(id=uuid.uuid4(), document_id=doc.id, position=2000, file_key=piece,
+                       original_filename=invoice_split.base_name(source.original_filename),
+                       page_count=body.page_to - body.page_from + 1, source_file_key=source.source_file_key,
+                       source_format=source.source_format, upload_key=key, upload_pages=pages,
+                       page_from=body.page_from, page_to=body.page_to,
+                       data=None if read_ai else {**empty, "description": None})
+    db.add(new)
+    # Bukti baru diletakkan setelah bukti terakhir dari unggahan yang sama
+    group_end = max(i for i, f in enumerate(doc.files) if invoice_split.upload_key(f) == key)
+    ordered = doc.files[:group_end + 1] + [new] + doc.files[group_end + 1:]
+    db.flush()
+    invoice_split.renumber(db, doc, ordered)
+    db.expire(doc, ["files"])
+    _rekey_checks(doc, invoice_split.rename_group(doc, key))
+    audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
+                         field=f"Bukti {new.position}", old_value=None,
+                         new_value=f"Ditambahkan dari {invoice_split.base_name(source.original_filename)} hal. "
+                                   f"{invoice_split.pages_label(body.page_from, body.page_to)}")
+    if read_ai:
+        # Hanya bukti baru yang dibaca AI; data bukti lain tetap
+        set_status(db, doc, DocStatus.PROCESSING, f"AI membaca bukti tambahan dari {user.full_name}")
+        db.commit()
+        background.add_task(process_document, doc.id, request.app.state.extractor, True)
+        return _detail(db, doc)
+    return _after_files_changed(db, doc)
+
+
+@router.delete("/{document_id}/files/{position}", response_model=DocumentDetail)
+def delete_file(document_id: uuid.UUID, position: int, user: User = Depends(uploader_roles),
+                db: Session = Depends(get_db)):
+    """Hapus satu bukti (mis. halaman yang keliru terbaca sebagai invoice). Minimal 1 bukti tersisa."""
+    doc = _editable_files(db, user, document_id)
+    part = _file(doc, position)
+    if len(doc.files) <= 1:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Voucher minimal berisi 1 bukti.")
+    key, name = invoice_split.upload_key(part), part.original_filename
+    audit_service.record(db, user, "FIXED_BY_PIC", document_id=doc.id, client_id=doc.client_id,
+                         field=f"Bukti {position} ({name})", old_value=_fmt((part.data or {}).get("invoice_no")) or name,
+                         new_value="Dihapus")
+    rest = [f for f in doc.files if f is not part]
+    db.delete(part)
+    db.flush()
+    invoice_split.renumber(db, doc, rest)
+    db.expire(doc, ["files"])
+    _rekey_checks(doc, invoice_split.rename_group(doc, key), removed=name)
+    return _after_files_changed(db, doc)
 
 
 @router.put("/{document_id}/files/{position}/tax", response_model=DocumentDetail)
@@ -773,20 +916,34 @@ def set_signers(document_id: uuid.UUID, body: SignersUpdate, user: User = Depend
     if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Voucher sudah terbit atau pengajuan dibatalkan; penanda tangan tidak bisa diubah.")
-    # Kotak "Diajukan oleh" tetap kecuali profilnya diubah; kotak "Disetujui oleh" diganti sesuai pilihan
+    # Kotak "Diajukan oleh" tetap kecuali sumber/profilnya diubah; kotak "Disetujui oleh" diganti sesuai pilihan
     pengaju = [s for s in doc.signers or [] if s["kind"] == "PENGAJU"]
-    if any(v is not None for v in (body.submitter_name, body.submitter_position, body.submitter_company)):
+    current = pengaju[0] if pengaju else {}
+    source = body.submitter_source
+    if source is None and body.submitter_name is not None and not body.submitter_name.strip():
+        source = signer_service.PIC  # format lama: nama dikosongkan = kembali ke PIC pengaju
+    elif source is None and any(v is not None for v in (body.submitter_name, body.submitter_position,
+                                                         body.submitter_company)):
+        source = signer_service.MANUAL
+    if source == signer_service.PIC:
+        # Profil dan tanda tangan disalin dari akun PIC Klien saat ini
         pic = db.get(User, doc.on_behalf_of or doc.uploaded_by)
-        current = pengaju[0] if pengaju else {}
-        defaults = signer_service.default_profile(pic, doc.client)
+        profile = signer_service.default_profile(pic, doc.client)
+        doc.submitter_signature_png = pic.signature_png
+        pengaju = [signer_service.pengaju_profile(profile["name"], profile["position"], profile["company"],
+                                                  pic.signature_png is not None, signer_service.PIC)]
+    elif source == signer_service.MANUAL:
         legacy = "company" not in current  # salinan lama: jabatan berisi "PIC Klien, <perusahaan>" atau nama perusahaan
-        # Nama dikosongkan = kembali ke profil PIC pengaju; tidak dikirim = tetap
-        name = ((body.submitter_name.strip() or defaults["name"]) if body.submitter_name is not None
-                else current.get("name") or defaults["name"])
+        was_pic = current.get("source") == signer_service.PIC
+        name = (body.submitter_name or "").strip() or ("" if was_pic else current.get("name", ""))
+        if not name:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Isi nama pengaju di bagian \"Diajukan oleh\".")
         position = (body.submitter_position.strip() if body.submitter_position is not None
-                    else defaults["position"] if legacy else current.get("position"))
+                    else "" if was_pic else "PIC Klien" if legacy else current.get("position"))
         company = ((body.submitter_company or "").strip()
-                   or (defaults["company"] if legacy else current.get("company")) or doc.client.name)
+                   or ("" if legacy or was_pic else current.get("company")) or doc.client.name)
+        if was_pic:
+            doc.submitter_signature_png = None  # tanda tangan PIC tidak dipakai untuk nama lain
         pengaju = [signer_service.pengaju_profile(name, position, company, doc.submitter_signature_png is not None)]
     new = pengaju + signer_service.resolve(db, doc.client_id, body.signatory_ids, None)
     describe = lambda items: "; ".join(f"{s['name']} ({s['position']})" for s in items) or "-"  # noqa: E731
@@ -818,6 +975,9 @@ def _signature_editable(db: Session, user: User, document_id: uuid.UUID) -> Docu
     if doc.status in (DocStatus.AMIGA_REVIEWED, DocStatus.SENT_TO_CLIENT, DocStatus.CANCELLED):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "Voucher sudah terbit atau pengajuan dibatalkan; tanda tangan tidak bisa diubah.")
+    if any(s["kind"] == "PENGAJU" and s.get("source") == signer_service.PIC for s in doc.signers or []):
+        raise HTTPException(status.HTTP_409_CONFLICT, "\"Diajukan oleh\" memakai profil PIC Klien; tanda tangannya "
+                            "diatur di halaman Akun. Pilih \"Diisi manual\" untuk memakai tanda tangan lain.")
     return doc
 
 
@@ -834,12 +994,10 @@ def get_submitter_signature(document_id: uuid.UUID, user: User = Depends(get_cur
 @router.put("/{document_id}/submitter-signature", response_model=DocumentDetail)
 def set_submitter_signature(document_id: uuid.UUID, body: SignatureIn, user: User = Depends(uploader_roles),
                             db: Session = Depends(get_db)):
-    """Unggah/ganti tanda tangan "Diajukan oleh" (PNG/JPG/WEBP) selama voucher belum terbit. Bila diunggah oleh
-    PIC pengaju sendiri, juga disimpan sebagai tanda tangan default untuk pengajuan berikutnya."""
+    """Unggah/ganti tanda tangan "Diajukan oleh" mode manual (PNG/JPG/WEBP) selama voucher belum terbit. Hanya untuk
+    pengajuan ini; tanda tangan mode PIC diatur di halaman Akun."""
     doc = _signature_editable(db, user, document_id)
     doc.submitter_signature_png = signature_service.normalize(body.image)
-    if user.id == (doc.on_behalf_of or doc.uploaded_by):
-        user.signature_png, user.signature_updated_at = doc.submitter_signature_png, datetime.now(timezone.utc)
     _set_pengaju_signature(db, doc, True)
     audit_service.record(db, user, "SIGNERS_CHANGED", document_id=doc.id, client_id=doc.client_id,
                          field="signature", new_value="Tanda tangan pengaju diunggah")

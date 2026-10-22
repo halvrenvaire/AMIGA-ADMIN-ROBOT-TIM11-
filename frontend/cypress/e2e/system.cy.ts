@@ -136,8 +136,11 @@ describe("System Testing AMIGA Robot Admin", () => {
         ["Voucher Pengeluaran Vendor", "Voucher Pengeluaran Reimburse", "Lainnya"]);
     });
     cy.get("#type").select("Voucher Pengeluaran Reimburse");
-    cy.get("#sub-name").should("have.value", "Rina (PIC Alpha)").clear().type("Andi Wijaya");
-    cy.get("#sub-position").clear().type("Staf Keuangan");
+    // Bawaan: profil PIC Klien (dikunci); isi manual lewat toggle
+    cy.contains(".pic-profile dd", "Rina (PIC Alpha)");
+    cy.contains(".source-toggle button", "Diisi manual").click();
+    cy.get("#sub-name").should("have.value", "").type("Andi Wijaya");
+    cy.get("#sub-position").type("Staf Keuangan");
     cy.contains(".aside .meta dt", "Diajukan oleh").next("dd").should("contain.text", "Andi Wijaya");
     // Mode AI bawaan: total saja
     cy.contains(".mode-card.on", "Total saja");

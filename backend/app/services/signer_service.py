@@ -28,21 +28,25 @@ def pengaju(submitter: User, client: Client, name: str | None = None) -> dict:
             "user_id": str(submitter.id)}
 
 
+PIC, MANUAL = "PIC", "MANUAL"
+
+
 def default_profile(owner: User | None, client: Client) -> dict:
-    """Isian awal profil "Diajukan oleh" (Tahap 14): profil terakhir pemilik akun, selain itu nama PIC,
-    jabatan "PIC Klien", dan nama perusahaan klien."""
+    """Profil "Diajukan oleh" mode PIC (Tahap 15): dikunci ke akun PIC Klien. Nama = nama akun; jabatan dan
+    perusahaan/unit diatur di halaman Akun (kosong = "PIC Klien" dan nama perusahaan klien)."""
     saved = (getattr(owner, "submitter_profile", None) or {}) if owner else {}
-    companies = saved.get("companies") or {}
-    return {"name": saved.get("name") or (owner.full_name if owner else ""),
-            "position": saved.get("position") if saved.get("position") is not None else "PIC Klien",
-            "company": companies.get(str(client.id)) or client.name}
+    companies = saved.get("companies") or {}  # format Tahap 14: perusahaan per klien
+    return {"name": owner.full_name if owner else "",
+            "position": (saved.get("position") or "").strip() or "PIC Klien",
+            "company": (saved.get("company") or "").strip() or companies.get(str(client.id)) or client.name}
 
 
-def pengaju_profile(name: str, position: str | None, company: str | None, signed: bool) -> dict:
-    """Kotak "Diajukan oleh" dari profil pengaju: nama, jabatan, perusahaan/unit, dan apakah ada spesimen tanda
-    tangan yang tersimpan di dokumen (`documents.submitter_signature_png`)."""
+def pengaju_profile(name: str, position: str | None, company: str | None, signed: bool,
+                    source: str = MANUAL) -> dict:
+    """Kotak "Diajukan oleh" dari profil pengaju: nama, jabatan, perusahaan/unit, apakah ada spesimen tanda tangan
+    yang tersimpan di dokumen (`documents.submitter_signature_png`), dan sumbernya (PIC = profil akun, MANUAL)."""
     return {"kind": SignatoryKind.PENGAJU.value, "name": name.strip()[:200], "position": (position or "").strip()[:120],
-            "company": (company or "").strip()[:200], "signature": signed}
+            "company": (company or "").strip()[:200], "signature": signed, "source": source}
 
 
 def _approver(s: Signatory) -> dict:

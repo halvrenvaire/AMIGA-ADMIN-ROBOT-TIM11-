@@ -11,12 +11,13 @@ import { AccountCheckBox, ClassificationPanel } from "../components/DocumentPrev
 import { ReassignModal } from "../components/ReassignModal";
 import { SignatureImage, SignatureModal } from "../components/Signature";
 import { SignerPicker } from "../components/SignerPicker";
+import { LockedProfileView, SourceToggle, type SubmitterSource } from "../components/SubmitterProfile";
 import { Anchor, SectionNav, jumpTo, type NavSection } from "../components/SectionNav";
 import { TaxPanel, TaxSummaryBox } from "../components/TaxPanel";
 import { VendorModal, VerifyVendorModal } from "../components/VendorForm";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
 import { FIELD_LABEL, ISSUE_LABEL, lineSubtotal, plainNumber, rupiah, tanggal, waktu } from "../format";
-import type { DocumentDetail, ExtractionMode, Extraction, FileData, Issue, Payee, Signatory, Vendor } from "../types";
+import type { DocFile, DocumentDetail, ExtractionMode, Extraction, FileData, Issue, Payee, Signatory, Vendor } from "../types";
 import { MODE_INFO } from "./Upload";
 
 type DocumentFile = DocumentDetail["files"][number];
@@ -144,6 +145,13 @@ export function DocumentPage() {
       </div>
 
       {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
+      {d.invoice_limit && (
+        <Alert kind="warn">
+          Satu voucher paling banyak <b>{d.invoice_limit.limit} invoice</b>. AI menemukan lebih banyak di{" "}
+          {d.invoice_limit.files.map((f) => `${f.file} (${f.skipped} invoice tidak dipisah)`).join(", ")}; halamannya ikut bukti
+          terakhir dari file itu. Ajukan sisanya di pengajuan terpisah.
+        </Alert>
+      )}
       {d.cancellation && (
         <Alert kind="warn">
           Pengajuan ini <b>dibatalkan</b> oleh {d.cancellation.by} pada {waktu(d.cancellation.at)}. Alasan: {d.cancellation.reason}
@@ -565,6 +573,7 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       )}
       <small className="muted">{file.original_filename} · {file.page_count} hal.
         {file.data?.manual && <> <span className="chip warn"><PenLine size={11} /> diisi manual: AI tidak membaca bukti ini</span></>}</small>
+      <BuktiPages doc={doc} file={file} busy={busy} dirty={dirty} onPos={onPos} onChange={onChange} onNotice={onNotice} />
 
       <Anchor id="data">
         <div className="section-title">Informasi utama</div>
@@ -1019,6 +1028,109 @@ function VendorOptions({ clientId }: { clientId: string }) {
   return <datalist id="vendor-options">{vendors.data?.map((v) => <option key={v.id} value={v.name} />)}</datalist>;
 }
 
+/** Rentang halaman bukti dari PDF unggahan (Tahap 15): satu PDF bisa berisi beberapa invoice. PIC bisa mengubah
+ *  rentang halaman, menambah bukti dari halaman yang terlewat AI, atau menghapus bukti yang keliru. */
+function BuktiPages({ doc, file, busy, dirty, onPos, onChange, onNotice }: {
+  doc: DocumentDetail; file: DocFile; busy: boolean; dirty: boolean; onPos: (p: number) => void;
+  onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
+}) {
+  const [modal, setModal] = useState<"pages" | "add" | null>(null);
+  const pages = file.upload_pages ?? file.page_count;
+  const from = file.page_from ?? 1;
+  const to = file.page_to ?? pages;
+  const label = from === to ? `hal. ${from}` : `hal. ${from}–${to}`;
+  const guard = () => !dirty || confirm("Perubahan pada bukti ini belum disimpan dan akan hilang. Lanjutkan?");
+
+  async function remove() {
+    if (!guard() || !confirm(`Hapus bukti ${file.position} (${file.original_filename}) dari voucher ini? Halaman PDF-nya tetap dilampirkan bila masih dipakai bukti lain.`)) return;
+    try {
+      const next = await api.del<DocumentDetail>(`/documents/${doc.id}/files/${file.position}`);
+      onPos(Math.min(file.position, next.files.length));
+      onChange(next, { kind: "ok", text: `Bukti ${file.position} dihapus.` });
+    } catch (e) { onNotice({ kind: "error", text: (e as Error).message }); }
+  }
+
+  return (
+    <div className="bukti-pages">
+      <span className="muted">Halaman bukti: <b>{label}</b> dari {pages} hal. {file.upload_name ?? file.original_filename}</span>
+      <div className="actions">
+        {pages > 1 && <button type="button" className="btn sm" disabled={busy} onClick={() => guard() && setModal("pages")}><ListOrdered /> Ubah halaman</button>}
+        <button type="button" className="btn sm" disabled={busy} onClick={() => guard() && setModal("add")}><Plus /> Tambah bukti</button>
+        {doc.files.length > 1 && <button type="button" className="btn ghost sm" disabled={busy} onClick={remove}><Trash2 /> Hapus bukti</button>}
+      </div>
+      {modal && (
+        <PageRangeModal doc={doc} file={file} add={modal === "add"} pages={pages}
+                        start={modal === "add" ? { from: to, to } : { from, to }}
+                        onClose={() => setModal(null)}
+                        onSaved={(next, position, text) => { setModal(null); if (position) onPos(position); onChange(next, { kind: "ok", text }); }} />
+      )}
+    </div>
+  );
+}
+
+function PageRangeModal({ doc, file, add, pages, start, onClose, onSaved }: {
+  doc: DocumentDetail; file: DocFile; add: boolean; pages: number; start: { from: number; to: number };
+  onClose: () => void; onSaved: (d: DocumentDetail, position: number | null, text: string) => void;
+}) {
+  const [from, setFrom] = useState(String(start.from));
+  const [to, setTo] = useState(String(start.to));
+  const [readAi, setReadAi] = useState(doc.ai_enabled !== false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const a = Number(from), b = Number(to);
+  const valid = Number.isInteger(a) && Number.isInteger(b) && a >= 1 && a <= b && b <= pages;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (add) {
+        const next = await api.post<DocumentDetail>(`/documents/${doc.id}/files`,
+          { source_position: file.position, page_from: a, page_to: b, read_ai: readAi });
+        const created = next.files.find((f) => f.upload_name === (file.upload_name ?? file.original_filename)
+          && f.page_from === a && f.page_to === b && !doc.files.some((o) => o.original_filename === f.original_filename));
+        onSaved(next, created?.position ?? null, readAi ? "Bukti ditambahkan. AI sedang membaca bukti baru." : "Bukti ditambahkan. Isi datanya dari file bukti.");
+      } else {
+        const next = await api.put<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/pages`, { page_from: a, page_to: b });
+        onSaved(next, null, "Halaman bukti diperbarui.");
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={add ? "Tambah bukti dari halaman PDF" : `Ubah halaman bukti ${file.position}`} onClose={onClose}>
+      <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        {add ? "Pakai bila AI melewatkan invoice/struk. Bukti baru diambil dari" : "Halaman yang dipakai bukti ini dari"}{" "}
+        <b>{file.upload_name ?? file.original_filename}</b> ({pages} hal.). Sertakan lampirannya, mis. rincian dan Faktur Pajak.
+        {add && " Beberapa struk dalam satu halaman: tambahkan bukti dengan halaman yang sama."}
+      </p>
+      {error && <Alert>{error}</Alert>}
+      <div className="grid-2">
+        <div className="field">
+          <label htmlFor="pg-from">Dari halaman</label>
+          <input id="pg-from" className="input" type="number" min={1} max={pages} value={from} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="pg-to">Sampai halaman</label>
+          <input id="pg-to" className="input" type="number" min={1} max={pages} value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
+      </div>
+      {!valid && <small className="error-text">Pilih halaman 1 sampai {pages}; halaman awal tidak boleh setelah halaman akhir.</small>}
+      {add && doc.ai_enabled !== false && (
+        <label className="toggle"><input type="checkbox" checked={readAi} onChange={(e) => setReadAi(e.target.checked)} />
+          Baca dengan AI (bukti lain tidak dibaca ulang)</label>
+      )}
+      <div className="actions" style={{ justifyContent: "flex-end" }}>
+        <button className="btn" onClick={onClose}>Batal</button>
+        <button className="btn primary" disabled={!valid || busy} onClick={save}>{add ? "Tambah bukti" : "Simpan halaman"}</button>
+      </div>
+    </Modal>
+  );
+}
+
 const KIND_TITLE = { PENGAJU: "Diajukan oleh", PENYETUJU: "Disetujui oleh" } as const;
 
 /** Penanda tangan yang akan dicetak di voucher; PIC/Intake bisa mengubah profil pengaju (nama, jabatan, perusahaan/unit,
@@ -1031,14 +1143,19 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
   const [initial, setInitial] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pengaju = doc.signers.find((s) => s.kind === "PENGAJU");
+  const currentSource: SubmitterSource = pengaju?.source === "PIC" ? "PIC" : "MANUAL";
   const current = {
     name: pengaju?.name ?? doc.on_behalf_of ?? doc.uploaded_by,
     position: pengaju?.position ?? "", company: pengaju?.company ?? "",
   };
+  const [source, setSource] = useState<SubmitterSource>(currentSource);
   const [profile, setProfile] = useState(current);
   const locked = doc.status === "AMIGA_REVIEWED" || doc.status === "SENT_TO_CLIENT" || doc.status === "CANCELLED";
   const canEdit = has("PIC_KLIEN", "INTAKE_SUPPORT") && !locked;
   const sigVersion = doc.submitter_signature ? doc.updated_at : null;
+  const signature = doc.submitter_signature
+    ? <SignatureImage path={`/documents/${doc.id}/submitter-signature`} version={sigVersion} alt="Tanda tangan pengaju" />
+    : <span className="sig-empty">Tanda tangan pengaju: belum ada (diisi basah)</span>;
 
   async function open() {
     const list = await api.get<Signatory[]>("/signatories", { client_id: doc.client.id });
@@ -1046,19 +1163,22 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
     setInitial(doc.signers.filter((x) => x.kind === "PENYETUJU")
       .map((x) => list.find((s) => s.full_name === x.name && s.position === x.position)?.id)
       .filter((id): id is string => Boolean(id)));
-    setProfile(current);
+    setSource(currentSource);
+    setProfile(currentSource === "PIC" ? { name: "", position: "", company: "" } : current);
     setEditing(true);
   }
 
   async function save() {
     setError(null);
-    const changed = profile.name.trim() !== current.name || profile.position.trim() !== current.position
-      || profile.company.trim() !== current.company;
+    const changed = source !== currentSource || (source === "MANUAL" && (profile.name.trim() !== current.name
+      || profile.position.trim() !== current.position || profile.company.trim() !== current.company));
+    if (changed && source === "MANUAL" && !profile.name.trim()) { setError("Isi nama pengaju."); return; }
     try {
       onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/signers`, {
         signatory_ids: ids,
-        ...(changed && { submitter_name: profile.name.trim(), submitter_position: profile.position.trim(),
-                         submitter_company: profile.company.trim() }),
+        ...(changed && (source === "PIC" ? { submitter_source: "PIC" } : {
+          submitter_source: "MANUAL", submitter_name: profile.name.trim(), submitter_position: profile.position.trim(),
+          submitter_company: profile.company.trim() })),
       }));
       setEditing(false);
     } catch (e) { setError((e as Error).message); }
@@ -1080,26 +1200,38 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
       {editing && initial ? (
         <>
           <div className="section-title">Diajukan oleh</div>
-          <div className="grid-3">
-            <div className="field">
-              <label htmlFor="edit-submitter">Nama</label>
-              <input id="edit-submitter" className="input" maxLength={200} value={profile.name}
-                     onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
-              <small>Kosongkan untuk kembali ke PIC pengaju.</small>
-            </div>
-            <div className="field">
-              <label htmlFor="edit-position">Jabatan</label>
-              <input id="edit-position" className="input" maxLength={120} value={profile.position}
-                     onChange={(e) => setProfile({ ...profile, position: e.target.value })} />
-            </div>
-            <div className="field">
-              <label htmlFor="edit-company">Perusahaan / unit</label>
-              <input id="edit-company" className="input" maxLength={200} value={profile.company} placeholder={doc.client.name}
-                     onChange={(e) => setProfile({ ...profile, company: e.target.value })} />
-            </div>
+          <div className="submitter-profile">
+            <SourceToggle value={source} onChange={setSource} />
+            {source === "PIC" ? (
+              currentSource === "PIC"
+                ? <LockedProfileView pic={{ ...current, signature }} accountLink={has("PIC_KLIEN")} />
+                : <p className="muted" style={{ margin: 0, fontSize: 13 }}>Diisi dari profil akun PIC Klien (nama, jabatan,
+                    perusahaan, dan tanda tangan) saat disimpan.</p>
+            ) : (
+              <>
+                <div className="grid-3">
+                  <div className="field">
+                    <label htmlFor="edit-submitter">Nama</label>
+                    <input id="edit-submitter" className="input" maxLength={200} value={profile.name}
+                           onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="edit-position">Jabatan</label>
+                    <input id="edit-position" className="input" maxLength={120} value={profile.position}
+                           onChange={(e) => setProfile({ ...profile, position: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="edit-company">Perusahaan / unit</label>
+                    <input id="edit-company" className="input" maxLength={200} value={profile.company} placeholder={doc.client.name}
+                           onChange={(e) => setProfile({ ...profile, company: e.target.value })} />
+                  </div>
+                </div>
+                <small className="muted">Tanda tangan untuk isian manual ditambahkan setelah disimpan.</small>
+              </>
+            )}
           </div>
           <SignerPicker clientId={doc.client.id} clientName={doc.client.name} initial={initial} onChange={setIds}
-                        submitter={profile.name.trim() || current.name} showSubmitter={false} />
+                        submitter={source === "MANUAL" ? profile.name.trim() || current.name : current.name} showSubmitter={false} />
           <div className="actions" style={{ justifyContent: "flex-end" }}>
             <button className="btn" onClick={() => setEditing(false)}>Batal</button>
             <button className="btn primary" onClick={save}>Simpan</button>
@@ -1118,17 +1250,14 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
       )}
       {!editing && (pengaju || canEdit) && (
         <div className="sig-row">
-          <div className="sig-box">
-            {doc.submitter_signature
-              ? <SignatureImage path={`/documents/${doc.id}/submitter-signature`} version={sigVersion} alt="Tanda tangan pengaju" />
-              : <span className="sig-empty">Tanda tangan pengaju: belum ada (diisi basah)</span>}
-          </div>
-          {canEdit && (
+          <div className="sig-box">{signature}</div>
+          {canEdit && currentSource === "MANUAL" && (
             <div className="sig-actions">
               <button className="btn sm" onClick={() => setSigning(true)}><PenLine /> {doc.submitter_signature ? "Ganti tanda tangan" : "Tambah tanda tangan"}</button>
               {doc.submitter_signature && <button className="btn ghost sm" onClick={removeSignature}><Trash2 /> Hapus</button>}
             </div>
           )}
+          {currentSource === "PIC" && <small className="muted">Diisi PIC Klien: profil dan tanda tangan dari akun PIC.</small>}
         </div>
       )}
       {signing && (

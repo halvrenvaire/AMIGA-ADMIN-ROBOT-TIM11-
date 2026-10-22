@@ -25,7 +25,7 @@ const pct = (v: string | number) => `${Number(v).toLocaleString("id-ID", { maxim
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const VAT_MODES: { value: VatMode; label: string }[] = [
-  { value: "separate", label: "PPN terpisah (ditambahkan di bawah rincian)" },
+  { value: "excluded", label: "Harga belum termasuk PPN (ditambahkan PPN)" },
   { value: "included", label: "Harga sudah termasuk PPN" },
   { value: "none", label: "Tidak ada PPN" },
 ];
@@ -39,32 +39,39 @@ function lineDpp(l: TaxLine, row: Row, vatMode: VatMode, rate: number): number {
   return vatMode === "included" && row.vat ? round2((sub * 100) / (100 + rate)) : sub;
 }
 
-/** DPP invoice tanpa rincian (sama dengan backend tax_service.total_dpp): total x 100 / (100 + tarif). */
+/** DPP invoice tanpa rincian bila harga sudah termasuk PPN (sama dengan backend tax_service.total_dpp). */
 const totalDpp = (total: number, rate: number) => Math.round((total * 100) / (100 + rate));
 
-/** PPN termasuk di total tagihan dan hitungan sistem (sama dengan backend tax_service.vat_breakdown). */
-function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number) {
+/** Format lama "PPN terpisah" dibaca sebagai "harga belum termasuk PPN" (sama dengan backend). */
+const normalizeVatMode = (m: string | null | undefined): VatMode | null =>
+  m === "separate" ? "excluded" : m === "excluded" || m === "included" || m === "none" ? m : null;
+
+/** PPN dan hitungan sistem (sama dengan backend tax_service.vat_breakdown). `payable`: yang dibayar sebelum PPh bila
+ *  PPN ditambahkan ke harga; tanpa `payable` = total invoice. */
+function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number):
+  { amount: number; computed: number; warning: string | null; payable?: number } {
   const items = lines.map((l, i) => ({ l, r: rows[i] })).filter(({ r }) => r && r.kind === "item");
   const itemSum = items.reduce((s, { l }) => s + (Number(l.subtotal) || 0), 0);
   const stated = lines.filter((_, i) => rows[i]?.kind === "vat").reduce((s, l) => s + (Number(l.subtotal) || 0), 0);
   const hasVatLine = rows.some((r) => r.kind === "vat");
   const taxed = items.filter(({ r }) => r.vat);
+  if (vatMode === "excluded") {
+    // Harga belum termasuk PPN: PPN = tarif x DPP, ditambahkan ke harga (tanpa rincian: DPP = total)
+    const base = items.length ? taxed.reduce((s, { l, r }) => s + lineDpp(l, r, vatMode, rate), 0) : Number(total) || 0;
+    const amount = Math.round((base * rate) / 100);
+    const warning = items.length && total !== "" && Math.abs(itemSum + amount - Number(total)) > 100
+      ? `Total invoice (${rupiah(Number(total))}) berbeda dengan harga + PPN hitungan sistem (${rupiah(itemSum + amount)}). Voucher membayar harga + PPN ${pct(rate)}; periksa tarif PPN dan baris yang kena PPN.`
+      : null;
+    return { amount, computed: amount, warning, payable: (items.length ? itemSum : Number(total) || 0) + amount };
+  }
   if (!items.length && vatMode !== "none" && total !== "") {
-    // Tanpa rincian (mode total saja): total = DPP + PPN
+    // Tanpa rincian, harga sudah termasuk PPN: total = DPP + PPN
     const amount = Number(total) - totalDpp(Number(total), rate);
     return { amount, computed: amount, warning: null as string | null };
   }
   if (vatMode === "included") {
     const amount = taxed.reduce((s, { l, r }) => s + (Number(l.subtotal) || 0) - lineDpp(l, r, vatMode, rate), 0);
     return { amount, computed: amount, warning: null as string | null };
-  }
-  if (vatMode === "separate") {
-    const computed = Math.round((taxed.reduce((s, { l, r }) => s + lineDpp(l, r, vatMode, rate), 0) * rate) / 100);
-    const amount = total !== "" ? Number(total) - itemSum : hasVatLine ? stated : computed;
-    const warning = Math.abs(amount - computed) > 100
-      ? `PPN pada invoice (${rupiah(amount)}) berbeda dengan hitungan sistem (${rupiah(computed)} = ${pct(rate)} x DPP baris yang kena PPN). Voucher tetap memakai angka invoice; periksa tarif PPN dan baris yang kena PPN.`
-      : null;
-    return { amount, computed, warning };
   }
   return { amount: 0, computed: 0, warning: hasVatLine && stated ? "Ada baris PPN, tetapi PPN diatur \"Tidak ada PPN\". Periksa kembali pengaturan PPN." : null };
 }
@@ -106,9 +113,9 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
     description: l.description ?? "", subtotal: l.subtotal ?? "", pph: l.pph, vat: l.vat, kind: l.kind,
   })), [file.data]);
   const initialVat = current?.vat;
-  // Sama dengan backend: tanpa pengaturan, "terpisah" bila ada baris PPN, selain itu "tidak ada"
-  const defaultVatMode: VatMode = saved.some(isVatLine) ? "separate" : "none";
-  const [vatMode, setVatMode] = useState<VatMode>(initialVat?.mode ?? defaultVatMode);
+  // Sama dengan backend: tanpa pengaturan, "belum termasuk PPN" bila ada baris PPN, selain itu "tidak ada"
+  const defaultVatMode: VatMode = saved.some(isVatLine) ? "excluded" : "none";
+  const [vatMode, setVatMode] = useState<VatMode>(normalizeVatMode(initialVat?.mode) ?? defaultVatMode);
   const [vatRate, setVatRate] = useState(initialVat ? plainNumber(initialVat.rate) : "11");
   const [vatShow, setVatShow] = useState(initialVat?.show ?? false);
   const startRows = useMemo(() => initialRows(file.data, saved, currentMode === "line"), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -137,9 +144,12 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const dppTotal = itemIdx.reduce((s, i) => s + dpp(i), 0);
   const vat = vatInfo(lines, rows, total, vatMode, vatPct);
   const gross = total === "" ? null : Number(total);
+  // Dibayarkan sebelum PPh: harga + PPN bila PPN ditambahkan, selain itu total invoice
+  const payable = gross == null ? null : calc ? vat.payable ?? gross
+    : vatMode === "excluded" ? gross + (Number(vatAmount) || 0) : gross;
 
   // Mode satu jenis: DPP otomatis = jumlah DPP baris barang/jasa; tanpa rincian = total dikurangi PPN di dalamnya
-  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode === "none" ? gross : totalDpp(gross, vatPct);
+  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode !== "included" ? gross : totalDpp(gross, vatPct);
   const invoiceBase = manual || !calc ? (base === "" ? null : Number(base)) : autoBase;
   const invoiceCut = !calc ? (code === "NONE" ? 0 : Number(cutAmount) || 0)
     : invoiceBase && rateOf(code) ? Math.round((invoiceBase * rateOf(code)) / 100) : 0;
@@ -277,8 +287,9 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
             <select id="vat-mode" className="input" value={vatMode} disabled={off} onChange={(e) => setVatMode(e.target.value as VatMode)}>
               {VAT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
-            <small>{vatMode === "included" ? "Umum di struk ritel: DPP dihitung mundur dari harga." : vatMode === "separate"
-              ? "Baris PPN tidak dicetak sebagai barang dan tidak menjadi dasar PPh." : "Vendor bukan PKP atau tagihan tanpa PPN."}</small>
+            <small>{vatMode === "included" ? "Umum di struk ritel: DPP dihitung mundur dari harga." : vatMode === "excluded"
+              ? `Harga = DPP; PPN ditambahkan (mis. 200.000 + ${pct(vatPct)} = ${rupiah(Math.round(200000 * (1 + vatPct / 100)))}). Baris PPN di invoice tidak dihitung sebagai barang.`
+              : "Vendor bukan PKP atau tagihan tanpa PPN."}</small>
           </div>
           {vatMode !== "none" && (
             <div className="field">
@@ -295,8 +306,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
                 )}
               </div>
               {calc ? (
-                <small>PPN pada tagihan ini: <b className="num">{rupiah(vat.amount)}</b>
-                  {vatMode === "separate" && itemIdx.length > 0 && <> · hitungan sistem {rupiah(vat.computed)}</>}</small>
+                <small>{vatMode === "excluded" ? "PPN ditambahkan" : "PPN pada tagihan ini"}: <b className="num">{rupiah(vat.amount)}</b></small>
               ) : (
                 <input className="input num" type="number" min="0" placeholder="Nilai PPN di invoice" aria-label="Nilai PPN (manual)"
                        style={{ marginTop: 6 }} disabled={off} value={vatAmount} onChange={(e) => setVatAmount(e.target.value)} />
@@ -376,13 +386,13 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
               {calc ? (
                 <div className="tax-calc num">
                   {pct(rateOf(code))} × {rupiah(invoiceBase)} = <b>{rupiah(invoiceCut)}</b>
-                  {gross != null && <div className="muted">Dibayarkan untuk bukti ini: <b>{rupiah(gross - invoiceCut)}</b></div>}
+                  {payable != null && <div className="muted">Dibayarkan untuk bukti ini: <b>{rupiah(payable - invoiceCut)}</b></div>}
                 </div>
               ) : (
                 <>
                   <input id="tax-cut" className="input num" type="number" min="0" disabled={off} value={cutAmount}
                          onChange={(e) => setCutAmount(e.target.value)} />
-                  <small>Tarif acuan {pct(rateOf(code))}{gross != null && <> · dibayarkan untuk bukti ini: <b>{rupiah(gross - invoiceCut)}</b></>}</small>
+                  <small>Tarif acuan {pct(rateOf(code))}{payable != null && <> · dibayarkan untuk bukti ini: <b>{rupiah(payable - invoiceCut)}</b></>}</small>
                 </>
               )}
               {list.find((r) => r.code === code)?.needs_confirmation && <small className="tax-warn">Tarif awal memakai aturan umum; perlu dikonfirmasi konsultan pajak.</small>}
@@ -466,7 +476,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
                           <button type="button" className="link-btn" disabled={off}
                                   onClick={() => {
                                     setRow(i, { kind: item ? "vat" : "item", pph: "" });
-                                    if (item && vatMode === "none") setVatMode("separate");  // baris PPN berarti PPN terpisah
+                                    if (item && vatMode === "none") setVatMode("excluded");  // baris PPN berarti PPN ditambahkan ke harga
                                   }}>
                             {item ? "Tandai sebagai baris PPN" : "Bukan baris PPN"}
                           </button>
@@ -500,7 +510,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           {groups.length === 0 ? <span className="muted">Belum ada baris yang dipotong PPh.</span> : groups.map((g) => (
             <div key={g.code}>{codeName(g.code)} {pct(g.rate)} × {rupiah(g.base)} ({g.lines.length} baris) = <b>{rupiah(g.amount)}</b></div>
           ))}
-          {gross != null && <div className="muted">Total potongan <b>{rupiah(cut)}</b> · dibayarkan untuk bukti ini: <b>{rupiah(gross - cut)}</b></div>}
+          {payable != null && <div className="muted">Total potongan <b>{rupiah(cut)}</b> · dibayarkan untuk bukti ini: <b>{rupiah(payable - cut)}</b></div>}
         </div>
       )}
 
@@ -532,7 +542,7 @@ export function TaxSummaryBox({ summary, multi }: { summary: TaxSummary; multi: 
           {vat.filter((v) => v.mode !== "none").map((v, i) => (
             <Fragment key={`v${i}`}>
               <dt className="muted">PPN {pct(v.rate)}{multi && v.invoice_no ? ` · ${v.invoice_no}` : ""}</dt>
-              <dd className="num muted">{rupiah(v.amount)} <span>termasuk dalam tagihan{v.show ? " · dirinci di voucher" : ""}</span></dd>
+              <dd className="num muted">{rupiah(v.amount)} <span>{v.mode === "excluded" ? "ditambahkan ke harga" : "termasuk dalam tagihan"}{v.show ? " · dirinci di voucher" : ""}</span></dd>
             </Fragment>
           ))}
           {summary.lines.map((t, i) => (

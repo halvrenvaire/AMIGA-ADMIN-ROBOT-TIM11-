@@ -38,7 +38,8 @@ export interface Me {
   /** Spesimen tanda tangan elektronik (PIC Klien), null bila belum ada. */
   signature_updated_at?: string | null;
   /** Profil "Diajukan oleh" terakhir: isian awal pengajuan berikutnya. companies: per id perusahaan. */
-  submitter_profile?: { name?: string; position?: string; companies?: Record<string, string> };
+  /** Profil "Diajukan oleh" mode PIC: jabatan dan perusahaan/unit (kosong = "PIC Klien" / nama perusahaan). */
+  submitter_profile?: { position?: string; company?: string; companies?: Record<string, string> };
 }
 
 export interface AdminUser extends Me { is_active: boolean }
@@ -92,6 +93,15 @@ export interface Extraction {
   duration_ms: number | null;
 }
 
+/** Satu bukti. source_format: "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF. */
+export interface DocFile {
+  position: number; original_filename: string; page_count: number; read_at: string | null; source_format?: string | null;
+  /** Data per invoice yang diedit PIC saat DRAFT/EXCEPTION. */
+  data?: FileData | null;
+  /** Tahap 15: bukti = halaman page_from..page_to dari PDF unggahan (upload_pages halaman); null = seluruh file. */
+  page_from?: number | null; page_to?: number | null; upload_pages?: number | null; upload_name?: string | null;
+}
+
 export interface FileData {
   vendor_name: string | null; invoice_no: string | null; invoice_date: string | null; total: string | null;
   bank_name: string | null; account_no: string | null; account_name: string | null;
@@ -122,7 +132,8 @@ export interface FileLine {
 
 export interface LineSuggestion { code: string; reason: string; source: "ai" | "aturan" }
 
-export type VatMode = "separate" | "included" | "none";
+/** excluded = harga belum termasuk PPN (ditambahkan); "PPN terpisah" lama dibaca sebagai excluded. */
+export type VatMode = "excluded" | "included" | "none";
 export interface VatSetting { mode: VatMode; rate: string; show: boolean; /** PPN diisi manual (hitung otomatis mati). */ amount?: string | null }
 
 export interface TaxGroup { code: string; name: string; rate: string; base: string; amount: string; lines: number[] }
@@ -157,9 +168,7 @@ export interface DocumentDetail extends DocumentSummary {
   vendor: ClientRef | null;
   signers: Signer[];
   /** source_format: "jpg"/"png"/"webp" bila diunggah sebagai foto lalu dikonversi ke PDF. */
-  files: { position: number; original_filename: string; page_count: number; read_at: string | null; source_format?: string | null;
-    /** Data per invoice yang diedit PIC saat DRAFT/EXCEPTION. */
-    data?: FileData | null }[];
+  files: DocFile[];
   cancellation?: { by: string; at: string; reason: string } | null;
   classification?: Classification | null;
   account_check?: AccountCheck | null;
@@ -167,6 +176,8 @@ export interface DocumentDetail extends DocumentSummary {
   /** Isi manual: AI dimatikan atau gagal membaca sebagian/semua invoice. */
   ai_manual?: { status: "off" | "failed"; files: string[]; message: string } | null;
   ai_enabled?: boolean;
+  /** Invoice dalam PDF melebihi batas per voucher; sisanya ikut bukti terakhir. */
+  invoice_limit?: { limit: number; files: { file: string; skipped: number }[] } | null;
   /** Rekening tujuan per vendor (invoice dengan vendor + rekening sama digabung). */
   payees?: Payee[];
   /** Peringatan yang sudah dikonfirmasi PIC dan masih berlaku, per kode kendala. */
@@ -280,6 +291,8 @@ export interface Signer {
   kind: SignatoryKind; name: string; position: string;
   /** Profil pengaju: perusahaan/unit, dan apakah tanda tangan tersimpan di pengajuan ini. */
   company?: string | null; signature?: boolean;
+  /** Sumber "Diajukan oleh": PIC = profil akun PIC Klien (dikunci), MANUAL = diisi manual; null = data lama. */
+  source?: "PIC" | "MANUAL" | null;
 }
 
 export interface VoucherRow {

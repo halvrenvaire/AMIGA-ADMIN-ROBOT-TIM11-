@@ -102,6 +102,47 @@ TOTAL_ACCOUNT_FIELDS = """,
   "account_no": string|null,
   "account_name": string|null"""
 
+# Tahap 15: satu PDF bisa berisi beberapa invoice/struk. AI memindai per potongan halaman (mis. 5 halaman) dan
+# mendaftar setiap tagihan beserta halaman awalnya. Halaman pendukung tidak dihitung sebagai tagihan tersendiri.
+SCAN_SYSTEM_PROMPT = """Kamu staf keuangan yang memilah berkas PDF berisi bukti tagihan. Satu berkas bisa berisi
+BEBERAPA tagihan: beberapa invoice berurutan (masing-masing bisa beberapa halaman), atau beberapa struk/nota dalam
+satu halaman. Daftarkan setiap tagihan (invoice, faktur tagihan, nota tagihan, struk, bon, kuitansi) yang HALAMAN
+AWALNYA (kepala tagihan: nama penjual, nomor, tanggal) ada di halaman yang diberikan.
+BUKAN tagihan tersendiri, jangan didaftarkan: Faktur Pajak (dokumen pajak DJP untuk invoice yang sama), halaman
+rincian/lampiran/detail invoice, lanjutan invoice dari halaman sebelumnya, timesheet, surat jalan, bukti potong,
+bukti transfer, dan surat pengantar. Salin data yang TERLIHAT persis seperti tertulis; isi null bila tidak ada.
+Jangan menghitung, menebak, atau mengarang data."""
+
+SCAN_INSTRUCTION = """PDF ini adalah halaman {first} sampai {last} dari berkas aslinya (halaman pertama PDF ini =
+halaman {first}). Kembalikan HANYA satu objek JSON (tanpa teks lain):
+{{
+  "document_class": "invoice"|"receipt"|"irrelevant"|"uncertain",
+  "document_type": string,
+  "not_invoice_reason": string|null,
+  "invoices": [
+    {{
+      "page": number,
+      "document_class": "invoice"|"receipt"|"uncertain",
+      "document_type": string,
+      "vendor_name": string|null,
+      "invoice_no": string|null,
+      "invoice_date": "YYYY-MM-DD"|null,
+      "total": string|null{account}
+    }}
+  ]
+}}
+"document_class"/"document_type"/"not_invoice_reason" di luar "invoices" menjelaskan halaman-halaman ini secara
+umum (dipakai bila tidak ada tagihan). "invoices" berurutan sesuai letaknya; kosongkan ([]) bila tidak ada tagihan
+yang dimulai di halaman ini. "page" = nomor halaman berkas asli tempat tagihan itu dimulai ({first}–{last}).
+Beberapa struk dalam satu halaman = beberapa entri dengan "page" yang sama. "vendor_name": nama penjual/penerbit,
+bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar, ditulis persis seperti
+di dokumen sebagai teks (mis. "Rp 2.695.000"). Tanggal dokumen Indonesia ditulis hari-bulan-tahun
+("12-10-2026" = "2026-10-12")."""
+
+# Pembacaan satu tagihan di halaman yang memuat beberapa tagihan (mis. beberapa struk dalam satu halaman)
+FOCUS_INSTRUCTION = """
+PENTING: halaman ini memuat beberapa tagihan. Baca HANYA tagihan berikut dan abaikan tagihan lain: {focus}."""
+
 FOLLOWUP_SYSTEM_PROMPT = """Kamu memeriksa ulang satu invoice untuk bagian keuangan. Tugasmu HANYA mencari baris
 pajak, biaya, atau potongan yang terlewat pada pembacaan sebelumnya, lalu menyalinnya persis seperti tertulis.
 Jangan mengulang data lain, jangan mengklasifikasikan dokumen, dan jawab hanya dengan JSON yang diminta."""
@@ -167,6 +208,8 @@ class ExtractedInvoice:
     doc_class: str | None = None
     # Token AI yang terpakai untuk membaca invoice ini: {"input_tokens", "output_tokens"}
     usage: dict = field(default_factory=dict)
+    # Tahap 15: halaman awal invoice di berkas asli (hasil pemindaian berkas berisi beberapa invoice)
+    page: int | None = None
 
     def __post_init__(self):
         if self.doc_class is None or (self.doc_class == INVOICE and not self.is_invoice):
@@ -399,6 +442,48 @@ def _followup_items(answer) -> list[dict]:
 
 
 TOTAL_ONLY_MAX_TOKENS = 600  # jawaban mode total hanya beberapa field
+SCAN_MAX_TOKENS = 3000  # daftar tagihan per potongan halaman (±100 token per tagihan)
+
+
+@dataclass
+class ScanResult:
+    """Hasil pemindaian satu potongan halaman: tagihan yang dimulai di halaman itu (`page` = halaman berkas asli),
+    dan klasifikasi umum halaman itu (dipakai bila tidak ada tagihan)."""
+    invoices: list[ExtractedInvoice]
+    document: ExtractedInvoice
+    usage: dict = field(default_factory=dict)
+
+
+def parse_scan(text: str, first: int, last: int) -> ScanResult:
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ExtractionError("Jawaban AI tidak berisi JSON")
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError as e:
+        raise ExtractionError(f"JSON dari AI tidak valid: {e}") from e
+    if not isinstance(data, dict):
+        raise ExtractionError("JSON dari AI bukan objek")
+    general = {k: data.get(k) for k in ("document_class", "document_type", "not_invoice_reason")}
+    invoices = []
+    for item in data.get("invoices") or []:
+        if not isinstance(item, dict):
+            continue
+        part = parse_response(json.dumps(item))
+        if part.doc_class == IRRELEVANT or not (part.invoice_no or part.vendor_name or part.total is not None):
+            continue
+        try:
+            page = int(item.get("page"))
+        except (TypeError, ValueError):
+            page = first
+        if not first <= page <= last:
+            # Nomor halaman relatif terhadap potongan (1, 2, ...) diubah ke halaman berkas asli
+            page = first + page - 1 if 1 <= page <= last - first + 1 else first
+        part.page = page
+        part.line_items = []
+        invoices.append(part)
+    document = parse_response(json.dumps(general)) if not invoices else ExtractedInvoice()
+    return ScanResult(invoices=invoices, document=document)
 
 
 class InvoiceExtractor:
@@ -416,15 +501,31 @@ class InvoiceExtractor:
             usage[key] = usage.get(key, 0) + int(used.get(key) or 0)
         return text
 
-    def extract(self, pdf_bytes: bytes, mode: str = "ITEMIZED", include_account: bool = True) -> ExtractedInvoice:
-        """`mode`: "TOTAL_ONLY" = hanya total dan data kepala invoice (tanpa rincian); "ITEMIZED" = rincian lengkap."""
+    def scan_chunk(self, pdf_bytes: bytes, first: int, last: int, include_account: bool = True) -> ScanResult:
+        """Daftar tagihan yang dimulai di potongan halaman `first`..`last` (Tahap 15). Data kepala + total saja."""
         usage: dict = {}
+        instruction = SCAN_INSTRUCTION.format(first=first, last=last,
+                                              account=TOTAL_ACCOUNT_FIELDS if include_account else "")
+        try:
+            text = self._read(SCAN_SYSTEM_PROMPT, pdf_bytes, instruction, SCAN_MAX_TOKENS, usage)
+        except BedrockError as e:
+            raise ExtractionError(str(e)) from e
+        result = parse_scan(text, first, last)
+        result.usage = usage
+        return result
+
+    def extract(self, pdf_bytes: bytes, mode: str = "ITEMIZED", include_account: bool = True,
+                focus: str | None = None) -> ExtractedInvoice:
+        """`mode`: "TOTAL_ONLY" = hanya total dan data kepala invoice (tanpa rincian); "ITEMIZED" = rincian lengkap.
+        `focus`: ciri tagihan yang dibaca bila halamannya memuat beberapa tagihan (mis. "nomor X, vendor Y")."""
+        usage: dict = {}
+        extra = FOCUS_INSTRUCTION.format(focus=focus) if focus else ""
         try:
             if mode == "TOTAL_ONLY":
                 instruction = TOTAL_INSTRUCTION.format(account=TOTAL_ACCOUNT_FIELDS if include_account else "")
-                text = self._read(TOTAL_SYSTEM_PROMPT, pdf_bytes, instruction, TOTAL_ONLY_MAX_TOKENS, usage)
+                text = self._read(TOTAL_SYSTEM_PROMPT, pdf_bytes, instruction + extra, TOTAL_ONLY_MAX_TOKENS, usage)
             else:
-                text = self._read(SYSTEM_PROMPT, pdf_bytes, INSTRUCTION, settings.extraction_max_tokens, usage)
+                text = self._read(SYSTEM_PROMPT, pdf_bytes, INSTRUCTION + extra, settings.extraction_max_tokens, usage)
         except BedrockError as e:
             raise ExtractionError(str(e)) from e
         result = parse_response(text)

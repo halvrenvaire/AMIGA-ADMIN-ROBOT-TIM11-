@@ -275,11 +275,13 @@ def voucher_rows(doc) -> tuple[list[tuple[str, Decimal, bool]], Decimal]:
             from app.services.document_processing import default_description  # hindari import melingkar
             text = (data.get("description") or "").strip() or default_description(data) or "Invoice"
             # Uraian sudah menyebut nomor invoice, jadi tanpa awalan [nomor]
+            # Harga belum termasuk PPN: PPN ditambahkan ke total; selain itu total invoice sudah berisi PPN
+            price = total if vat["mode"] == "excluded" else total - vat_amount
             if vat["show"] and vat_amount:
-                rows.append((text, total - vat_amount, False))
+                rows.append((text, price, False))
                 rows.append((f"{tag}PPN {_qty(Decimal(vat['rate']))}%", vat_amount, False))
             else:
-                rows.append((text + (" (termasuk PPN)" if vat_amount else ""), total, False))
+                rows.append((text + (" (termasuk PPN)" if vat_amount else ""), price + vat_amount, False))
         if vat["show"] and items:
             vat_total = sum(shares, Decimal(0))
             if vat_total:
