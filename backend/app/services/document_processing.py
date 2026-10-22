@@ -21,7 +21,7 @@ from app.models import (
     CATEGORY_REIMBURSE, TOTAL_ONLY, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue,
     Vendor,
 )
-from app.services import audit_service, storage, tax_service
+from app.services import audit_service, invoice_split, storage, tax_service
 from app.services.account_check import MISMATCH, payee_checks
 from app.services.extraction_service import (
     INVOICE, IRRELEVANT, RECEIPT, UNCERTAIN, ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor,
@@ -469,6 +469,69 @@ def first_pages(pdf: bytes, limit: int) -> bytes:
         return pdf
 
 
+def split_uploads(db, doc: Document, extractor, keep: set, include_account: bool,
+                  usage: dict) -> tuple[dict, dict | None]:
+    """Pindai setiap PDF unggahan yang belum dipindai dan pecah menjadi satu bukti per invoice (Tahap 15).
+    Hasil: {id bukti: data hasil pindai (kepala invoice + total)} dan catatan bila batas invoice per voucher terlampaui.
+    Pemindaian yang gagal tidak menghentikan proses: file itu dibaca seperti biasa (1 file = 1 bukti)."""
+    targets = [f for f in doc.files if f.id not in keep and f.page_from is None]
+    if not targets:
+        return {}, None
+    remaining = settings.max_invoices_per_voucher - (len(doc.files) - len(targets))
+    scanned: dict = {}
+    skipped: list[dict] = []
+    ordered: list[DocumentFile] = []
+    for idx, f in enumerate(doc.files):
+        ordered.append(f)
+        if f not in targets:
+            continue
+        upload = storage.load(f.file_key)
+        try:
+            total_pages = invoice_split.page_count(upload)
+            invoices, general = invoice_split.scan(extractor, upload, include_account, usage)
+        except ExtractionError as e:
+            log.warning("Pemindaian %s gagal: %s", f.original_filename, e)
+            continue
+        except Exception:  # noqa: BLE001 - file tetap dibaca seperti biasa
+            log.exception("Pemindaian %s gagal tak terduga", f.original_filename)
+            continue
+        key = f.file_key
+        f.upload_key, f.upload_pages = key, total_pages
+        if not invoices:
+            f.page_from, f.page_to = 1, total_pages
+            scanned[f.id] = general
+            continue
+        later = sum(1 for t in targets if t not in ordered)  # file berikutnya minimal 1 bukti
+        cap = max(1, remaining - later)
+        if len(invoices) > cap:
+            skipped.append({"file": f.original_filename, "skipped": len(invoices) - cap})
+            invoices = invoices[:cap]
+        remaining -= len(invoices)
+        ranges = invoice_split.plan(invoices, total_pages)
+        if skipped and skipped[-1]["file"] == f.original_filename:
+            inv, first, _ = ranges[-1]
+            ranges[-1] = (inv, first, total_pages)  # halaman invoice yang tidak dipisah ikut bukti terakhir
+        for j, (inv, first, last) in enumerate(ranges):
+            target = f if j == 0 else DocumentFile(
+                id=uuid.uuid4(), document_id=doc.id, position=2000 + len(ordered),
+                original_filename=f.original_filename, source_file_key=f.source_file_key,
+                source_format=f.source_format, upload_key=key, upload_pages=total_pages)
+            target.file_key = invoice_split.save_piece(upload, key, first, last, total_pages)
+            target.page_from, target.page_to, target.page_count = first, last, last - first + 1
+            if j:
+                db.add(target)
+                ordered.append(target)
+            scanned[target.id] = inv
+    db.flush()
+    invoice_split.renumber(db, doc, ordered)
+    db.expire(doc, ["files"])
+    for key in dict.fromkeys(invoice_split.upload_key(f) for f in doc.files):
+        invoice_split.rename_group(doc, key)
+    db.commit()
+    note = {"limit": settings.max_invoices_per_voucher, "files": skipped} if skipped else None
+    return scanned, note
+
+
 def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_manual: bool = False,
                      lines_only: bool = False) -> None:
     """`retry_manual`: hanya baca ulang invoice yang sebelumnya diisi manual karena AI gagal; data invoice lain tetap.
@@ -493,11 +556,16 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
         total_only = mode == TOTAL_ONLY
         ai_on = settings.ai_extraction_enabled and extractor is not None
         started = time.monotonic()
-        files = doc.files or []
-        sources = [(f, f.original_filename, f.file_key) for f in files] or [(None, doc.original_filename, doc.file_key)]
         parts, checks, manual, errors, fresh, read = [], [], [], [], set(), 0
         usage = {"input_tokens": 0, "output_tokens": 0}
+        scanned, limit_note = {}, None
         try:
+            if ai_on and not lines_only and getattr(extractor, "scan_chunk", None) is not None and doc.files:
+                # Tahap 15: satu PDF bisa berisi beberapa invoice; dipecah dulu menjadi bukti per invoice
+                scanned, limit_note = split_uploads(db, doc, extractor, keep, bool(doc.include_account), usage)
+            files = doc.files or []
+            sources = ([(f, f.original_filename, f.file_key) for f in files]
+                       or [(None, doc.original_filename, doc.file_key)])
             for f, name, key in sources:
                 if f is not None and f.id in keep:
                     parts.append(data_to_part(f.data))
@@ -505,10 +573,20 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                         checks.append(old_checks[name])
                     continue
                 part = None
-                if ai_on:
+                if f is not None and f.id in scanned and (total_only or scanned[f.id].doc_class == IRRELEVANT
+                                                          or not scanned[f.id].invoice_no and
+                                                          scanned[f.id].total is None):
+                    # Mode total: hasil pindai sudah berisi data kepala invoice dan total; tidak dibaca ulang
+                    part = scanned[f.id]
+                elif ai_on:
                     pdf = first_pages(storage.load(key), settings.ai_max_pages)
+                    hint = None
+                    if f is not None:
+                        hint = invoice_split.focus(doc, f, part_to_data(scanned[f.id]) if f.id in scanned
+                                                   else f.data)
                     try:
-                        part = extractor.extract(pdf, mode=mode, include_account=bool(doc.include_account))
+                        part = extractor.extract(pdf, mode=mode, include_account=bool(doc.include_account),
+                                                 **({"focus": hint} if hint else {}))
                     except ExtractionError as e:
                         errors.append(f"{name}: {e}")
                     except Exception as e:  # noqa: BLE001 - AI tidak boleh membuat dokumen macet di PROCESSING
@@ -564,6 +642,8 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                     db.commit()
             data = combine(parts)
             data.raw = {**data.raw, "document_checks": checks}
+            if limit_note or previous.get("invoice_limit"):
+                data.raw["invoice_limit"] = limit_note or previous["invoice_limit"]
             if manual:
                 status = "failed" if ai_on else "off"
                 data.raw["ai"] = {"status": status, "files": manual, "error": "; ".join(errors)[:500] or None,

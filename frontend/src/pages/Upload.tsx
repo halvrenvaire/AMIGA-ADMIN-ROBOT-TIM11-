@@ -4,10 +4,11 @@ import { CheckCircle2, Circle, FileText, ListOrdered, Receipt, Save, UploadCloud
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignerPicker } from "../components/SignerPicker";
-import { SubmitterProfileFields, type SubmitterProfile } from "../components/SubmitterProfile";
+import { EMPTY_PROFILE, SubmitterProfileFields, type LockedProfile, type SubmitterProfile } from "../components/SubmitterProfile";
+import { SignatureImage } from "../components/Signature";
 import { Alert } from "../components/ui";
 import { tanggal, todayIso, REQUEST_CATEGORIES } from "../format";
-import type { DocumentSummary, ExtractionMode, Me, Signatory } from "../types";
+import type { DocumentSummary, ExtractionMode, Signatory } from "../types";
 
 const MAX_MB = 10;
 // Batas bukti per voucher: Reimburse (bon tol, parkir) bisa sampai 20, kategori lain 10
@@ -25,18 +26,6 @@ export const MODE_INFO: Record<ExtractionMode, { title: string; desc: string }> 
   ITEMIZED: { title: "Rincian barang/jasa", desc: "AI membaca setiap baris barang/jasa. Voucher berisi 1 baris per item, pajak bisa diatur per baris." },
 };
 
-/** Isian awal "Diajukan oleh": profil terakhir PIC. Intake Support mengosongkannya (diisi server dari PIC yang diwakili). */
-function startProfile(user: Me | null, isPic: boolean, clientId: string, clientName?: string): SubmitterProfile {
-  const saved = user?.submitter_profile ?? {};
-  if (!isPic) return { name: "", position: "", company: "", signature: null, useSaved: true };
-  return {
-    name: saved.name || user?.full_name || "",
-    position: saved.position ?? "PIC Klien",
-    company: (clientId && saved.companies?.[clientId]) || clientName || "",
-    signature: null, useSaved: true,
-  };
-}
-
 /** Layar 02 — Pembuatan Voucher (PIC Klien, Intake Support). FR-1.1–1.5.
  *  Data pengajuan, profil pengaju, penyetuju, mode AI, lalu file bukti. Setelah disimpan sebagai draf,
  *  pengguna langsung dibawa ke halaman detail untuk memeriksa hasil AI dan mengajukannya. */
@@ -52,7 +41,7 @@ export function Upload() {
   const [requestType, setRequestType] = useState<string>(REQUEST_CATEGORIES[0]);
   const MAX_FILES = maxFilesFor(requestType);
   const [submittedDate, setSubmittedDate] = useState(todayIso());
-  const [profile, setProfile] = useState<SubmitterProfile>(() => startProfile(user, isPic, clientId, company?.name));
+  const [profile, setProfile] = useState<SubmitterProfile>(EMPTY_PROFILE);
   const [signers, setSigners] = useState<string[]>([]);
   const [approvers, setApprovers] = useState<Signatory[]>([]);
   const [mode, setMode] = useState<ExtractionMode>("TOTAL_ONLY");
@@ -66,14 +55,20 @@ export function Upload() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const submitterLabel = profile.name.trim() || (isPic ? user?.full_name ?? "-" : "PIC Klien yang mendelegasikan");
+  // "Diajukan oleh" mode PIC: profil akun PIC Klien (Intake Support: PIC yang mendelegasikan, diisi server)
+  const saved = user?.submitter_profile ?? {};
+  const pic: LockedProfile = isPic && user ? {
+    name: user.full_name, position: saved.position || "PIC Klien",
+    company: saved.company || (clientId && saved.companies?.[clientId]) || company?.name || "Nama perusahaan klien",
+    signature: user.signature_updated_at
+      ? <SignatureImage path="/auth/me/signature" version={user.signature_updated_at} alt="Tanda tangan Anda" />
+      : <span className="sig-empty">Tanpa tanda tangan (diisi basah)</span>,
+  } : null;
+  const submitterLabel = profile.source === "MANUAL" ? profile.name.trim() || "-"
+    : pic?.name ?? "PIC Klien yang mendelegasikan";
 
   function chooseClient(id: string) {
     setClientId(id);
-    // Perusahaan/unit pengaju diingat per klien
-    const name = clients.find((c) => c.id === id)?.name;
-    const saved = user?.submitter_profile?.companies?.[id];
-    if (isPic) setProfile((p) => ({ ...p, company: saved || name || "" }));
   }
 
   function add(list: FileList | null | undefined) {
@@ -108,11 +103,13 @@ export function Upload() {
     form.set("signatory_ids", signers.join(","));
     form.set("extraction_mode", mode);
     form.set("include_account", String(includeAccount));
-    if (profile.name.trim()) form.set("submitter_name", profile.name.trim());
-    if (isPic || profile.position.trim()) form.set("submitter_position", profile.position.trim());
-    if (profile.company.trim()) form.set("submitter_company", profile.company.trim());
-    if (profile.signature) form.set("submitter_signature", profile.signature);
-    form.set("use_saved_signature", String(profile.useSaved));
+    form.set("submitter_source", profile.source);
+    if (profile.source === "MANUAL") {
+      form.set("submitter_name", profile.name.trim());
+      form.set("submitter_position", profile.position.trim());
+      if (profile.company.trim()) form.set("submitter_company", profile.company.trim());
+      if (profile.signature) form.set("submitter_signature", profile.signature);
+    }
     if (extras) {
       form.set("channel", channel);
       if (dueDate) form.set("due_date", dueDate);
@@ -172,10 +169,7 @@ export function Upload() {
         </div>
 
         <div className="section-title">2. Diajukan oleh</div>
-        <SubmitterProfileFields value={profile} onChange={setProfile}
-                                placeholderName={isPic ? user?.full_name : "Kosongkan = PIC yang mendelegasikan"}
-                                savedName={isPic ? (user?.submitter_profile?.name || user?.full_name) : undefined}
-                                savedSignature={isPic ? user?.signature_updated_at ?? null : null} />
+        <SubmitterProfileFields value={profile} onChange={setProfile} pic={pic} accountLink={isPic} />
 
         <div className="section-title">3. Disetujui oleh</div>
         {company

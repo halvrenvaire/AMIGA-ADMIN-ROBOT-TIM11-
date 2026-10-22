@@ -280,6 +280,12 @@ class DocumentFile(Base):
     # Data invoice file ini (hasil AI, lalu dilengkapi/diedit PIC per invoice). Data gabungan voucher
     # di tabel extractions disusun ulang dari data semua file setiap kali PIC menyimpan.
     data: Mapped[dict | None] = mapped_column(JSONB)
+    # Tahap 15: satu PDF unggahan bisa berisi beberapa invoice. Bukti ini = halaman page_from..page_to dari PDF
+    # unggahan di upload_key (file_key = potongan halaman itu). Kosong = data lama / belum dipindai: seluruh file.
+    upload_key: Mapped[str | None] = mapped_column(String(500))
+    page_from: Mapped[int | None] = mapped_column(SmallInteger)
+    page_to: Mapped[int | None] = mapped_column(SmallInteger)
+    upload_pages: Mapped[int | None] = mapped_column(SmallInteger)  # jumlah halaman PDF unggahan
 
     document: Mapped[Document] = relationship(back_populates="files")
 

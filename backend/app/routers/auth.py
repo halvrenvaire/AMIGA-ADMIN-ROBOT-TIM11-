@@ -60,7 +60,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 
 @router.patch("/me", response_model=MeResponse)
 def update_profile(body: ProfileUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Ubah nama tampilan dan/atau email. Mengganti email (dipakai untuk login) wajib dengan password saat ini."""
+    """Ubah nama tampilan, email, dan/atau profil "Diajukan oleh" (jabatan, perusahaan/unit). Mengganti email (dipakai untuk login) wajib dengan password saat ini."""
     if body.full_name is not None and body.full_name.strip() != user.full_name:
         audit_service.record(db, user, "PROFILE_UPDATED", field="full_name",
                              old_value=user.full_name, new_value=body.full_name.strip())
@@ -73,6 +73,14 @@ def update_profile(body: ProfileUpdate, user: User = Depends(get_current_user), 
             raise HTTPException(status.HTTP_409_CONFLICT, "Email sudah dipakai akun lain.")
         audit_service.record(db, user, "PROFILE_UPDATED", field="email", old_value=user.email, new_value=email)
         user.email = email
+    # Profil "Diajukan oleh" mode PIC: jabatan dan perusahaan/unit (perubahan profil tidak dicatat di jejak audit)
+    if body.submitter_position is not None or body.submitter_company is not None:
+        profile = dict(user.submitter_profile or {})
+        if body.submitter_position is not None:
+            profile["position"] = body.submitter_position.strip()
+        if body.submitter_company is not None:
+            profile["company"] = body.submitter_company.strip()
+        user.submitter_profile = profile
     db.commit()
     return user_profile(db, user)
 

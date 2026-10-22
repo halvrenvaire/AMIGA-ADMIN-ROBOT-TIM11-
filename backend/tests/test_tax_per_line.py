@@ -167,7 +167,7 @@ def test_default_voucher_merges_ppn_into_items(extractor):
 def test_show_ppn_detail_on_voucher(extractor):
     doc_id = draft_id(extractor)
     r = per_line(doc_id, {1: "PPH23"}, vat={"mode": "separate", "rate": "11", "show": True})
-    assert r.json()["files"][0]["data"]["tax"]["vat"] == {"mode": "separate", "rate": "11", "show": True}
+    assert r.json()["files"][0]["data"]["tax"]["vat"] == {"mode": "excluded", "rate": "11", "show": True}  # format lama
     text = voucher_text(doc_id)
     assert re.search(r"1 AC Split 1 PK \(2 x Rp ?1\.000\.000\) Rp ?2\.000\.000", text)
     assert re.search(r"3 Potongan PPh 23 .*?\(Rp ?10\.000\) 4 PPN 11% Rp ?275\.000", text)
@@ -194,9 +194,10 @@ def test_ppn_rate_is_selectable_and_mismatch_only_warns(extractor):
     doc_id = draft_id(extractor)
     r = set_tax(doc_id, code="NONE", vat={"mode": "separate", "rate": "12"})
     [vat] = r.json()["tax_summary"]["vat"]
-    assert vat["rate"] == "12" and "berbeda dengan hitungan sistem" in vat["warning"]
-    assert "Rp 300.000" in vat["warning"]  # 12% x 2.500.000
-    assert Decimal(r.json()["tax_summary"]["net"]) == Decimal(2775000)  # tetap total invoice
+    assert vat["rate"] == "12" and "berbeda dengan harga + PPN" in vat["warning"]
+    assert "Rp 2.800.000" in vat["warning"]  # 2.500.000 + 12% x 2.500.000
+    # Harga belum termasuk PPN (Tahap 15): voucher membayar harga + PPN hitungan sistem
+    assert Decimal(r.json()["tax_summary"]["net"]) == Decimal(2800000)
     [vat] = set_tax(doc_id, code="NONE", vat={"mode": "separate", "rate": "11"}).json()["tax_summary"]["vat"]
     assert vat["warning"] is None
     assert send(doc_id).json()["status"] == "READY_FOR_REVIEW"  # peringatan tidak memblokir
@@ -216,10 +217,11 @@ def test_pic_can_mark_a_line_as_ppn(extractor):
     doc_id = draft_id(extractor, invoice(line_items=lines, total=Decimal(2220000)))
     assert detail(doc_id)["files"][0]["data"]["line_suggestions"][1] is not None  # dianggap barang
     tax = set_tax(doc_id, code="PPH23", lines=[{"index": 1, "kind": "vat"}]).json()["files"][0]["data"]["tax"]
-    assert tax["base"] == "2000000" and tax["vat"]["mode"] == "separate"
+    assert tax["base"] == "2000000" and tax["vat"]["mode"] == "excluded"
 
 
-@pytest.mark.parametrize("mode,show", [("separate", False), ("separate", True), ("included", False), ("included", True)])
+@pytest.mark.parametrize("mode,show", [("separate", False), ("separate", True), ("included", False), ("included", True),
+                                       ("excluded", False), ("excluded", True)])
 def test_voucher_rows_always_sum_to_net(mode, show):
     from types import SimpleNamespace as N
     from app.services.voucher_service import voucher_rows
@@ -227,11 +229,30 @@ def test_voucher_rows_always_sum_to_net(mode, show):
         {"description": "Kursi", "qty": "3", "unit_price": "222000", "subtotal": "666000", "pph": "PPH23"},
         {"description": "Meja", "qty": "1", "unit_price": "333000", "subtotal": "333000"},
         {"description": "Ongkir", "subtotal": "111000", "vat": False}]}
-    if mode == "separate":
-        data["line_items"][2] = {"description": "PPN 11%", "subtotal": "111000"}
+    if mode in ("separate", "excluded"):
+        data["line_items"][2] = {"description": "PPN 11%", "subtotal": "110000"}
         data["line_items"][0]["subtotal"], data["line_items"][1]["subtotal"] = "600000", "400000"
+        data["total"] = "1110000"
+    if mode == "separate":
+        data["line_items"][2]["subtotal"] = "110000"
     data["tax"] = tax_service.build(None, True, None, True, data, mode="line", vat={"mode": mode, "rate": "11", "show": show},
                                     table={"PPH23": N(name="PPh 23", rate_npwp=Decimal(2), rate_no_npwp=Decimal(4))})
     rows, paid = voucher_rows(N(files=[N(data=data)], extraction=None))
     assert sum((a for _, a, cut in rows if not cut), Decimal(0)) == Decimal(1110000)
     assert paid == Decimal(1110000) - Decimal(data["tax"]["amount"])
+
+
+def test_price_excluding_ppn_in_itemized_mode(extractor):
+    """Tahap 15: PPN dihitung sistem (tarif x DPP baris) dan ditambahkan; baris PPN di invoice hanya pembanding."""
+    lines = [AC, ExtractedLine("PPN", None, None, Decimal(220000))]
+    doc_id = draft_id(extractor, invoice(line_items=lines, total=Decimal(2220000)))
+    r = set_tax(doc_id, code="NONE", vat={"mode": "excluded", "rate": "11"})
+    [vat] = r.json()["tax_summary"]["vat"]
+    assert (Decimal(vat["amount"]), vat["warning"]) == (Decimal(220000), None)
+    assert Decimal(r.json()["tax_summary"]["net"]) == 2220000
+    # Invoice tanpa baris PPN (total = harga): PPN tetap ditambahkan, ada pengingat selisih
+    doc_id = draft_id(extractor, invoice(line_items=[AC], total=Decimal(2000000), invoice_no="INV-EX2"))
+    r = set_tax(doc_id, code="NONE", vat={"mode": "excluded", "rate": "11"})
+    [vat] = r.json()["tax_summary"]["vat"]
+    assert "berbeda dengan harga + PPN" in vat["warning"] and Decimal(r.json()["tax_summary"]["net"]) == 2220000
+    assert re.search(r"TOTAL DIBAYARKAN Rp ?2\.220\.000", voucher_text(doc_id))

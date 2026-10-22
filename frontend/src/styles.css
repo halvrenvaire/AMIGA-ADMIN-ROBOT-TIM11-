@@ -1181,9 +1181,22 @@ small.block { display: block; }
 .extras summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--fg-2); }
 .extras-body { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 10px; }
 .extras-body .grid-2 { width: 100%; }
-.submitter-profile { display: flex; flex-direction: column; gap: 10px; }
+.submitter-profile { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.submitter-profile > .source-toggle { align-self: flex-start; }
 .sig-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sig-box { display: grid; place-items: center; min-width: 180px; min-height: 56px; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 10px; background: #fff; }
+/* Mode gelap: kotak tanda tangan tidak lagi putih terang; goresan tinta gelap dibalik menjadi terang */
+:root[data-theme="dark"] .sig-box, :root[data-theme="dark"] .sig-frame { background: var(--surface-muted); }
+:root[data-theme="dark"] .sig-box .sig-img, :root[data-theme="dark"] .sig-frame .sig-img,
+:root[data-theme="dark"] .table td .sig-img { filter: invert(1) hue-rotate(180deg); background: transparent; }
+.readonly-value { padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); font-size: 13.5px; min-height: 38px; }
+.source-toggle { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); flex-wrap: wrap; }
+.source-toggle button { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; font: inherit; font-size: 13px; color: var(--fg-2); cursor: pointer; }
+.source-toggle button.on { background: var(--surface); color: var(--fg); font-weight: 600; box-shadow: var(--card-shadow); }
+.pic-profile { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; }
+.pic-profile dt { font-size: 12px; color: var(--fg-3); }
+.pic-profile dd { margin: 2px 0 0; font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .pic-profile { grid-template-columns: 1fr; } }
 .sig-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .error-text { color: var(--red); }
 @media (max-width: 860px) {
@@ -1198,3 +1211,7 @@ small.block { display: block; }
 @media (max-width: 860px) { .voucher-frame { height: 60vh; min-height: 320px; } }
 .ai-cost h2 { display: flex; align-items: center; gap: 6px; }
 .ai-cost .panel-head { flex-wrap: wrap; gap: 10px; }
+
+/* Tahap 15: halaman bukti dari PDF unggahan (satu PDF bisa berisi beberapa invoice) */
+.bukti-pages { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-muted); font-size: 12.5px; }
+.bukti-pages .actions { gap: 6px; }

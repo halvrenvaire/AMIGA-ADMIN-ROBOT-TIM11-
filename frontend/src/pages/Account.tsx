@@ -194,35 +194,81 @@ function AccountInfo({ user }: { user: Me }) {
   );
 }
 
-/** Spesimen tanda tangan elektronik PIC Klien untuk kotak "Diajukan oleh" di voucher. */
+/** Profil "Diajukan oleh" mode PIC: nama akun, jabatan, perusahaan/unit, dan tanda tangan elektronik. Dipakai
+ *  otomatis di voucher bila pengajuan memilih "Diisi PIC Klien". */
 function SignatureCard({ user }: { user: Me }) {
   const { updateSession } = useAuth();
+  const saved = user.submitter_profile ?? {};
+  const [position, setPosition] = useState(saved.position ?? "");
+  const [company, setCompany] = useState(saved.company ?? "");
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [busy, setBusy] = useState(false);
+  const dirty = position.trim() !== (saved.position ?? "") || company.trim() !== (saved.company ?? "");
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      updateSession(await api.patch<Me>("/auth/me", { submitter_position: position.trim(), submitter_company: company.trim() }));
+      setNotice({ kind: "ok", text: "Profil pengaju disimpan. Berlaku untuk pengajuan berikutnya." });
+    } catch (err) {
+      setNotice({ kind: "error", text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function remove() {
-    setError(null);
-    try { updateSession(await api.del<Me>("/auth/me/signature")); } catch (e) { setError((e as Error).message); }
+    setNotice(null);
+    try { updateSession(await api.del<Me>("/auth/me/signature")); } catch (e) { setNotice({ kind: "error", text: (e as Error).message }); }
   }
 
   return (
-    <section className="card panel">
-      <CardHead icon={PenLine} title="Tanda tangan elektronik"
-                note={'Dibubuhkan otomatis di kotak "Diajukan oleh" pada voucher pengajuan Anda.'} />
-      {error && <Alert>{error}</Alert>}
-      <div className="sig-frame">
-        <SignatureImage path="/auth/me/signature" version={user.signature_updated_at ?? null} alt="Tanda tangan Anda" />
+    <form className="card panel" onSubmit={save}>
+      <CardHead icon={PenLine} title={'Profil "Diajukan oleh"'}
+                note={'Dipakai otomatis di voucher bila pengajuan memilih "Diisi PIC Klien".'} />
+      {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
+      <div className="field">
+        <label>Nama</label>
+        <div className="readonly-value">{user.full_name}</div>
+        <small>Sama dengan nama tampilan di kartu Profil.</small>
       </div>
-      <div className="actions">
-        <button className="btn sm" onClick={() => setOpen(true)}><PenLine /> {user.signature_updated_at ? "Ganti" : "Buat tanda tangan"}</button>
-        {user.signature_updated_at && <button className="btn sm" onClick={remove}>Hapus</button>}
+      <div className="grid-2">
+        <div className="field">
+          <label htmlFor="sp-position">Jabatan</label>
+          <input id="sp-position" className="input" maxLength={120} value={position} placeholder="PIC Klien"
+                 onChange={(e) => setPosition(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="sp-company">Perusahaan / unit</label>
+          <input id="sp-company" className="input" maxLength={200} value={company} placeholder="Kosongkan = nama perusahaan"
+                 onChange={(e) => setCompany(e.target.value)} />
+        </div>
       </div>
-      <small className="muted">Tanpa tanda tangan elektronik, kotak di voucher tetap kosong untuk tanda tangan basah.</small>
+      <div className="field">
+        <label>Tanda tangan elektronik</label>
+        <div className="sig-frame">
+          <SignatureImage path="/auth/me/signature" version={user.signature_updated_at ?? null} alt="Tanda tangan Anda" />
+        </div>
+        <div className="actions">
+          <button type="button" className="btn sm" onClick={() => setOpen(true)}>
+            <PenLine /> {user.signature_updated_at ? "Ganti" : "Buat tanda tangan"}
+          </button>
+          {user.signature_updated_at && <button type="button" className="btn sm" onClick={remove}>Hapus</button>}
+        </div>
+        <small>Tanpa tanda tangan elektronik, kotak di voucher tetap kosong untuk tanda tangan basah.</small>
+      </div>
+      <div className="actions" style={{ justifyContent: "flex-end" }}>
+        {dirty && <button type="button" className="btn" onClick={() => { setPosition(saved.position ?? ""); setCompany(saved.company ?? ""); }}>Batal</button>}
+        <button className="btn primary" disabled={busy || !dirty}>Simpan profil pengaju</button>
+      </div>
       {open && (
         <SignatureModal title="Tanda tangan Anda" signer={user.full_name} onClose={() => setOpen(false)}
                         onSave={async (image) => { updateSession(await api.put<Me>("/auth/me/signature", { image })); setOpen(false); }} />
       )}
-    </section>
+    </form>
   );
 }
 

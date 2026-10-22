@@ -31,7 +31,8 @@ _Terakhir diperbarui: 22 Okt 2026_
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
 | 12 | Berkas invoice banyak halaman (invoice + Faktur Pajak + timesheet) | Kecil | 2/2 | ✅ |
 | 13 | Feedback uji coba 21–22 Okt: rekening opsional, alur simpan jelas, tampilan HP, full fit layar lebar & hide sidebar desktop | Sedang | 6/6 | ✅ |
-| 14 | Mode AI total saja/rincian, rekening jadi fitur tambahan, pajak otomatis/manual, profil & tanda tangan pengaju, pratinjau voucher, estimasi biaya AI | Besar | 10/10 | ✅ (belum di-commit) |
+| 14 | Mode AI total saja/rincian, rekening jadi fitur tambahan, pajak otomatis/manual, profil & tanda tangan pengaju, pratinjau voucher, estimasi biaya AI | Besar | 10/10 | ✅ |
+| 15 | Toggle "Diajukan oleh" (profil PIC terkunci / isi manual), banyak invoice dalam satu PDF (pindai per 5 halaman, satu bukti per invoice, rentang halaman bisa diubah), tanda tangan di mode gelap, PPN "harga belum termasuk PPN" | Besar | 9/9 | ✅ (belum di-commit) |
 
 ---
 
@@ -212,11 +213,29 @@ mode "Rincian" tanpa fitur rekening, data rekeningnya tetap tersimpan, dan salin
 | T14.3 | Rekening tujuan jadi **fitur tambahan** (toggle "Perlu input rekening tujuan ke voucher", bawaan mati): bila aktif, rekening dibaca AI, diisi, dicek ke data vendor, dan dicetak di voucher. `VENDOR_MISMATCH` dan `ACCOUNT_MISMATCH` jadi **pengingat** yang tidak menahan pengajuan maupun persetujuan; rekening berbeda/belum terverifikasi tetap perlu konfirmasi reviewer saat menyetujui | [x] | belum di-commit |
 | T14.4 | Pajak mode Total saja: DPP otomatis dari total sesuai perlakuan PPN (terpisah/termasuk/tanpa + tarif), tetap bisa diubah; PPh di level dokumen. Opsi **"Hitung pajak otomatis"** (bawaan aktif); bila dimatikan, DPP, PPN, dan potongan PPh diisi manual | [x] | belum di-commit |
 | T14.5 | Uraian per invoice (bawaan "Invoice {nomor} - {vendor}", bisa diedit) dicetak sebagai satu baris voucher; wajib terisi sebelum diajukan | [x] | belum di-commit |
-| T14.6 | Profil **Diajukan oleh**: nama, jabatan, perusahaan/unit, tanda tangan (PNG/JPG/WEBP, maks. 2 MB). Disimpan per pengajuan dan diingat sebagai isian awal PIC; bisa diubah di halaman detail; dicetak di simulasi dan voucher final. Unggahan Telegram memakai mode Total saja dan profil tersimpan | [x] | belum di-commit |
+| T14.6 | Profil **Diajukan oleh** (**diganti oleh T15.1–T15.2**: profil tidak lagi diingat dari isian pengajuan): nama, jabatan, perusahaan/unit, tanda tangan (PNG/JPG/WEBP, maks. 2 MB). Disimpan per pengajuan dan diingat sebagai isian awal PIC; bisa diubah di halaman detail; dicetak di simulasi dan voucher final. Unggahan Telegram memakai mode Total saja dan profil tersimpan | [x] | belum di-commit |
 | T14.7 | Halaman 1 disusun ulang: Klien → Kategori → Tanggal → Diajukan oleh → Disetujui oleh → Mode AI → Fitur tambahan (saluran & tenggat, rekening) → File bukti, lalu **Simpan draf & lanjutkan** langsung ke halaman detail. Saluran & tenggat jadi opsional | [x] | belum di-commit |
 | T14.8 | Halaman 2: mode Total saja menampilkan formulir ringkas (data utama, uraian, total, pajak dokumen) tanpa tabel rincian; **pratinjau voucher** langsung di halaman (di HP lewat tombol buka di tab baru); tombol "Kirim ke reviewer" menjadi **Ajukan untuk Direview** (aktif setelah uraian dan pajak terisi) | [x] | belum di-commit |
 | T14.9 | **Estimasi biaya AI** per mode (token tercatat per pengajuan × harga di pengaturan) di Dashboard Service Lead dan halaman Pengguna System Admin; `GET /dashboard/ai-usage` | [x] | belum di-commit |
 | T14.10 | Cek ulang tampilan HP (390 px) untuk halaman unggah, detail, pajak, dan kartu biaya AI: tidak ada geser ke samping; test backend `tests/test_total_only.py` + test lama disesuaikan; Cypress disesuaikan dengan alur baru (belum dijalankan ulang) | [x] | belum di-commit |
+
+## Tahap 15 — Toggle pengaju & banyak invoice dalam satu PDF (feedback owner 22 Okt 2026)
+
+Sumber: masukan owner 22 Okt 2026 dengan contoh `contoh voucher bayar owner (tidak disimpan di repo)` (32 halaman: tiap
+invoice = halaman invoice + rincian + 2 halaman Faktur Pajak) beserta jawaban open question. Data lama tetap aman: bukti
+lama tetap 1 file = 1 bukti (kolom halaman kosong), salinan penanda tangan lama tetap tercetak.
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T15.1 | **Diajukan oleh** punya pilihan **Diisi PIC Klien** (bawaan; nama, jabatan, perusahaan/unit, dan tanda tangan dikunci ke profil akun PIC) atau **Diisi manual** (nama wajib, jabatan, perusahaan, tanda tangan opsional; kosong = tanda tangan basah). Isian manual tidak diingat. Intake Support: mode PIC memakai profil PIC yang mendelegasikan, tetap bisa pilih manual. Field `submitter_source` di unggah dan `PUT /documents/{id}/signers` | [x] | belum di-commit |
+| T15.2 | Halaman **Akun**: kartu Profil "Diajukan oleh" (jabatan, perusahaan/unit, tanda tangan elektronik); nama mengikuti nama tampilan. Tanda tangan di halaman detail hanya bisa diganti untuk isian manual | [x] | belum di-commit |
+| T15.3 | Kotak tanda tangan tidak lagi putih terang di **mode gelap**: latar mengikuti tema dan goresan tinta dibalik menjadi terang | [x] | belum di-commit |
+| T15.4 | **Banyak invoice dalam satu PDF**: AI memindai semua halaman per 5 halaman (`AI_MAX_PAGES`) sampai `AI_MAX_SCAN_PAGES` (bawaan 40) dan mendaftar tiap invoice/struk (nomor, tanggal, vendor, total, halaman awal). Faktur Pajak, rincian, timesheet tidak dihitung sebagai invoice. Bila potongan pertama tidak memuat tagihan, pemindaian berhenti (hemat token). Mode Total saja memakai hasil pindai tanpa membaca ulang | [x] | belum di-commit |
+| T15.5 | Setiap invoice jadi satu **bukti** (tab, uraian, pajak, satu baris voucher): invoice di halaman berbeda dipotong per rentang halaman (invoice + lampirannya sampai sebelum invoice berikutnya); beberapa struk dalam satu halaman = beberapa bukti di halaman yang sama (mode Rincian membaca ulang tiap struk dengan petunjuk struk mana). Lampiran voucher tetap memuat PDF unggahan utuh, sekali. Migrasi `b8d2e4f6a713` (`upload_key`, `page_from`, `page_to`, `upload_pages`) | [x] | belum di-commit |
+| T15.6 | PIC bisa **mengubah rentang halaman**, **menambah bukti** dari halaman yang terlewat AI (dibaca AI atau diisi manual), dan **menghapus bukti** (minimal 1); semua tercatat di jejak audit. Endpoint `PUT /documents/{id}/files/{n}/pages`, `POST /documents/{id}/files`, `DELETE /documents/{id}/files/{n}` | [x] | belum di-commit |
+| T15.7 | Batas **invoice per voucher** dihitung per invoice yang terdeteksi: `MAX_INVOICES_PER_VOUCHER` (bawaan 30); kelebihannya ikut bukti terakhir dan muncul peringatan. `backend/.env.example` diperbarui | [x] | belum di-commit |
+| T15.8 | Test backend `tests/test_invoice_split.py` (berkas mirip DSS, struk satu halaman, batas, ubah/tambah/hapus bukti, prompt pindai) dan `tests/test_total_only.py` (toggle PIC/manual, tidak diingat, Intake); cek browser desktop dan HP 390 px (mode gelap) tanpa geser ke samping | [x] | belum di-commit |
+| T15.9 | Pilihan PPN "PPN terpisah" diganti **Harga belum termasuk PPN (ditambahkan PPN)**: harga = DPP dan PPN ditambahkan (mis. 200.000 dengan PPN 11% = 222.000 di baris voucher; PPh dihitung dari 200.000). Mode rincian: PPN dihitung sistem (tarif x DPP baris yang kena PPN); baris PPN di invoice hanya pembanding, selisih lebih dari Rp 100 dari total invoice menjadi pengingat. Data lama "PPN terpisah" ikut dihitung cara baru (keputusan owner: masih uji coba) | [x] | belum di-commit |
 
 ---
 
@@ -238,3 +257,5 @@ mode "Rincian" tanpa fitur rekening, data rekeningnya tetap tersimpan, dan salin
 | 22 Okt 2026 | T13.4 ditambahkan dan selesai: pencarian tersedia di laci menu HP |
 | 22 Okt 2026 | Tahap 14 ditambahkan dan selesai (T14.1–T14.10, belum di-commit); T1.6, T2.5 (bagian rekening), T10.4, T10.5, T11.4, T13.1 ditandai diganti oleh T14.x |
 | 22 Okt 2026 | T13.5–T13.6 ditambahkan dan selesai: tampilan dashboard full fit ke kanan (hapus max-width 1440px) dan fitur minimizing sidebar desktop (ikon di header sidebar, transisi halus, mode mini 68px dengan hover tooltip berpanah) serta persistensi localStorage |
+| 22 Okt 2026 | Hash `89d5d6a` diisi untuk Tahap 14. Tahap 15 ditambahkan dan selesai (T15.1–T15.8, belum di-commit): toggle Diajukan oleh, banyak invoice per PDF, tanda tangan mode gelap; T14.6 ditandai diganti oleh T15.1–T15.2 |
+| 22 Okt 2026 | T15.9 ditambahkan dan selesai (belum di-commit): PPN "harga belum termasuk PPN (ditambahkan PPN)" menggantikan "PPN terpisah" |

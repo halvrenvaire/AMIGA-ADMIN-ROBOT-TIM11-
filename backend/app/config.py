@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # dan timesheet. AI hanya membaca N halaman pertama (data invoice dan Faktur Pajak); semua halaman tetap
     # dilampirkan di voucher. Juga menjaga batas ukuran dokumen Amazon Bedrock (±4,5 MB).
     ai_max_pages: int = 5
+    # Tahap 15: satu PDF bisa berisi beberapa invoice. AI memindai halaman per `ai_max_pages` halaman sampai batas ini
+    # per file untuk mencari setiap invoice/struk; halaman sesudahnya tetap dilampirkan tetapi tidak dipindai.
+    ai_max_scan_pages: int = 40
+    # Batas jumlah invoice/bukti dalam satu voucher (dihitung per invoice yang terdeteksi, bukan per file)
+    max_invoices_per_voucher: int = 30
     # Estimasi biaya AI di Dasbor (System Admin & Service Lead): harga per 1.000 token model pembaca invoice (USD)
     # dan kurs. Bawaan = harga publik Amazon Nova Lite; sesuaikan dengan tagihan AWS sebenarnya.
     ai_price_input_per_1k_usd: float = 0.00006

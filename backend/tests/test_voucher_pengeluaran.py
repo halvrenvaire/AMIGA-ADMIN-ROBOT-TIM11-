@@ -36,7 +36,7 @@ def test_submitter_name_can_be_another_employee(extractor):
     doc = detail(upload(submitter_name="Andi Wijaya", include_account="false").json()["id"])
     pengaju = doc["signers"][0]
     assert pengaju["kind"] == "PENGAJU" and pengaju["name"] == "Andi Wijaya"
-    assert (pengaju["position"], pengaju["company"], pengaju["signature"]) == ("PIC Klien", "PT Klien Alpha", False)
+    assert (pengaju["position"], pengaju["company"], pengaju["signature"]) == ("", "PT Klien Alpha", False)
     approve(doc)
     text = pdf_text(api(PIC).get(f"/documents/{doc['id']}/voucher").content)
     assert "Andi Wijaya" in text and "Rina (PIC Alpha)" not in text

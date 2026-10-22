@@ -121,7 +121,10 @@ def suggest(bedrock, items: list[dict], reimburse: bool, valid: set[str]) -> lis
     return result
 
 
-VAT_MODES = ("separate", "included", "none")  # PPN terpisah di bawah barang / sudah termasuk harga / tidak ada
+# Tahap 15: "excluded" = harga belum termasuk PPN, PPN ditambahkan (DPP + tarif x DPP). "separate" (PPN terpisah,
+# sebelum Tahap 15) dibaca sebagai "excluded": logikanya sama (keputusan owner 22 Okt 2026, data masih uji coba).
+VAT_MODES = ("excluded", "included", "none")
+LEGACY_VAT_MODES = {"separate": "excluded"}
 DEFAULT_VAT_RATE = Decimal(11)
 LINE = "LINE"  # kode pajak invoice bila PPh dipilih per baris
 VAT_TOLERANCE = Decimal(100)  # selisih PPN invoice vs hitungan sistem yang dianggap pembulatan
@@ -145,11 +148,12 @@ def item_lines(data: dict) -> list[tuple[int, dict]]:
 
 
 def vat_settings(tax: dict | None, data: dict) -> dict:
-    """Pengaturan PPN satu invoice. Bawaan: "terpisah" bila ada baris PPN, selain itu "tidak ada"; tarif 11%;
+    """Pengaturan PPN satu invoice. Bawaan: "belum termasuk PPN" (ditambahkan) bila ada baris PPN, selain itu "tidak ada"; tarif 11%;
     rincian PPN tidak dicetak di voucher (PPN dilebur ke nilai barang)."""
     v = (tax or {}).get("vat") or {}
-    mode = v.get("mode") if v.get("mode") in VAT_MODES else (
-        "separate" if any(line_is_vat(li) for li in data.get("line_items") or []) else "none")
+    mode = LEGACY_VAT_MODES.get(v.get("mode"), v.get("mode"))
+    if mode not in VAT_MODES:
+        mode = "excluded" if any(line_is_vat(li) for li in data.get("line_items") or []) else "none"
     rate = _dec(v.get("rate")) or DEFAULT_VAT_RATE
     out = {"mode": mode, "rate": _num(rate), "show": bool(v.get("show"))}
     if v.get("amount") not in (None, ""):
@@ -158,9 +162,9 @@ def vat_settings(tax: dict | None, data: dict) -> dict:
 
 
 def total_dpp(total: Decimal | None, vat: dict) -> Decimal | None:
-    """DPP invoice tanpa rincian (mode total saja): total dikurangi PPN yang termasuk di dalamnya.
-    PPN terpisah atau termasuk harga: total = DPP + PPN, jadi DPP = total x 100 / (100 + tarif)."""
-    if total is None or vat["mode"] == "none":
+    """DPP invoice tanpa rincian (mode total saja). Harga belum termasuk PPN (ditambahkan): DPP = total.
+    Harga sudah termasuk PPN: total = DPP + PPN, jadi DPP = total x 100 / (100 + tarif)."""
+    if total is None or vat["mode"] in ("none", "excluded"):
         return total
     return (total * 100 / (100 + Decimal(vat["rate"]))).quantize(Decimal(1), rounding=ROUND_HALF_UP)
 
@@ -201,20 +205,20 @@ def vat_breakdown(data: dict, vat: dict | None = None) -> dict:
     if vat.get("amount") is not None:
         # Diisi manual PIC: dipakai apa adanya, tanpa hitungan dan peringatan sistem
         amount = computed = Decimal(vat["amount"]) if vat["mode"] != "none" else Decimal(0)
+    elif vat["mode"] == "excluded":
+        # Harga belum termasuk PPN: PPN = tarif x DPP, ditambahkan ke harga. Tanpa rincian: DPP = total invoice
+        base = sum((line_dpp(li, vat) for li in taxed), Decimal(0)) if items else (total or Decimal(0))
+        amount = computed = (base * rate / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+        if items and total is not None and abs(item_sum + computed - total) > VAT_TOLERANCE:
+            warning = (f"Total invoice (Rp {total:,.0f}) berbeda dengan harga + PPN hitungan sistem "
+                       f"(Rp {item_sum + computed:,.0f}). Voucher membayar harga + PPN {_num(rate)}%; periksa tarif "
+                       f"PPN dan baris yang kena PPN.").replace(",", ".")
     elif not items and total is not None and vat["mode"] != "none":
         # Tanpa rincian (mode total saja): PPN = total - DPP
         amount = computed = total - total_dpp(total, vat)
     elif vat["mode"] == "included":
         computed = sum(((_dec(li.get("subtotal")) or Decimal(0)) - line_dpp(li, vat) for li in taxed), Decimal(0))
         amount = computed
-    elif vat["mode"] == "separate":
-        computed = (sum((line_dpp(li, vat) for li in taxed), Decimal(0)) * rate / 100).quantize(
-            Decimal(1), rounding=ROUND_HALF_UP)
-        amount = (total - item_sum) if total is not None else (stated if stated is not None else computed)
-        if abs(amount - computed) > VAT_TOLERANCE:
-            warning = (f"PPN pada invoice (Rp {amount:,.0f}) berbeda dengan hitungan sistem (Rp {computed:,.0f} = "
-                       f"{_num(rate)}% x DPP baris yang kena PPN). Voucher tetap memakai angka invoice; periksa tarif "
-                       f"PPN dan baris yang kena PPN.").replace(",", ".")
     else:
         computed = amount = Decimal(0)
         if stated:
@@ -297,8 +301,8 @@ def recompute(tax: dict | None, data: dict) -> dict | None:
 
 def label(tax: dict | None) -> str:
     vat = (tax or {}).get("vat") or {}
-    vat_text = {"separate": f"; PPN terpisah {vat.get('rate')}%", "included": f"; harga termasuk PPN {vat.get('rate')}%",
-                "none": "; tanpa PPN"}.get(vat.get("mode"), "")
+    vat_text = {"included": f"; harga termasuk PPN {vat.get('rate')}%",
+                "excluded": f"; harga belum termasuk PPN, ditambah PPN {vat.get('rate')}%", "none": "; tanpa PPN"}.get(vat.get("mode"), "")
     if vat.get("show"):
         vat_text += ", rincian PPN dicetak"
     if tax and tax.get("mode") == "line":
@@ -455,6 +459,12 @@ def summary(doc) -> Summary:
         data = f.data or {}
         tax = data.get("tax")
         vat = vat_breakdown(data, vat_settings(tax, data))
+        if vat["mode"] == "excluded" and result.gross is not None:
+            # PPN ditambahkan: yang dibayar = harga (rincian, atau total bila tanpa rincian) + PPN, bukan total invoice
+            items = item_lines(data)
+            price = (sum((_dec(li.get("subtotal")) or Decimal(0) for _, li in items), Decimal(0)) if items
+                     else _dec(data.get("total")) or Decimal(0))
+            result.gross += price + vat["amount"] - (_dec(data.get("total")) or Decimal(0))
         if vat["mode"] != "none" or vat["warning"]:
             result.vat.append(VatLine(data.get("invoice_no"), vat["mode"], Decimal(vat["rate"]), vat["amount"],
                                       vat["show"], vat["warning"]))
