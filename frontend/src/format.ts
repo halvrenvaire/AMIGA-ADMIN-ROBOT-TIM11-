@@ -32,11 +32,11 @@ export const ISSUE_LABEL: Record<IssueCode, string> = {
   POSSIBLE_DUPLICATE: "Kemungkinan duplikat",
   EXTRACTION_FAILED: "AI gagal membaca",
   RETURNED_BY_REVIEWER: "Dikembalikan reviewer",
-  VENDOR_MISMATCH: "Vendor/rekening berbeda",
+  VENDOR_MISMATCH: "Vendor berbeda",
   NOT_AN_INVOICE: "Dokumen tidak relevan",
   RECEIPT_NOT_INVOICE: "Struk/nota, bukan invoice resmi",
   NEEDS_MANUAL_REVIEW: "Perlu pemeriksaan manual",
-  ACCOUNT_MISMATCH: "Rekening tidak cocok",
+  ACCOUNT_MISMATCH: "Rekening berbeda",
 };
 
 export const FIELD_LABEL: Record<string, string> = {

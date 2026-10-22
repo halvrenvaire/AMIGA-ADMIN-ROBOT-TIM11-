@@ -59,6 +59,11 @@ class BedrockClient:
 
     def read_pdf(self, system_prompt: str, pdf_bytes: bytes, instruction: str, max_tokens: int) -> str:
         """Kirim PDF langsung ke model (Converse API, blok dokumen) dan kembalikan teks jawabannya."""
+        return self.read_pdf_usage(system_prompt, pdf_bytes, instruction, max_tokens)[0]
+
+    def read_pdf_usage(self, system_prompt: str, pdf_bytes: bytes, instruction: str,
+                       max_tokens: int) -> tuple[str, dict]:
+        """Seperti read_pdf, ditambah token yang terpakai ({"input_tokens", "output_tokens"}) untuk estimasi biaya."""
         try:
             response = self.llm_runtime.converse(
                 modelId=settings.extraction_model_id or settings.llm_model,
@@ -71,4 +76,6 @@ class BedrockClient:
             )
         except (ClientError, BotoCoreError) as e:
             raise BedrockError(f"Membaca PDF gagal: {e}") from e
-        return response["output"]["message"]["content"][0]["text"].strip()
+        usage = response.get("usage") or {}
+        return (response["output"]["message"]["content"][0]["text"].strip(),
+                {"input_tokens": usage.get("inputTokens", 0), "output_tokens": usage.get("outputTokens", 0)})

@@ -39,6 +39,9 @@ function lineDpp(l: TaxLine, row: Row, vatMode: VatMode, rate: number): number {
   return vatMode === "included" && row.vat ? round2((sub * 100) / (100 + rate)) : sub;
 }
 
+/** DPP invoice tanpa rincian (sama dengan backend tax_service.total_dpp): total x 100 / (100 + tarif). */
+const totalDpp = (total: number, rate: number) => Math.round((total * 100) / (100 + rate));
+
 /** PPN termasuk di total tagihan dan hitungan sistem (sama dengan backend tax_service.vat_breakdown). */
 function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number) {
   const items = lines.map((l, i) => ({ l, r: rows[i] })).filter(({ r }) => r && r.kind === "item");
@@ -46,6 +49,11 @@ function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode,
   const stated = lines.filter((_, i) => rows[i]?.kind === "vat").reduce((s, l) => s + (Number(l.subtotal) || 0), 0);
   const hasVatLine = rows.some((r) => r.kind === "vat");
   const taxed = items.filter(({ r }) => r.vat);
+  if (!items.length && vatMode !== "none" && total !== "") {
+    // Tanpa rincian (mode total saja): total = DPP + PPN
+    const amount = Number(total) - totalDpp(Number(total), rate);
+    return { amount, computed: amount, warning: null as string | null };
+  }
   if (vatMode === "included") {
     const amount = taxed.reduce((s, { l, r }) => s + (Number(l.subtotal) || 0) - lineDpp(l, r, vatMode, rate), 0);
     return { amount, computed: amount, warning: null as string | null };
@@ -89,6 +97,10 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const [npwp, setNpwp] = useState(current?.npwp ?? known !== false);
   const [manual, setManual] = useState(current && currentMode === "invoice" ? !current.base_auto : false);
   const [base, setBase] = useState(current && currentMode === "invoice" && !current.base_auto ? plainNumber(current.base ?? null) : "");
+  // Hitung pajak otomatis (bawaan). Dimatikan: DPP, PPN, dan potongan PPh diisi sendiri oleh PIC
+  const [calc, setCalc] = useState(current?.calc !== false);
+  const [vatAmount, setVatAmount] = useState(current?.calc === false ? plainNumber(current.vat?.amount ?? null) : "");
+  const [cutAmount, setCutAmount] = useState(current?.calc === false ? plainNumber(current.amount ?? null) : "");
   // Pengaturan baris yang tersimpan di server (panel nonaktif selama data invoice belum disimpan, jadi barisnya sama)
   const saved = useMemo<TaxLine[]>(() => (file.data?.line_items ?? []).map((l) => ({
     description: l.description ?? "", subtotal: l.subtotal ?? "", pph: l.pph, vat: l.vat, kind: l.kind,
@@ -126,10 +138,11 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const vat = vatInfo(lines, rows, total, vatMode, vatPct);
   const gross = total === "" ? null : Number(total);
 
-  // Mode satu jenis: DPP otomatis = jumlah DPP baris barang/jasa; bila tidak ada rincian, total invoice
-  const autoBase = dppTotal > 0 ? dppTotal : gross;
-  const invoiceBase = manual ? (base === "" ? null : Number(base)) : autoBase;
-  const invoiceCut = invoiceBase && rateOf(code) ? Math.round((invoiceBase * rateOf(code)) / 100) : 0;
+  // Mode satu jenis: DPP otomatis = jumlah DPP baris barang/jasa; tanpa rincian = total dikurangi PPN di dalamnya
+  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode === "none" ? gross : totalDpp(gross, vatPct);
+  const invoiceBase = manual || !calc ? (base === "" ? null : Number(base)) : autoBase;
+  const invoiceCut = !calc ? (code === "NONE" ? 0 : Number(cutAmount) || 0)
+    : invoiceBase && rateOf(code) ? Math.round((invoiceBase * rateOf(code)) / 100) : 0;
   // Mode per baris: potongan dikelompokkan per jenis PPh
   const groups = useMemo(() => {
     const byCode = new Map<string, { code: string; lines: number[]; base: number }>();
@@ -147,7 +160,9 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
 
   const body = () => ({
     mode, code: mode === "invoice" ? code : "NONE", npwp,
-    base: mode === "invoice" && manual && base !== "" ? base : null,
+    base: mode === "invoice" && (manual || !calc) && base !== "" ? base : null,
+    ...(!calc && { calc: false, vat_amount: vatMode !== "none" && vatAmount !== "" ? vatAmount : null,
+                   amount: code !== "NONE" && cutAmount !== "" ? cutAmount : null }),
     lines: rows.map((r, i) => ({
       index: i, vat: r.vat, pph: mode === "line" && r.kind === "item" ? r.pph || null : undefined,
       // Jenis baris hanya dikirim bila berbeda dengan tebakan sistem atau pernah dikoreksi PIC
@@ -162,9 +177,12 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
 
   function bodyFrom(t: NonNullable<typeof current>, ls: TaxLine[], rs: Row[]) {
     const m = t.mode ?? "invoice";
+    const manualCalc = t.calc === false;
     return {
       mode: m, code: m === "invoice" ? t.code : "NONE", npwp: t.npwp,
       base: m === "invoice" && !t.base_auto && t.base != null ? plainNumber(t.base) : null,
+      ...(manualCalc && { calc: false, vat_amount: t.vat?.mode !== "none" && t.vat?.amount != null ? plainNumber(t.vat.amount) : null,
+                          amount: t.code !== "NONE" && t.amount != null ? plainNumber(t.amount) : null }),
       lines: rs.map((r, i) => ({
         index: i, vat: r.vat, pph: m === "line" && r.kind === "item" ? ls[i].pph || null : undefined,
         kind: ls[i].kind || (r.kind === "vat") !== VAT_LINE.test(ls[i].description) ? r.kind : undefined,
@@ -177,6 +195,9 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
     setMode(currentMode); setRows(startRows); setSelected(new Set());
     if (current) {
       setCode(currentMode === "invoice" ? current.code : "NONE"); setNpwp(current.npwp);
+      setCalc(current.calc !== false);
+      setVatAmount(current.calc === false ? plainNumber(current.vat?.amount ?? null) : "");
+      setCutAmount(current.calc === false ? plainNumber(current.amount ?? null) : "");
       setManual(currentMode === "invoice" ? !current.base_auto : false);
       setBase(currentMode === "invoice" && !current.base_auto ? plainNumber(current.base ?? null) : "");
       if (current.vat) { setVatMode(current.vat.mode); setVatRate(plainNumber(current.vat.rate)); setVatShow(current.vat.show); }
@@ -214,7 +235,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
     setBusy(true);
     try {
       const next = await api.put<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/tax`, body());
-      onChange(next, { kind: "ok", text: `Pajak bukti ${file.position} diterapkan. Cek simulasi voucher sebelum dikirim.` });
+      onChange(next, { kind: "ok", text: `Pajak bukti ${file.position} diterapkan. Cek pratinjau voucher sebelum diajukan.` });
     } catch (e) {
       onNotice({ kind: "error", text: (e as Error).message });
     } finally {
@@ -233,6 +254,20 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
         <Alert kind="warn">Pajak bukti {file.position} <b>belum dipilih</b>. Periksa pengaturan di bawah, lalu klik
           &quot;Terapkan pajak&quot; (termasuk bila tanpa potongan).</Alert>
       )}
+      <label className="toggle">
+        <input type="checkbox" checked={calc} disabled={off}
+               onChange={(e) => {
+                 setCalc(e.target.checked);
+                 if (!e.target.checked) {
+                   // Mulai dari hitungan sistem, lalu PIC menyesuaikan dengan angka di invoice
+                   setMode("invoice");
+                   setBase(autoBase != null ? String(autoBase) : "");
+                   setVatAmount(vatMode !== "none" ? String(Math.round(vat.amount)) : "");
+                   setCutAmount(String(invoiceCut));
+                 }
+               }} />
+        <span>Hitung pajak otomatis <span className="muted">· matikan bila ingin mengisi DPP, PPN, dan potongan PPh sendiri sesuai invoice</span></span>
+      </label>
 
       <div className="tax-sub">
         <b>PPN</b>
@@ -259,12 +294,17 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
                          style={{ width: 90 }} disabled={off} value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
                 )}
               </div>
-              <small>PPN pada tagihan ini: <b className="num">{rupiah(vat.amount)}</b>
-                {vatMode === "separate" && <> · hitungan sistem {rupiah(vat.computed)}</>}</small>
+              {calc ? (
+                <small>PPN pada tagihan ini: <b className="num">{rupiah(vat.amount)}</b>
+                  {vatMode === "separate" && itemIdx.length > 0 && <> · hitungan sistem {rupiah(vat.computed)}</>}</small>
+              ) : (
+                <input className="input num" type="number" min="0" placeholder="Nilai PPN di invoice" aria-label="Nilai PPN (manual)"
+                       style={{ marginTop: 6 }} disabled={off} value={vatAmount} onChange={(e) => setVatAmount(e.target.value)} />
+              )}
             </div>
           )}
         </div>
-        {vat.warning && <small className="tax-warn">{vat.warning}</small>}
+        {calc && vat.warning && <small className="tax-warn">{vat.warning}</small>}
         {vatMode !== "none" && (
           <label className="toggle">
             <input type="checkbox" checked={vatShow} disabled={off} onChange={(e) => setVatShow(e.target.checked)} />
@@ -278,7 +318,8 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
         <div className="seg" role="radiogroup" aria-label="Penerapan PPh">
           <button type="button" role="radio" aria-checked={mode === "invoice"} className={mode === "invoice" ? "active" : ""} disabled={off}
                   onClick={() => setMode("invoice")}>Satu jenis untuk seluruh invoice</button>
-          <button type="button" role="radio" aria-checked={mode === "line"} className={mode === "line" ? "active" : ""} disabled={off || !lines.length}
+          <button type="button" role="radio" aria-checked={mode === "line"} className={mode === "line" ? "active" : ""} disabled={off || !lines.length || !calc}
+                  title={!lines.length ? "Hanya untuk mode rincian barang/jasa" : !calc ? "Hanya saat pajak dihitung otomatis" : undefined}
                   onClick={() => setMode("line")}>Berbeda per baris</button>
         </div>
         {mode === "invoice" && distinctSuggestions.size > 1 && (
@@ -320,20 +361,30 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           <div className="grid-2">
             <div className="field">
               <label htmlFor="tax-base">Dasar pengenaan pajak (DPP)</label>
-              <input id="tax-base" className="input num" type="number" disabled={off || !manual}
-                     value={manual ? base : autoBase ?? ""} onChange={(e) => setBase(e.target.value)} />
-              <label className="toggle" style={{ marginTop: 4 }}>
-                <input type="checkbox" checked={!manual} disabled={off}
-                       onChange={(e) => { setManual(!e.target.checked); setBase(autoBase != null ? String(autoBase) : ""); }} />
-                <span>Otomatis dari rincian (tanpa PPN)</span>
-              </label>
+              <input id="tax-base" className="input num" type="number" disabled={off || (calc && !manual)}
+                     value={manual || !calc ? base : autoBase ?? ""} onChange={(e) => setBase(e.target.value)} />
+              {calc && (
+                <label className="toggle" style={{ marginTop: 4 }}>
+                  <input type="checkbox" checked={!manual} disabled={off}
+                         onChange={(e) => { setManual(!e.target.checked); setBase(autoBase != null ? String(autoBase) : ""); }} />
+                  <span>{itemIdx.length ? "Otomatis dari rincian (tanpa PPN)" : "Otomatis dari total (tanpa PPN)"}</span>
+                </label>
+              )}
             </div>
             <div className="field">
-              <label>Potongan</label>
-              <div className="tax-calc num">
-                {pct(rateOf(code))} × {rupiah(invoiceBase)} = <b>{rupiah(invoiceCut)}</b>
-                {gross != null && <div className="muted">Dibayarkan untuk bukti ini: <b>{rupiah(gross - invoiceCut)}</b></div>}
-              </div>
+              <label htmlFor="tax-cut">Potongan</label>
+              {calc ? (
+                <div className="tax-calc num">
+                  {pct(rateOf(code))} × {rupiah(invoiceBase)} = <b>{rupiah(invoiceCut)}</b>
+                  {gross != null && <div className="muted">Dibayarkan untuk bukti ini: <b>{rupiah(gross - invoiceCut)}</b></div>}
+                </div>
+              ) : (
+                <>
+                  <input id="tax-cut" className="input num" type="number" min="0" disabled={off} value={cutAmount}
+                         onChange={(e) => setCutAmount(e.target.value)} />
+                  <small>Tarif acuan {pct(rateOf(code))}{gross != null && <> · dibayarkan untuk bukti ini: <b>{rupiah(gross - invoiceCut)}</b></>}</small>
+                </>
+              )}
               {list.find((r) => r.code === code)?.needs_confirmation && <small className="tax-warn">Tarif awal memakai aturan umum; perlu dikonfirmasi konsultan pajak.</small>}
             </div>
           </div>
@@ -456,7 +507,8 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
       {(dirty || !current) && (
         <div className="actions" style={{ justifyContent: "flex-end" }}>
           {dirty && current && <button className="btn" disabled={busy} onClick={reset}><Undo2 /> Batalkan</button>}
-          <button className="btn primary" disabled={off || (mode === "invoice" && manual && base === "") || (vatMode !== "none" && !(Number(vatRate) > 0))}
+          <button className="btn primary" disabled={off || (mode === "invoice" && (manual || !calc) && base === "" && code !== "NONE")
+                    || (vatMode !== "none" && !(Number(vatRate) > 0)) || (!calc && code !== "NONE" && cutAmount === "")}
                   onClick={apply}>Terapkan pajak</button>
         </div>
       )}

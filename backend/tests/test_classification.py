@@ -189,11 +189,25 @@ def test_verified_vendor_matches_and_skips_confirmation(extractor):
     assert reviewer(doc).post(f"/documents/{doc['id']}/approve").json()["status"] == "AMIGA_REVIEWED"
 
 
-def test_account_different_from_verified_vendor_is_blocked(extractor):
+def test_account_different_from_verified_vendor_is_a_warning(extractor):
+    """Tahap 14: rekening berbeda tidak lagi menahan draf; reviewer wajib mengonfirmasi pengecekan saat menyetujui."""
     verified_vendor(account_no="9999999999")
     doc = detail(upload().json()["id"])
-    assert doc["status"] == "EXCEPTION" and ("ACCOUNT_MISMATCH", "account_no") in codes(doc)
+    assert doc["status"] == "READY_FOR_REVIEW" and ("ACCOUNT_MISMATCH", "account_no") in codes(doc)
     assert doc["account_check"]["state"] == "MISMATCH"
+    approve = lambda **body: reviewer(doc).post(f"/documents/{doc['id']}/approve", json=body)  # noqa: E731
+    r = approve()
+    assert r.status_code == 422 and "berbeda dengan data vendor" in r.json()["detail"]
+    assert approve(account_confirmed=True, account_note="Telepon vendor").json()["status"] == "AMIGA_REVIEWED"
+
+
+def test_account_feature_off_skips_account_checks(extractor):
+    """Rekening tidak dicantumkan (bawaan): tidak dicek, tidak perlu dikonfirmasi reviewer."""
+    verified_vendor(account_no="9999999999")
+    doc = detail(upload(include_account="false").json()["id"])
+    assert doc["include_account"] is False and doc["account_check"]["state"] == "OFF"
+    assert doc["status"] == "READY_FOR_REVIEW" and doc["issues"] == [] and doc["payees"] == []
+    assert reviewer(doc).post(f"/documents/{doc['id']}/approve").json()["status"] == "AMIGA_REVIEWED"
 
 
 def test_vendor_verification_rules(tx):

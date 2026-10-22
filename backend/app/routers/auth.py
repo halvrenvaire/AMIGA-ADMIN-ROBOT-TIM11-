@@ -28,6 +28,7 @@ def user_profile(db: Session, user: User) -> MeResponse:
         clients=[ClientRef(id=c.id, name=c.name) for c in clients],
         upload_clients=[ClientRef(id=c.id, name=c.name) for c in clients if c.id in upload_ids],
         signature_updated_at=user.signature_updated_at,
+        submitter_profile=user.submitter_profile or {},
     )
 
 

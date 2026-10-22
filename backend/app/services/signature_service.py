@@ -30,21 +30,26 @@ def _bad(message: str) -> HTTPException:
 
 
 def normalize(image: str) -> bytes:
-    """Data URL / base64 (PNG atau JPEG) → PNG transparan yang dipotong ke goresan tanda tangan."""
+    """Data URL / base64 (PNG, JPEG, atau WEBP) → PNG transparan yang dipotong ke goresan tanda tangan."""
     raw = image.split(",", 1)[1] if image.startswith("data:") else image
     try:
         data = base64.b64decode(raw, validate=True)
     except (binascii.Error, ValueError):
         raise _bad("Gambar tanda tangan tidak valid.")
+    return normalize_bytes(data)
+
+
+def normalize_bytes(data: bytes) -> bytes:
+    """File gambar tanda tangan (PNG, JPEG, atau WEBP) → PNG transparan yang dipotong ke goresan."""
     if len(data) > MAX_UPLOAD_BYTES:
         raise _bad("Gambar tanda tangan maksimal 2 MB.")
     try:
         img = Image.open(io.BytesIO(data))
-        if img.format not in ("PNG", "JPEG"):
-            raise _bad("Gunakan gambar PNG atau JPG.")
+        if img.format not in ("PNG", "JPEG", "WEBP"):
+            raise _bad("Gunakan gambar PNG, JPG, atau WEBP.")
         img.load()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
-        raise _bad("Gambar tanda tangan tidak bisa dibaca. Gunakan PNG atau JPG.")
+        raise _bad("Gambar tanda tangan tidak bisa dibaca. Gunakan PNG, JPG, atau WEBP.")
 
     img = img.convert("RGBA")
     # Latar terang menjadi transparan, supaya foto tanda tangan di kertas putih juga rapi di voucher
@@ -62,14 +67,17 @@ def normalize(image: str) -> bytes:
     return out.getvalue()
 
 
-def for_signers(db: Session, signers: list[dict]) -> list[bytes | None]:
-    """Spesimen untuk tiap penanda tangan di salinan dokumen (urutan sama). Salinan lama tanpa id → None."""
+def for_signers(db: Session, signers: list[dict], doc=None) -> list[bytes | None]:
+    """Spesimen untuk tiap penanda tangan di salinan dokumen (urutan sama). Salinan lama tanpa id → None.
+    Kotak "Diajukan oleh" dengan `signature: true` memakai spesimen yang disimpan di dokumen (Tahap 14)."""
     user_ids = {uuid.UUID(s["user_id"]) for s in signers if s.get("user_id")}
     sig_ids = {uuid.UUID(s["signatory_id"]) for s in signers if s.get("signatory_id")}
     users = dict(db.execute(select(User.id, User.signature_png).where(User.id.in_(user_ids))).tuples().all()) \
         if user_ids else {}
     sigs = dict(db.execute(select(Signatory.id, Signatory.signature_png)
                            .where(Signatory.id.in_(sig_ids))).tuples().all()) if sig_ids else {}
-    return [users.get(uuid.UUID(s["user_id"])) if s.get("user_id")
+    own = getattr(doc, "submitter_signature_png", None) if doc is not None else None
+    return [own if s.get("signature") is True
+            else users.get(uuid.UUID(s["user_id"])) if s.get("user_id")
             else sigs.get(uuid.UUID(s["signatory_id"])) if s.get("signatory_id") else None
             for s in signers]

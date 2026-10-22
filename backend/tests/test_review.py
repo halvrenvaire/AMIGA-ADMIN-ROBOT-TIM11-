@@ -59,8 +59,8 @@ def test_uat1_normal_flow_ends_sent_to_client(extractor):
     text = pdf_text(preview.content)
     assert body["voucher"]["voucher_no"] in text
     assert "BATAS OTORISASI" not in text  # dihapus atas permintaan owner (19 Okt 2026)
-    # Rekening tujuan tidak dicetak di Voucher Pengeluaran (feedback owner); kategori juga tidak
-    assert "1234567890" not in text and "Rekening tujuan" not in text and "Rp 900.000" in text
+    # Tahap 14: rekening dicetak hanya bila fitur rekening diaktifkan (helper upload mengaktifkannya); kategori tidak
+    assert "Rekening tujuan" in text and "BCA 1234567890 a.n. PT Vendor Jaya" in text and "Rp 900.000" in text
     assert "VOUCHER PENGELUARAN" in text and "Voucher Pengeluaran Vendor" not in text
 
     download = pic.get(f"/documents/{doc['id']}/voucher", params={"download": True})

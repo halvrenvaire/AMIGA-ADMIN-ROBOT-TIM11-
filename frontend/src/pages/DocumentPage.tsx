@@ -1,21 +1,23 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  Ban, CheckCircle2, CloudOff, Download, Equal, ExternalLink, Eye, FileClock, Maximize2, Minimize2, PenLine, Plus, Receipt, RotateCcw,
-  Save, Send, ShieldCheck, Trash2, Undo2, UserPlus,
+  Ban, CheckCircle2, CloudOff, Download, Equal, ExternalLink, Eye, FileClock, ListOrdered, Maximize2, Minimize2, PenLine, Plus, Receipt,
+  RotateCcw, Save, Send, ShieldCheck, Trash2, Undo2, UserPlus,
 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { AiProcessingCard, AiResultCard, AiScanOverlay } from "../components/AiProcessing";
 import { AccountCheckBox, ClassificationPanel } from "../components/DocumentPreview";
 import { ReassignModal } from "../components/ReassignModal";
+import { SignatureImage, SignatureModal } from "../components/Signature";
 import { SignerPicker } from "../components/SignerPicker";
 import { Anchor, SectionNav, jumpTo, type NavSection } from "../components/SectionNav";
 import { TaxPanel, TaxSummaryBox } from "../components/TaxPanel";
 import { VendorModal, VerifyVendorModal } from "../components/VendorForm";
 import { Alert, Loading, Modal, PdfFrame, StatusBadge, useApi } from "../components/ui";
 import { FIELD_LABEL, ISSUE_LABEL, lineSubtotal, plainNumber, rupiah, tanggal, waktu } from "../format";
-import type { DocumentDetail, Extraction, FileData, Issue, Payee, Signatory, Vendor } from "../types";
+import type { DocumentDetail, ExtractionMode, Extraction, FileData, Issue, Payee, Signatory, Vendor } from "../types";
+import { MODE_INFO } from "./Upload";
 
 type DocumentFile = DocumentDetail["files"][number];
 
@@ -35,10 +37,14 @@ const toLines = (ex: Extraction | null): Line[] =>
     description: l.description ?? "", qty: plainNumber(l.qty), unit_price: plainNumber(l.unit_price), subtotal: plainNumber(l.subtotal),
   }));
 
-/** Kendala yang harus dibereskan PIC sebelum draf boleh dikirim (sama dengan BLOCKING di backend). */
-const BLOCKING = new Set(["MISSING_EVIDENCE", "CALCULATION_DISCREPANCY", "NOT_AN_INVOICE", "EXTRACTION_FAILED", "ACCOUNT_MISMATCH"]);
-/** Peringatan yang cukup dikonfirmasi PIC beserta alasannya (ACKNOWLEDGEABLE di backend). */
-const NEEDS_ACK = "VENDOR_MISMATCH";
+/** Kendala yang harus dibereskan PIC sebelum draf boleh diajukan (sama dengan BLOCKING di backend). */
+const BLOCKING = new Set(["MISSING_EVIDENCE", "CALCULATION_DISCREPANCY", "NOT_AN_INVOICE", "EXTRACTION_FAILED"]);
+/** Peringatan lunak (WARNINGS di backend): pengingat untuk dicek, tidak menahan pengajuan maupun persetujuan. */
+const SOFT = new Set(["VENDOR_MISMATCH", "ACCOUNT_MISMATCH"]);
+const isTotalOnly = (d: DocumentDetail) => d.extraction_mode === "TOTAL_ONLY";
+/** Uraian bawaan satu invoice (sama dengan backend default_description). */
+const defaultDescription = (d: FileData | null | undefined) =>
+  `Invoice ${d?.invoice_no?.trim() || "-"} - ${d?.vendor_name?.trim() || "vendor"}`;
 
 /** Subtotal yang berlaku: qty × harga bila keduanya terisi (dihitung sistem), selain itu isian manual. */
 const effectiveSubtotal = (l: Line) => lineSubtotal(l.qty, l.unit_price) ?? l.subtotal;
@@ -127,7 +133,7 @@ export function DocumentPage() {
           <h1 style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 19 }}>{d.request_id}</span> <StatusBadge status={d.status} />
           </h1>
-          <p>{d.client.name} · {d.request_type ?? "-"} · via {d.channel ?? "-"}</p>
+          <p>{d.client.name} · {d.request_type ?? "-"}{d.channel && <> · via {d.channel}</>}</p>
         </div>
         <div className="actions">
           {has("SERVICE_LEAD") && d.status === "READY_FOR_REVIEW" && <button className="btn" onClick={() => setReassign(true)}>Alihkan reviewer</button>}
@@ -183,7 +189,9 @@ export function DocumentPage() {
                   ))}</ol></dd></>
               )}
               <dt>Tanggal pengajuan</dt><dd>{tanggal(d.submitted_date)}</dd>
-              <dt>Tenggat</dt><dd>{tanggal(d.due_date)}</dd>
+              {d.due_date && <><dt>Tenggat</dt><dd>{tanggal(d.due_date)}</dd></>}
+              <dt>Mode AI</dt><dd>{MODE_INFO[d.extraction_mode ?? "ITEMIZED"].title}
+                {d.include_account && <> <span className="chip gray">rekening dicantumkan</span></>}</dd>
               <dt>Finance Reviewer</dt><dd>{d.assigned_reviewer ?? "-"}</dd>
               <dt>Vendor</dt>
               <dd>{d.vendor_name ?? "-"} {d.vendor
@@ -219,20 +227,17 @@ export function DocumentPage() {
               <div className="section-title">Kendala ({shownIssues.length})</div>
               <div className="issues">
                 {shownIssues.map((i, n) => (
-                  <div className="issue" key={n}>
-                    <b>{ISSUE_LABEL[i.code]} {i.field && <>· {FIELD_LABEL[i.field] ?? i.field}</>}</b>
+                  <div className={`issue${SOFT.has(i.code) ? " soft" : ""}`} key={n}>
+                    <b>{SOFT.has(i.code) && "Pengingat · "}{ISSUE_LABEL[i.code]} {i.field && <>· {FIELD_LABEL[i.field] ?? i.field}</>}</b>
                     <span>{i.message}</span>
                     <code>{i.code}</code>
                   </div>
                 ))}
               </div>
-              {(canReprocess || canDismissDup || (canEdit && codes.has(NEEDS_ACK))) && (
+              {(canReprocess || canDismissDup) && (
                 <div className="actions">
                   {canReprocess && <button className="btn primary" onClick={reprocess}><RotateCcw /> Proses ulang</button>}
                   {canDismissDup && <DismissDuplicate id={id} onDone={(n) => update(n, { kind: "ok", text: "Ditandai bukan duplikat." })} />}
-                  {canEdit && codes.has(NEEDS_ACK) && (
-                    <AcknowledgePayees doc={d} onDone={(n) => update(n, { kind: "ok", text: "Perbedaan vendor/rekening dikonfirmasi. Alasan Anda tampil untuk Finance Reviewer." })} />
-                  )}
                 </div>
               )}
             </section>
@@ -243,6 +248,11 @@ export function DocumentPage() {
             <SignersPanel doc={d} onChange={(n) => update(n, { kind: "ok", text: "Penanda tangan voucher diperbarui." })} />
           </Anchor>
 
+          {canEdit && (
+            <Anchor id="opsi">
+              <OptionsPanel doc={d} onChange={update} onNotice={setNotice} />
+            </Anchor>
+          )}
           {canEdit
             ? <DraftEditor doc={d} pos={filePos} onPos={setPos} onChange={update} onNotice={setNotice} />
             : d.extraction && <Anchor id="data"><ReadOnlyData doc={d} onChange={update} /></Anchor>}
@@ -279,7 +289,7 @@ const isEmpty = (v: string | null | undefined) => v == null || String(v).trim() 
 function navSections(d: DocumentDetail, o: { filePos: number; canEdit: boolean; canReview: boolean;
   showAiResult: boolean; showClassification: boolean; manual: boolean }): NavSection[] {
   const blocking = d.issues.filter((i) => BLOCKING.has(i.code));
-  const pendingAck = d.issues.some((i) => i.code === NEEDS_ACK);
+  const soft = d.issues.filter((i) => SOFT.has(i.code));
   const has = (code: string) => d.issues.some((i) => i.code === code);
   const flaggedIn = (fields: readonly string[]) => blocking.some((i) => i.field && fields.includes(i.field));
   const list: NavSection[] = [{ id: "info", label: "Info dokumen", state: "info" }];
@@ -294,10 +304,12 @@ function navSections(d: DocumentDetail, o: { filePos: number; canEdit: boolean; 
                 state: has("NOT_AN_INVOICE") ? "block" : has("RECEIPT_NOT_INVOICE") || has("NEEDS_MANUAL_REVIEW") ? "fix" : "ok" });
   }
   if (d.issues.length) {
-    list.push({ id: "kendala", label: `Kendala (${displayIssues(d).length})`, state: blocking.length ? "block" : "fix",
-                note: blocking.length ? `${blocking.length} wajib dibereskan` : pendingAck && o.canEdit ? "perlu konfirmasi PIC" : "diputuskan reviewer" });
+    const onlySoft = soft.length === d.issues.length;
+    list.push({ id: "kendala", label: `Kendala (${displayIssues(d).length})`, state: blocking.length ? "block" : onlySoft ? "info" : "fix",
+                note: blocking.length ? `${blocking.length} wajib dibereskan` : onlySoft ? "pengingat, tidak menahan" : "diputuskan reviewer" });
   }
   list.push({ id: "penanda", label: "Penanda tangan", state: "info", note: d.signers.length ? undefined : "belum dipilih" });
+  if (o.canEdit) list.push({ id: "opsi", label: "Mode AI & fitur", state: "info", note: MODE_INFO[d.extraction_mode ?? "ITEMIZED"].title });
   if (o.canEdit) {
     const file = d.files.find((f) => f.position === o.filePos) ?? d.files[0];
     const data = file?.data;
@@ -308,25 +320,32 @@ function navSections(d: DocumentDetail, o: { filePos: number; canEdit: boolean; 
                   note: empty ? `${empty} kolom kosong` : flaggedIn(fields) ? "perlu diperbaiki" : undefined });
     };
     fieldState(HEADER_FIELDS, "Informasi utama", "data");
-    const lines = data?.line_items ?? [];
-    list.push({ id: "rincian", label: "Rincian barang/jasa" + tag,
-                state: has("CALCULATION_DISCREPANCY") ? "block" : !lines.length ? "fix" : "ok",
-                note: has("CALCULATION_DISCREPANCY") ? "total tidak cocok" : !lines.length ? "belum ada baris" : `${lines.length} baris` });
-    if (d.request_type !== "Voucher Pengeluaran Reimburse") {
+    const noDesc = isTotalOnly(d) ? d.files.filter((f) => isEmpty(f.data?.description)).map((f) => f.position) : [];
+    if (isTotalOnly(d)) {
+      list.push({ id: "uraian", label: "Uraian transaksi" + tag, state: noDesc.length ? "fix" : "ok",
+                  note: noDesc.length ? `belum diisi: bukti ${noDesc.join(", ")}` : undefined });
+    } else {
+      const lines = data?.line_items ?? [];
+      list.push({ id: "rincian", label: "Rincian barang/jasa" + tag,
+                  state: has("CALCULATION_DISCREPANCY") ? "block" : !lines.length ? "fix" : "ok",
+                  note: has("CALCULATION_DISCREPANCY") ? "total tidak cocok" : !lines.length ? "belum ada baris" : `${lines.length} baris` });
+    }
+    if (d.include_account) {
       const empty = PAYMENT_FIELDS.filter((k) => isEmpty(data?.[k] ?? null)).length;
-      const mismatch = d.issues.some((i) => i.code === "ACCOUNT_MISMATCH");
-      // Rekening opsional (tidak ada proses transfer): kolom kosong tidak perlu diisi
-      list.push({ id: "pembayaran", label: "Data pembayaran" + tag, state: mismatch ? "block" : "ok",
-                  note: mismatch ? "rekening tidak cocok" : empty ? "opsional"
+      const mismatch = has("ACCOUNT_MISMATCH");
+      // Rekening tetap opsional: kolom kosong boleh, rekening berbeda hanya pengingat
+      list.push({ id: "pembayaran", label: "Rekening tujuan" + tag, state: mismatch ? "fix" : "ok",
+                  note: mismatch ? "berbeda dengan data vendor" : empty ? "opsional"
                     : d.account_check?.state === "UNVERIFIED" ? "rekening belum terverifikasi" : undefined });
     }
     const noTax = d.files.filter((f) => !f.data?.tax).map((f) => f.position);
     const vatWarn = (d.tax_summary?.vat ?? []).some((v) => v.warning);
     list.push({ id: "pajak", label: "Pajak", state: noTax.length ? "fix" : vatWarn ? "fix" : "ok",
                 note: noTax.length ? `belum dipilih: bukti ${noTax.join(", ")}` : vatWarn ? "cek PPN" : undefined });
-    const waiting = blocking.length || noTax.length || pendingAck;
-    list.push({ id: "kirim", label: "Kirim ke reviewer", state: waiting ? "info" : "ok",
-                note: waiting ? "setelah semua lengkap" : "siap dikirim" });
+    list.push({ id: "pratinjau", label: "Pratinjau voucher", state: "info" });
+    const waiting = blocking.length || noTax.length || noDesc.length;
+    list.push({ id: "kirim", label: "Ajukan untuk direview", state: waiting ? "info" : "ok",
+                note: waiting ? "setelah semua lengkap" : "siap diajukan" });
   } else if (d.extraction) {
     list.push({ id: "data", label: "Data invoice & pajak", state: "info" });
     if (o.canReview) {
@@ -344,7 +363,7 @@ function issueSection(d: DocumentDetail, code: string, canEdit: boolean): string
   return {
     MISSING_EVIDENCE: missing && !d.issues.some((i) => i.code === "MISSING_EVIDENCE" && i.field && (HEADER_FIELDS as readonly string[]).includes(i.field))
       ? "pembayaran" : "data",
-    CALCULATION_DISCREPANCY: "rincian",
+    CALCULATION_DISCREPANCY: isTotalOnly(d) ? "data" : "rincian",
     VENDOR_MISMATCH: "kendala",
     ACCOUNT: "pembayaran",
     NOT_AN_INVOICE: "klasifikasi",
@@ -354,17 +373,27 @@ function issueSection(d: DocumentDetail, code: string, canEdit: boolean): string
 function ReadOnlyData({ doc, onChange }: { doc: DocumentDetail; onChange: (d: DocumentDetail, n?: Notice) => void }) {
   const ex = doc.extraction!;
   const flags = flagged(doc.issues);
+  // Rekening hanya ditampilkan bila fitur rekening aktif, atau pada pengajuan lama yang sudah berisi rekening
+  const showAccount = doc.include_account || (!isTotalOnly(doc) && PAYMENT_FIELDS.some((k) => !isEmpty(ex[k])));
+  const fields = showAccount ? ALL_FIELDS : HEADER_FIELDS;
+  const descriptions = doc.files.map((f) => f.data?.description).filter(Boolean);
   return (
     <section className="card panel">
       <div className="section-title">Data invoice</div>
       <dl className="meta">
-        {ALL_FIELDS.map((k) => (
+        {isTotalOnly(doc) && descriptions.length > 0 && (
+          <><dt>Uraian</dt><dd>{descriptions.length === 1 ? descriptions[0]
+            : <ol className="plain-list">{descriptions.map((t, i) => <li key={i}>{t}</li>)}</ol>}</dd></>
+        )}
+        {fields.map((k) => (
           <FieldView key={k} label={FIELD_LABEL[k]} flag={flags.has(k)} pic={k in doc.pic_overrides}
                      value={k === "total" ? rupiah(ex.total) : k === "invoice_date" ? tanggal(ex.invoice_date) : ex[k] ?? "-"} />
         ))}
       </dl>
-      <LinesTable lines={doc.files.length === 1 && doc.files[0].data ? dataLines(doc.files[0].data) : toLines(ex)} total={ex.total}
-                  pphNames={pphNames(doc)} />
+      {!isTotalOnly(doc) && (
+        <LinesTable lines={doc.files.length === 1 && doc.files[0].data ? dataLines(doc.files[0].data) : toLines(ex)} total={ex.total}
+                    pphNames={pphNames(doc)} />
+      )}
       {doc.tax_summary && <TaxSummaryBox summary={doc.tax_summary} multi={doc.files.length > 1} />}
       <PaymentChecks doc={doc} onChange={onChange} />
     </section>
@@ -436,21 +465,28 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
   onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
 }) {
   const file = doc.files.find((f) => f.position === pos) ?? doc.files[0];
-  const initial = useMemo(() => ({ fields: dataFields(file.data), lines: dataLines(file.data) }), [file]);
+  const totalOnly = isTotalOnly(doc);
+  const initial = useMemo(() => ({
+    fields: dataFields(file.data), lines: dataLines(file.data),
+    description: file.data?.description ?? (totalOnly ? defaultDescription(file.data) : ""),
+  }), [file, totalOnly]);
   const initialKey = JSON.stringify(initial);
   const [fields, setFields] = useState(initial.fields);
   const [lines, setLines] = useState(initial.lines);
+  const [description, setDescription] = useState(initial.description);
   const [busy, setBusy] = useState(false);
   const [taxDirty, setTaxDirty] = useState(false);
-  useEffect(() => { setFields(initial.fields); setLines(initial.lines); }, [initialKey, pos]); // eslint-disable-line react-hooks/exhaustive-deps
+  const resetData = () => { setFields(initial.fields); setLines(initial.lines); setDescription(initial.description); };
+  useEffect(resetData, [initialKey, pos]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dataDirty = JSON.stringify({ fields, lines }) !== initialKey;
+  const dataDirty = JSON.stringify({ fields, lines, description }) !== initialKey;
   const dirty = dataDirty || taxDirty;
-  const reimburse = doc.request_type === "Voucher Pengeluaran Reimburse";
   const blocking = doc.issues.filter((i) => BLOCKING.has(i.code));
-  const pendingAck = doc.issues.some((i) => i.code === NEEDS_ACK);
-  // PIC wajib memilih pajak sendiri untuk setiap bukti sebelum dikirim (AI hanya menyarankan)
+  // PIC wajib memilih pajak sendiri untuk setiap bukti sebelum diajukan (AI hanya menyarankan)
   const noTax = doc.files.filter((f) => !f.data?.tax).map((f) => f.position);
+  // Mode total saja: setiap bukti butuh uraian transaksi (dicetak sebagai satu baris voucher)
+  const noDesc = totalOnly ? doc.files.filter((f) => isEmpty(f.data?.description)).map((f) => f.position) : [];
+  const shownFields = doc.include_account ? ALL_FIELDS : HEADER_FIELDS;
   const flags = flagged(blocking);
   // Qty atau harga diubah: subtotal ikut dihitung ulang (qty × harga) bila keduanya terisi
   const setLine = (i: number, k: keyof Line, v: string) => setLines((ls) => ls.map((l, n) => {
@@ -463,8 +499,9 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
   async function save() {
     // Data lengkap satu invoice (backend mengganti data bukti ini dan mencatat field yang berubah)
     const data = {
-      ...Object.fromEntries(ALL_FIELDS.map((k) => [k, fields[k].trim() || null])),
-      line_items: lines.map((l) => ({
+      ...Object.fromEntries(shownFields.map((k) => [k, fields[k].trim() || null])),
+      ...(totalOnly && { description: description.trim() || null }),
+      line_items: totalOnly ? [] : lines.map((l) => ({
         description: l.description || null, qty: l.qty || null, unit_price: l.unit_price || null, subtotal: effectiveSubtotal(l) || null,
         pph: l.pph ?? null, vat: l.vat ?? null, kind: l.kind ?? null,
       })),
@@ -474,8 +511,8 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       const next = await api.put<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/data`, data);
       const left = next.issues.filter((i) => BLOCKING.has(i.code)).length;
       onChange(next, left
-        ? { kind: "warn", text: `Tersimpan. Masih ada ${left} kendala yang harus dibereskan sebelum dikirim ke reviewer.` }
-        : { kind: "ok", text: "Tersimpan dan lolos verifikasi ulang. Cek simulasi voucher, lalu kirim ke reviewer." });
+        ? { kind: "warn", text: `Tersimpan. Masih ada ${left} kendala yang harus dibereskan sebelum diajukan.` }
+        : { kind: "ok", text: "Tersimpan dan lolos verifikasi ulang. Cek pratinjau voucher, lalu ajukan untuk direview." });
     } catch (e) {
       onNotice({ kind: "error", text: (e as Error).message });
     } finally {
@@ -487,7 +524,7 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
     setBusy(true);
     try {
       const next = await api.post<DocumentDetail>(`/documents/${doc.id}/submit`);
-      onChange(next, { kind: "ok", text: `Terkirim ke Finance Reviewer${next.assigned_reviewer ? ` (${next.assigned_reviewer})` : ""}.` });
+      onChange(next, { kind: "ok", text: `Diajukan ke Finance Reviewer${next.assigned_reviewer ? ` (${next.assigned_reviewer})` : ""}.` });
     } catch (e) {
       onNotice({ kind: "error", text: (e as Error).message });
     } finally {
@@ -509,8 +546,8 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       <div className="panel-head">
         <div>
           <h2>{doc.status === "DRAFT" ? "Draf voucher" : "Perbaiki data"}</h2>
-          <p>{doc.ai_manual ? "Isi atau periksa data tiap bukti sesuai file bukti" : "Periksa data hasil bacaan AI untuk tiap bukti"}, lalu kirim ke
-            Finance Reviewer. Reviewer hanya menyetujui atau mengembalikan.</p>
+          <p>{doc.ai_manual ? "Isi atau periksa data tiap bukti sesuai file bukti" : "Periksa data hasil bacaan AI untuk tiap bukti"}, lalu ajukan
+            untuk direview. Finance Reviewer hanya menyetujui atau mengembalikan.</p>
         </div>
       </div>
 
@@ -521,7 +558,7 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
                     disabled={busy} title={f.original_filename}
                     onClick={() => { if (!dirty || confirm("Perubahan pada bukti ini belum disimpan. Pindah bukti?")) onPos(f.position); }}>
               Bukti {f.position}{f.data?.manual && <PenLine size={12} aria-label="diisi manual" />}
-              {!f.data?.tax && <span className="tab-dot" title="Pajak belum dipilih" />}
+              {(!f.data?.tax || noDesc.includes(f.position)) && <span className="tab-dot" title={!f.data?.tax ? "Pajak belum dipilih" : "Uraian belum diisi"} />}
             </button>
           ))}
         </div>
@@ -534,6 +571,19 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
         <div className="grid-2">{HEADER_FIELDS.map(fieldInput)}</div>
       </Anchor>
 
+      {totalOnly ? (
+        <Anchor id="uraian">
+          <div className="field">
+            <label htmlFor="f-description">Uraian transaksi</label>
+            <input id="f-description" className={`input ${isEmpty(description) ? "flag" : ""}`} maxLength={300} value={description}
+                   placeholder={defaultDescription({ ...file.data, invoice_no: fields.invoice_no, vendor_name: fields.vendor_name } as FileData)}
+                   onChange={(e) => setDescription(e.target.value)} />
+            <small>Dicetak sebagai satu baris di voucher. Bawaan: &quot;Invoice nomor - vendor&quot;, boleh diubah.</small>
+          </div>
+          {!isEmpty(fields.total) && <small className="muted">Total yang dibayarkan dari invoice ini: <b className="num">{rupiah(fields.total)}</b>.
+            Butuh rincian per barang/jasa? Ganti mode AI di bagian &quot;Mode AI &amp; fitur&quot;.</small>}
+        </Anchor>
+      ) : (
       <Anchor id="rincian">
       <div className="section-title">Rincian barang/jasa</div>
       <div style={{ overflowX: "auto" }}>
@@ -574,34 +624,39 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       </div>
       <small className="muted">Subtotal dihitung otomatis dari qty × harga satuan. Untuk harga borongan, kosongkan qty atau harga, lalu isi subtotalnya.</small>
       </Anchor>
+      )}
 
-      {!reimburse && (
+      {doc.include_account && (
         <Anchor id="pembayaran">
-          <div className="section-title">Data pembayaran <span className="muted" style={{ textTransform: "none", letterSpacing: 0 }}>· opsional</span></div>
+          <div className="section-title">Rekening tujuan <span className="muted" style={{ textTransform: "none", letterSpacing: 0 }}>· dicetak di voucher</span></div>
           <div className="grid-2">{PAYMENT_FIELDS.map(fieldInput)}</div>
-          <small className="muted">Boleh dikosongkan: rekening tidak dicetak di voucher. Bila diisi, sistem mencocokkannya dengan rekening vendor terverifikasi untuk mencegah rekening palsu.</small>
+          <small className="muted">Boleh dikosongkan. Bila diisi, sistem mencocokkannya dengan rekening vendor terverifikasi; bila berbeda, muncul pengingat untuk dicek.</small>
           <PaymentChecks doc={doc} file={file} editing onChange={onChange} disabled={busy || dataDirty} />
         </Anchor>
       )}
 
       <Anchor id="pajak">
-      <TaxPanel key={`${file.position}-${JSON.stringify(file.data?.tax ?? null)}`} doc={doc} file={file} lines={lines}
+      <TaxPanel key={`${file.position}-${JSON.stringify(file.data?.tax ?? null)}`} doc={doc} file={file} lines={totalOnly ? [] : lines}
                 total={fields.total} disabled={busy || dataDirty} onDirty={setTaxDirty} onChange={onChange} onNotice={onNotice} />
       {noTax.length > 0
         ? <p className="muted" style={{ margin: 0 }}>Pajak belum dipilih untuk bukti {noTax.join(", ")}; total dibayarkan dihitung setelah dipilih.</p>
         : doc.tax_summary && <TaxSummaryBox summary={doc.tax_summary} multi={doc.files.length > 1} />}
       </Anchor>
 
+      <Anchor id="pratinjau">
+        <VoucherPreview doc={doc} stale={dirty} />
+      </Anchor>
+
       <div className="decision sec-anchor" id="sec-kirim">
-        {dataDirty && <button className="btn" disabled={busy} onClick={() => { setFields(initial.fields); setLines(initial.lines); }}><Undo2 /> Batalkan</button>}
+        {dataDirty && <button className="btn" disabled={busy} onClick={resetData}><Undo2 /> Batalkan</button>}
         {dataDirty && <span className="unsaved-hint">Ada perubahan yang belum disimpan</span>}
         <button className={`btn${dataDirty ? " primary" : ""}`} disabled={busy || !dataDirty} onClick={save}><Save /> Simpan bukti {file.position}</button>
         <SimulationButton docId={doc.id} disabled={busy || dirty} />
-        <button className={`btn${dataDirty ? "" : " primary"}`} onClick={submit} disabled={busy || dirty || blocking.length > 0 || noTax.length > 0 || pendingAck}
+        <button className={`btn${dataDirty ? "" : " primary"}`} onClick={submit} disabled={busy || dirty || blocking.length > 0 || noTax.length > 0 || noDesc.length > 0}
                 title={dirty ? "Simpan perubahan (data atau pajak) dulu" : blocking.length ? "Bereskan kendala dulu"
-                  : noTax.length ? `Pilih pajak untuk bukti ${noTax.join(", ")}`
-                  : pendingAck ? "Konfirmasi perbedaan vendor/rekening dulu (bagian Kendala)" : undefined}>
-          <Send /> Kirim ke reviewer
+                  : noDesc.length ? `Isi uraian transaksi untuk bukti ${noDesc.join(", ")}`
+                  : noTax.length ? `Pilih pajak untuk bukti ${noTax.join(", ")}` : undefined}>
+          <Send /> Ajukan untuk Direview
         </button>
       </div>
     </section>
@@ -662,13 +717,15 @@ function ReviewDecision({ doc, onChange, onNotice }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [returning, setReturning] = useState(false);
-  // Rekening yang belum terverifikasi wajib dicek manual dan dikonfirmasi sebelum menyetujui
+  // Rekening yang belum terverifikasi atau berbeda dengan data vendor wajib dicek manual dan dikonfirmasi sebelum menyetujui
   const [accountConfirmed, setAccountConfirmed] = useState(false);
   const [accountNote, setAccountNote] = useState("");
   const account = doc.account_check;
-  const needsConfirm = account?.state === "UNVERIFIED";
-  // Konfirmasi mencakup semua rekening tujuan yang belum terverifikasi (voucher bisa berisi beberapa vendor)
-  const unverified = (doc.payees ?? []).filter((p) => p.state === "UNVERIFIED").map((p) => p.account_no ?? "-");
+  const needsConfirm = account?.state === "UNVERIFIED" || account?.state === "MISMATCH";
+  // Peringatan lunak (vendor/rekening berbeda) tidak menahan persetujuan
+  const open = doc.issues.filter((i) => !SOFT.has(i.code));
+  // Konfirmasi mencakup semua rekening tujuan yang perlu dicek (voucher bisa berisi beberapa vendor)
+  const unverified = (doc.payees ?? []).filter((p) => p.state === "UNVERIFIED" || p.state === "MISMATCH").map((p) => p.account_no ?? "-");
   if (!unverified.length) unverified.push(doc.extraction?.account_no || "-");
   const accountKey = JSON.stringify(account ?? null);
   useEffect(() => { setAccountConfirmed(false); }, [accountKey]);
@@ -701,7 +758,7 @@ function ReviewDecision({ doc, onChange, onNotice }: {
         <div className="account-confirm">
           <label className="toggle" style={{ alignItems: "flex-start" }}>
             <input type="checkbox" checked={accountConfirmed} onChange={(e) => setAccountConfirmed(e.target.checked)} style={{ marginTop: 3 }} />
-            <span>Saya sudah mencocokkan rekening {unverified.length > 1 ? "berikut" : ""}{" "}
+            <span>{account?.state === "MISMATCH" && <b>Rekening berbeda dengan data vendor. </b>}Saya sudah mencocokkan rekening {unverified.length > 1 ? "berikut" : ""}{" "}
               {unverified.map((a, n) => <Fragment key={a}>{n > 0 && ", "}<b className="mono">{a}</b></Fragment>)} dengan sumber tepercaya
               (mis. konfirmasi langsung ke vendor), bukan hanya dari dokumen atau isian PIC.</span>
           </label>
@@ -712,8 +769,8 @@ function ReviewDecision({ doc, onChange, onNotice }: {
       <div className="decision">
         <button className="btn danger" disabled={busy} onClick={() => setReturning(true)}>Kembalikan ke PIC</button>
         <button className="btn success" onClick={approve}
-                disabled={busy || doc.issues.length > 0 || account?.state === "MISMATCH" || (needsConfirm && !accountConfirmed)}
-                title={doc.issues.length ? "Masih ada kendala" : needsConfirm && !accountConfirmed ? "Konfirmasi pengecekan rekening dulu" : undefined}>
+                disabled={busy || open.length > 0 || (needsConfirm && !accountConfirmed)}
+                title={open.length ? "Masih ada kendala" : needsConfirm && !accountConfirmed ? "Konfirmasi pengecekan rekening dulu" : undefined}>
           <CheckCircle2 /> Setujui
         </button>
       </div>
@@ -813,36 +870,6 @@ function ManualEntryCard({ doc, canEdit, canRetry, onRetry }: {
   );
 }
 
-/** PIC mengonfirmasi beberapa vendor/rekening dalam satu voucher beserta alasannya (peringatan, bukan kendala). */
-function AcknowledgePayees({ doc, onDone }: { doc: DocumentDetail; onDone: (d: DocumentDetail) => void }) {
-  const [open, setOpen] = useState(false);
-  const payees = doc.payees ?? [];
-  return (
-    <>
-      <button className="btn primary" onClick={() => setOpen(true)}><CheckCircle2 /> Konfirmasi perbedaan vendor/rekening</button>
-      {open && (
-        <ReasonModal title="Konfirmasi beberapa vendor/rekening" submitLabel="Konfirmasi"
-                     label="Alasan (wajib; tercatat di riwayat dan tampil untuk Finance Reviewer, tidak dicetak di voucher)"
-                     placeholder="mis. Dua vendor dalam satu proyek renovasi kantor; tagihan dibayar bersama."
-                     intro={payees.length > 1 && (
-                       <ul className="plain-list payee-mini">
-                         {payees.map((p, n) => (
-                           <li key={n}><b>{p.vendor_name ?? "Vendor tanpa nama"}</b> · <span className="mono">{p.bank_name ?? "-"} {p.account_no ?? "-"}</span>
-                             <span className="muted"> · bukti {p.invoices.join(", ")} · {rupiah(p.net)}</span></li>
-                         ))}
-                       </ul>
-                     )}
-                     onClose={() => setOpen(false)}
-                     onSubmit={async (reason) => {
-                       const next = await api.post<DocumentDetail>(`/documents/${doc.id}/acknowledge`, { code: NEEDS_ACK, reason });
-                       setOpen(false);
-                       onDone(next);
-                     }} />
-      )}
-    </>
-  );
-}
-
 const PAYEE_STATE: Record<string, { label: string; tone: string }> = {
   VERIFIED: { label: "terverifikasi", tone: "ok" },
   MISMATCH: { label: "tidak cocok", tone: "bad" },
@@ -862,7 +889,8 @@ function PaymentChecks({ doc, file, editing = false, disabled = false, onChange 
   const [verifying, setVerifying] = useState<Vendor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const payees = doc.payees ?? [];
-  const ack = doc.acknowledgements?.[NEEDS_ACK];
+  // Konfirmasi PIC dari pengajuan lama (sebelum perbedaan vendor menjadi pengingat saja)
+  const ack = doc.acknowledgements?.VENDOR_MISMATCH;
   const canRegister = editing && has("PIC_KLIEN", "INTAKE_SUPPORT");
   const canVerify = !editing && has("FINANCE_REVIEWER") && doc.status === "READY_FOR_REVIEW";
   const refresh = async (text: string) => onChange(await api.get<DocumentDetail>(`/documents/${doc.id}`), { kind: "ok", text });
@@ -891,7 +919,7 @@ function PaymentChecks({ doc, file, editing = false, disabled = false, onChange 
     return null;
   };
 
-  if (!doc.account_check || doc.account_check.state === "NOT_APPLICABLE") return null;
+  if (!doc.account_check || doc.account_check.state === "NOT_APPLICABLE" || doc.account_check.state === "OFF") return null;
   const single = payees.length <= 1;
   const mine = file ? payees.find((p) => p.invoices.includes(file.position)) : undefined;
   return (
@@ -993,38 +1021,53 @@ function VendorOptions({ clientId }: { clientId: string }) {
 
 const KIND_TITLE = { PENGAJU: "Diajukan oleh", PENYETUJU: "Disetujui oleh" } as const;
 
-/** Penanda tangan yang akan dicetak di voucher; PIC/Intake bisa mengubah sebelum voucher terbit. */
+/** Penanda tangan yang akan dicetak di voucher; PIC/Intake bisa mengubah profil pengaju (nama, jabatan, perusahaan/unit,
+ *  tanda tangan) dan pemberi persetujuan sebelum voucher terbit. */
 function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: DocumentDetail) => void }) {
   const { has } = useAuth();
   const [editing, setEditing] = useState(false);
+  const [signing, setSigning] = useState(false);
   const [ids, setIds] = useState<string[]>([]);
   const [initial, setInitial] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const currentSubmitter = doc.signers.find((s) => s.kind === "PENGAJU")?.name ?? doc.on_behalf_of ?? doc.uploaded_by;
-  const [submitterName, setSubmitterName] = useState(currentSubmitter);
+  const pengaju = doc.signers.find((s) => s.kind === "PENGAJU");
+  const current = {
+    name: pengaju?.name ?? doc.on_behalf_of ?? doc.uploaded_by,
+    position: pengaju?.position ?? "", company: pengaju?.company ?? "",
+  };
+  const [profile, setProfile] = useState(current);
   const locked = doc.status === "AMIGA_REVIEWED" || doc.status === "SENT_TO_CLIENT" || doc.status === "CANCELLED";
   const canEdit = has("PIC_KLIEN", "INTAKE_SUPPORT") && !locked;
+  const sigVersion = doc.submitter_signature ? doc.updated_at : null;
 
   async function open() {
-    // Pilihan awal = penanda tangan dokumen saat ini (dicocokkan dari nama + jabatan)
     const list = await api.get<Signatory[]>("/signatories", { client_id: doc.client.id });
     // Urutan kotak "Disetujui oleh" saat ini, dicocokkan dari nama + jabatan
     setInitial(doc.signers.filter((x) => x.kind === "PENYETUJU")
       .map((x) => list.find((s) => s.full_name === x.name && s.position === x.position)?.id)
       .filter((id): id is string => Boolean(id)));
-    setSubmitterName(currentSubmitter);
+    setProfile(current);
     setEditing(true);
   }
 
   async function save() {
     setError(null);
+    const changed = profile.name.trim() !== current.name || profile.position.trim() !== current.position
+      || profile.company.trim() !== current.company;
     try {
       onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/signers`, {
         signatory_ids: ids,
-        ...(submitterName.trim() !== currentSubmitter ? { submitter_name: submitterName.trim() } : {}),
+        ...(changed && { submitter_name: profile.name.trim(), submitter_position: profile.position.trim(),
+                         submitter_company: profile.company.trim() }),
       }));
       setEditing(false);
     } catch (e) { setError((e as Error).message); }
+  }
+
+  async function removeSignature() {
+    setError(null);
+    try { onChange(await api.del<DocumentDetail>(`/documents/${doc.id}/submitter-signature`)); }
+    catch (e) { setError((e as Error).message); }
   }
 
   return (
@@ -1033,17 +1076,30 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
         <div><h2>Penanda tangan voucher</h2><p>{doc.status === "CANCELLED" ? "Pengajuan dibatalkan." : locked ? "Sudah tercetak di voucher." : "Dicetak di kotak tanda tangan voucher."}</p></div>
         {canEdit && !editing && <button className="btn sm" onClick={open}>Ubah</button>}
       </div>
+      {error && <Alert>{error}</Alert>}
       {editing && initial ? (
         <>
-          {error && <Alert>{error}</Alert>}
-          <div className="field" style={{ maxWidth: 420 }}>
-            <label htmlFor="edit-submitter">Nama &quot;Diajukan oleh&quot;</label>
-            <input id="edit-submitter" className="input" maxLength={200} value={submitterName}
-                   onChange={(e) => setSubmitterName(e.target.value)} />
-            <small>Boleh nama karyawan lain. Kosongkan untuk kembali ke PIC pengaju.</small>
+          <div className="section-title">Diajukan oleh</div>
+          <div className="grid-3">
+            <div className="field">
+              <label htmlFor="edit-submitter">Nama</label>
+              <input id="edit-submitter" className="input" maxLength={200} value={profile.name}
+                     onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
+              <small>Kosongkan untuk kembali ke PIC pengaju.</small>
+            </div>
+            <div className="field">
+              <label htmlFor="edit-position">Jabatan</label>
+              <input id="edit-position" className="input" maxLength={120} value={profile.position}
+                     onChange={(e) => setProfile({ ...profile, position: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="edit-company">Perusahaan / unit</label>
+              <input id="edit-company" className="input" maxLength={200} value={profile.company} placeholder={doc.client.name}
+                     onChange={(e) => setProfile({ ...profile, company: e.target.value })} />
+            </div>
           </div>
           <SignerPicker clientId={doc.client.id} clientName={doc.client.name} initial={initial} onChange={setIds}
-                        submitter={submitterName.trim() || currentSubmitter} />
+                        submitter={profile.name.trim() || current.name} showSubmitter={false} />
           <div className="actions" style={{ justifyContent: "flex-end" }}>
             <button className="btn" onClick={() => setEditing(false)}>Batal</button>
             <button className="btn primary" onClick={save}>Simpan</button>
@@ -1054,11 +1110,118 @@ function SignersPanel({ doc, onChange }: { doc: DocumentDetail; onChange: (d: Do
       ) : (
         <dl className="meta">
           {doc.signers.map((s, i) => (
-            <Fragment key={i}><dt>{KIND_TITLE[s.kind]}</dt><dd><b>{s.name}</b> <span className="muted">· {s.position}</span></dd></Fragment>
+            <Fragment key={i}><dt>{KIND_TITLE[s.kind]}</dt>
+              <dd><b>{s.name}</b> {s.position && <span className="muted">· {s.position}</span>}
+                {s.company && <span className="muted"> · {s.company}</span>}</dd></Fragment>
           ))}
         </dl>
       )}
+      {!editing && (pengaju || canEdit) && (
+        <div className="sig-row">
+          <div className="sig-box">
+            {doc.submitter_signature
+              ? <SignatureImage path={`/documents/${doc.id}/submitter-signature`} version={sigVersion} alt="Tanda tangan pengaju" />
+              : <span className="sig-empty">Tanda tangan pengaju: belum ada (diisi basah)</span>}
+          </div>
+          {canEdit && (
+            <div className="sig-actions">
+              <button className="btn sm" onClick={() => setSigning(true)}><PenLine /> {doc.submitter_signature ? "Ganti tanda tangan" : "Tambah tanda tangan"}</button>
+              {doc.submitter_signature && <button className="btn ghost sm" onClick={removeSignature}><Trash2 /> Hapus</button>}
+            </div>
+          )}
+        </div>
+      )}
+      {signing && (
+        <SignatureModal title="Tanda tangan pengaju" signer={pengaju?.name ?? current.name} onClose={() => setSigning(false)}
+                        onSave={async (image) => {
+                          onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/submitter-signature`, { image }));
+                          setSigning(false);
+                        }} />
+      )}
     </section>
+  );
+}
+
+/** Mode baca AI dan fitur rekening; bisa diganti selama draf atau ada kendala (Tahap 14). */
+function OptionsPanel({ doc, onChange, onNotice }: {
+  doc: DocumentDetail; onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const mode: ExtractionMode = doc.extraction_mode ?? "ITEMIZED";
+
+  async function put(body: { extraction_mode?: ExtractionMode; include_account?: boolean }, text: string) {
+    setBusy(true);
+    try {
+      onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/options`, body), { kind: "ok", text });
+    } catch (e) {
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function switchMode(next: ExtractionMode) {
+    if (next === mode) return;
+    const ask = next === "ITEMIZED"
+      ? "AI akan membaca rincian barang/jasa dari setiap bukti. Data utama, uraian, dan pajak tetap. Lanjutkan?"
+      : "Rincian barang/jasa disembunyikan dan voucher berisi 1 baris per invoice. Total tetap; PPh per baris perlu dipilih ulang. Lanjutkan?";
+    if (!confirm(ask)) return;
+    void put({ extraction_mode: next }, next === "ITEMIZED" ? "AI sedang membaca rincian barang/jasa." : "Mode diganti ke total saja.");
+  }
+
+  return (
+    <section className="card panel">
+      <div className="panel-head"><div><h2>Mode AI &amp; fitur</h2><p>Bisa diganti selama pengajuan belum diajukan.</p></div></div>
+      <div className="mode-cards" role="radiogroup" aria-label="Mode baca AI">
+        {(Object.keys(MODE_INFO) as ExtractionMode[]).map((m) => (
+          <label key={m} className={`mode-card${mode === m ? " on" : ""}`}>
+            <input type="radio" name="doc-mode" value={m} checked={mode === m} disabled={busy} onChange={() => switchMode(m)} />
+            <span className="mode-ic">{m === "TOTAL_ONLY" ? <Receipt /> : <ListOrdered />}</span>
+            <span><b>{MODE_INFO[m].title}</b><small>{MODE_INFO[m].desc}</small></span>
+          </label>
+        ))}
+      </div>
+      <label className="toggle">
+        <input type="checkbox" checked={Boolean(doc.include_account)} disabled={busy}
+               onChange={(e) => put({ include_account: e.target.checked },
+                                    e.target.checked ? "Rekening tujuan akan diisi, dicek, dan dicetak di voucher." : "Rekening tujuan tidak dicantumkan di voucher.")} />
+        <span>Perlu input rekening tujuan ke voucher</span>
+      </label>
+    </section>
+  );
+}
+
+/** Pratinjau voucher (tanpa lampiran) langsung di halaman; dimuat ulang setelah data, pajak, atau penanda tangan disimpan.
+ *  Di layar kecil PDF tidak selalu bisa tampil di dalam halaman, jadi tersedia tombol buka di tab baru. */
+function VoucherPreview({ doc, stale }: { doc: DocumentDetail; stale: boolean }) {
+  const [shown, setShown] = useState(() => window.matchMedia?.("(min-width: 861px)").matches ?? true);
+  const version = doc.updated_at + JSON.stringify(doc.files.map((f) => f.data?.tax ?? null)) + JSON.stringify(doc.signers);
+  // Versi singkat (hash) supaya pratinjau dimuat ulang hanya bila isinya berubah
+  const v = [...version].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7) >>> 0;
+  const path = `/documents/${doc.id}/voucher-preview?attachments=false&v=${v}`;
+
+  async function openInTab() {
+    const win = window.open("", "_blank");
+    try {
+      const url = URL.createObjectURL(await api.blob(path));
+      if (win) win.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch { win?.close(); }
+  }
+
+  return (
+    <div className="voucher-preview">
+      <div className="section-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span>Pratinjau voucher</span>
+        <span className="actions">
+          <button type="button" className="btn ghost sm" onClick={() => setShown(!shown)}>{shown ? "Sembunyikan" : "Tampilkan"}</button>
+          <button type="button" className="btn ghost sm" onClick={openInTab}><ExternalLink /> Buka di tab baru</button>
+        </span>
+      </div>
+      {stale && <small className="warn-text">Simpan perubahan dulu agar pratinjau ikut diperbarui.</small>}
+      {shown && <div className="voucher-frame"><PdfFrame path={path} title="Pratinjau voucher" /></div>}
+      <small className="muted">Bertanda SIMULASI, tanpa lampiran. Nomor voucher dan tanda tangan penyetuju muncul setelah disetujui.</small>
+    </div>
   );
 }
 

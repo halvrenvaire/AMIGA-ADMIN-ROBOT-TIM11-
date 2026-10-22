@@ -6,6 +6,7 @@ import {
 import {
   ArrowDownRight, ArrowUpRight, ClipboardCheck, FileInput, Minus, Receipt, ShieldCheck, Upload, Wallet,
 } from "lucide-react";
+import { AiCostCard } from "../components/AiCostCard";
 import { Clover } from "../components/Logo";
 import { useTheme } from "../theme";
 import { api } from "../api";
@@ -171,6 +172,7 @@ export function Metrics() {
                        empty="–" color={c.approved} />
             </section>
           </div>
+          {has("SERVICE_LEAD", "SYSTEM_ADMIN") && <AiCostCard initialDays={days} />}
         </>
       )}
     </>

@@ -15,17 +15,28 @@ interface Doc { id: string; requestId: string }
 const docs: Record<string, Doc> = {};
 
 /** Unggah lewat Layar 02 lalu buka halaman dokumennya. */
-function upload(email: string, file: string, key: string) {
-  cy.visitAs(email, "/unggah");
-  cy.get("main input[type=file]").selectFile(`../samples/invoices/${file}`, { force: true });
-  cy.contains("button", "Preview").click();
-  cy.contains("button", "Kirim ke antrean").click();
-  cy.contains("Draf dibuat").find("b").invoke("text").then((requestId) => {
-    cy.contains("a", "Buka draf").click();
-    cy.location("pathname").should("match", /^\/dokumen\/[0-9a-f-]+$/).then((path) => {
+/** Skenario uji lama memakai mode rincian barang/jasa dan rekening tujuan (bawaan Tahap 14: total saja, tanpa rekening). */
+function itemizedWithAccount() {
+  cy.contains(".mode-card", "Rincian barang/jasa").click();
+  cy.contains("details.extras summary", "Fitur tambahan").click();
+  cy.contains(".extras label", "Perlu input rekening").find("input").check();
+}
+
+/** Simpan draf lalu catat ID dokumen dan Request ID dari halaman detail. */
+function saveDraft(key: string) {
+  cy.contains("button", "Simpan draf & lanjutkan").click();
+  cy.location("pathname", { timeout: 30_000 }).should("match", /^\/dokumen\/[0-9a-f-]+$/).then((path) => {
+    cy.get(".page-head h1 .mono").invoke("text").then((requestId) => {
       docs[key] = { id: path.split("/").pop()!, requestId };
     });
   });
+}
+
+function upload(email: string, file: string, key: string) {
+  cy.visitAs(email, "/unggah");
+  itemizedWithAccount();
+  cy.get("main input[type=file]").selectFile(`../samples/invoices/${file}`, { force: true });
+  saveDraft(key);
 }
 
 const badge = () => cy.get(".page-head .badge");
@@ -43,8 +54,8 @@ function submitDraft() {
       cy.contains(".alert", "diterapkan");
     }
   });
-  cy.contains(".decision button", "Kirim ke reviewer").click();
-  cy.contains(".alert", "Terkirim ke Finance Reviewer");
+  cy.contains(".decision button", "Ajukan untuk Direview").click();
+  cy.contains(".alert", "Diajukan ke Finance Reviewer");
 }
 
 function reviewerOf() {
@@ -104,7 +115,8 @@ describe("UAT AMIGA Robot Admin", () => {
   it("UAT 3 — tanpa nomor rekening tetap Draf: rekening opsional (feedback 21 Okt 2026)", () => {
     upload("pic.alpha@amiga.test", "02_tanpa_rekening.pdf", "missing");
     waitStatus("Draf");
-    cy.contains(".section-title", "Data pembayaran").should("contain.text", "opsional");
+    cy.contains(".section-title", "Rekening tujuan");
+    cy.contains("label", "Nomor rekening").next("input").should("have.value", "");
     cy.contains(".issue", "Nomor rekening").should("not.exist");
   });
 
@@ -151,7 +163,7 @@ describe("UAT AMIGA Robot Admin", () => {
       cy.contains(".decision button", "Simpan bukti 1").click();
       cy.contains(".alert", "Tersimpan");
       cy.contains(".issue", "CALCULATION_DISCREPANCY");
-      cy.contains(".decision button", "Kirim ke reviewer").should("be.disabled");
+      cy.contains(".decision button", "Ajukan untuk Direview").should("be.disabled");
 
       cy.visitAs("multi@amiga.test", `/dokumen/${docs.sod.id}/riwayat`);
       // Entri perubahan nominal (entri "Diperbaiki PIC" lain: pilihan pajak saat draf dikirim)

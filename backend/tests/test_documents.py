@@ -59,9 +59,10 @@ class FakeExtractor:
         self.calls = 0
         self.pages: list[int] = []  # jumlah halaman yang dikirim ke AI per panggilan
 
-    def extract(self, pdf_bytes):
+    def extract(self, pdf_bytes, mode="ITEMIZED", include_account=True):
         assert pdf_bytes.startswith(b"%PDF-")
         self.calls += 1
+        self.modes = getattr(self, "modes", []) + [mode]
         self.pages.append(len(PdfReader(io.BytesIO(pdf_bytes)).pages))
         # Daftar hasil = satu hasil per file (unggahan beberapa invoice), berurutan
         result = self.result.pop(0) if isinstance(self.result, list) else self.result
@@ -138,8 +139,9 @@ def upload(email="pic.alpha@amiga.test", client="PT Klien Alpha", pdf=None, file
            submit=True, **form):
     """Unggah lalu, seperti PIC di alur baru, kirim draf ke reviewer bila tidak ada kendala wajib
     (`submit=False` untuk menguji draf)."""
+    # Mode rincian + rekening dicantumkan: perilaku sebelum Tahap 14 (test mode total saja ada di test_total_only)
     data = {"client_id": client_id(client), "request_type": "Voucher Pengeluaran Vendor", "channel": "Email",
-            "submitted_date": "2026-10-14", **form}
+            "submitted_date": "2026-10-14", "extraction_mode": "ITEMIZED", "include_account": "true", **form}
     r = api(email).post("/documents", data=data,
                         files={"files": (filename, pdf if pdf is not None else make_pdf(), "application/pdf")})
     if submit:
@@ -260,7 +262,7 @@ def test_account_number_is_optional(extractor):
     extractor.result = invoice(bank_name=None, account_no=None, account_name=None)
     doc = detail(upload(submit=False).json()["id"])
     assert doc["status"] == "DRAFT" and doc["issues"] == []
-    assert doc["account_check"]["state"] == "MISSING" and "opsional" in doc["account_check"]["message"]
+    assert doc["account_check"]["state"] == "MISSING" and "tidak diisi" in doc["account_check"]["message"]
 
 
 def test_calculation_discrepancy(extractor):

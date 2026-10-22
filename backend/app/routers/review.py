@@ -19,11 +19,11 @@ from app.routers.documents import _detail, _get_document
 from app.schemas.schemas import (
     ApproveRequest, AuditItem, ClassificationDecision, DocumentDetail, ReasonRequest,
 )
-from app.services.account_check import MISMATCH, UNVERIFIED, VERIFIED, check_account, payee_checks
+from app.services.account_check import MISMATCH, OFF, UNVERIFIED, VERIFIED, check_account, payee_checks
 from app.services import audit_service, storage
 from app.services.access_rules import can_access_client
 from app.services.document_processing import (
-    BLOCKING, run_verification, set_status, submitter_ids, uploader_ids,
+    BLOCKING, WARNINGS, run_verification, set_status, submitter_ids, uploader_ids,
 )
 from app.services.reviewer_assignment import pick_reviewer
 from app.services.voucher_service import create_voucher
@@ -69,7 +69,7 @@ def approve(document_id: uuid.UUID, body: ApproveRequest | None = None, user: Us
     body = body or ApproveRequest()
     doc = _get_document(db, user, document_id)
     _require_status(doc, DocStatus.READY_FOR_REVIEW)
-    open_issues = _open_issues(db, doc)
+    open_issues = [i for i in _open_issues(db, doc) if i.code not in WARNINGS]  # peringatan tidak menahan
     if open_issues:
         codes = ", ".join(sorted({i.code.value for i in open_issues}))
         raise HTTPException(status.HTTP_409_CONFLICT,
@@ -94,17 +94,19 @@ def approve(document_id: uuid.UUID, body: ApproveRequest | None = None, user: Us
                             f"Dokumen otomatis dialihkan ke {_name(db, doc.assigned_reviewer_id)}.")
 
     # Rekening dicek ulang saat menyetujui: data vendor bisa diverifikasi/diubah setelah verifikasi sistem
+    # Tahap 14: rekening yang berbeda dari data vendor tidak lagi menahan voucher, tetapi reviewer wajib mengonfirmasi
+    # pengecekannya, sama seperti rekening yang belum terverifikasi
     account = check_account(db, doc)
-    if account.state == MISMATCH:
-        raise HTTPException(status.HTTP_409_CONFLICT, account.message)
-    if account.state == UNVERIFIED and not body.account_confirmed:
+    unchecked = (UNVERIFIED, MISMATCH)
+    if account.state in unchecked and not body.account_confirmed:
+        what = "berbeda dengan data vendor" if account.state == MISMATCH else "belum terverifikasi"
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            f"Rekening belum terverifikasi: {account.message} Cocokkan rekening dengan sumber tepercaya "
+                            f"Rekening {what}: {account.message} Cocokkan rekening dengan sumber tepercaya "
                             "(mis. konfirmasi langsung ke vendor), lalu centang konfirmasi pengecekan rekening.")
 
-    if account.state == UNVERIFIED:
-        # Konfirmasi mencakup semua rekening tujuan voucher yang belum terverifikasi
-        accounts = ", ".join(p.account_no or "-" for p in payee_checks(db, doc) if p.check.state == UNVERIFIED)
+    if account.state in unchecked:
+        # Konfirmasi mencakup semua rekening tujuan voucher yang belum terverifikasi atau berbeda
+        accounts = ", ".join(p.account_no or "-" for p in payee_checks(db, doc) if p.check.state in unchecked)
         audit_service.record(db, user, "ACCOUNT_CONFIRMED_BY_REVIEWER", document_id=doc.id, client_id=doc.client_id,
                              field="account_no", new_value=accounts or (doc.extraction.account_no if doc.extraction else None),
                              note=(body.account_note or "").strip() or "Rekening dicek manual oleh Finance Reviewer")
@@ -187,13 +189,13 @@ def decide_classification(document_id: uuid.UUID, body: ClassificationDecision, 
                             "syarat terpenuhi) atau minta invoice resmi ke vendor.")
     extraction = doc.extraction
     if body.decision == "RECEIPT_ACCEPTED":
-        others = codes - {IssueCode.RECEIPT_NOT_INVOICE, IssueCode.NEEDS_MANUAL_REVIEW}
+        others = codes - {IssueCode.RECEIPT_NOT_INVOICE, IssueCode.NEEDS_MANUAL_REVIEW} - WARNINGS
         if others:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 f"Struk belum bisa diterima: masih ada kendala lain ({', '.join(sorted(c.value for c in others))}). "
                                 "Data wajib harus lengkap lebih dulu.")
         account = check_account(db, doc)
-        if account.state != VERIFIED:
+        if account.state not in (VERIFIED, OFF):
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 f"Struk belum bisa diterima: rekening belum terverifikasi. {account.message} Verifikasi "
                                 "data rekening vendor di Data Referensi lebih dulu.")

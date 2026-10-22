@@ -8,8 +8,8 @@ export const MAX_PENYETUJU = 5;
 
 /** Kotak tanda tangan voucher. "Diajukan oleh" = PIC Klien pengaju (tetap); "Disetujui oleh" = satu kotak
  *  per pemberi persetujuan, urutannya sama dengan di voucher. Tanpa `initial`, satu kotak berisi default. */
-export function SignerPicker({ clientId, clientName, submitter, initial, onChange }: {
-  clientId: string; clientName: string; submitter: string; initial?: string[];
+export function SignerPicker({ clientId, clientName, submitter, initial, onChange, showSubmitter = true }: {
+  clientId: string; clientName: string; submitter: string; initial?: string[]; showSubmitter?: boolean;
   onChange: (ids: string[], chosen: Signatory[]) => void;
 }) {
   const [list, setList] = useState<Signatory[] | null>(null);
@@ -36,14 +36,14 @@ export function SignerPicker({ clientId, clientName, submitter, initial, onChang
   const canAdd = rows.length < MAX_PENYETUJU && unused.length > 0;
 
   return (
-    <div className="signer-picker">
-      <fieldset>
+    <div className={`signer-picker${showSubmitter ? "" : " single"}`}>
+      {showSubmitter && <fieldset>
         <legend>Diajukan oleh</legend>
         <div className="company-box">
           <UserRound />
           <div><b>{submitter}</b><small className="muted">{clientName}</small></div>
         </div>
-      </fieldset>
+      </fieldset>}
       <fieldset>
         <legend>Disetujui oleh <small className="muted">({rows.length}/{MAX_PENYETUJU} kotak)</small></legend>
         {!list.length && (

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Building2, CheckCircle2, Plus, UserPlus, UserX, Users } from "lucide-react";
+import { AiCostCard } from "../components/AiCostCard";
 import { ClientLogo } from "../components/ClientLogo";
 import { api } from "../api";
 import { useAuth } from "../auth";
@@ -50,6 +51,7 @@ export function AdminUsers() {
       </div>
       {(error || users.error) && <Alert>{error ?? users.error}</Alert>}
       {notice && <Alert kind="ok">{notice}</Alert>}
+      {me?.roles.includes("SYSTEM_ADMIN") && <AiCostCard />}
       <section className="card panel">
         {users.loading && !users.data ? <Loading /> : (
           <div className="table-wrap">

@@ -151,7 +151,18 @@ def vat_settings(tax: dict | None, data: dict) -> dict:
     mode = v.get("mode") if v.get("mode") in VAT_MODES else (
         "separate" if any(line_is_vat(li) for li in data.get("line_items") or []) else "none")
     rate = _dec(v.get("rate")) or DEFAULT_VAT_RATE
-    return {"mode": mode, "rate": _num(rate), "show": bool(v.get("show"))}
+    out = {"mode": mode, "rate": _num(rate), "show": bool(v.get("show"))}
+    if v.get("amount") not in (None, ""):
+        out["amount"] = _num(_dec(v["amount"]))  # PPN diisi manual PIC (hitung otomatis dimatikan)
+    return out
+
+
+def total_dpp(total: Decimal | None, vat: dict) -> Decimal | None:
+    """DPP invoice tanpa rincian (mode total saja): total dikurangi PPN yang termasuk di dalamnya.
+    PPN terpisah atau termasuk harga: total = DPP + PPN, jadi DPP = total x 100 / (100 + tarif)."""
+    if total is None or vat["mode"] == "none":
+        return total
+    return (total * 100 / (100 + Decimal(vat["rate"]))).quantize(Decimal(1), rounding=ROUND_HALF_UP)
 
 
 def line_dpp(li: dict, vat: dict) -> Decimal:
@@ -170,7 +181,8 @@ def default_base(data: dict, vat: dict | None = None) -> Decimal | None:
     base = sum((line_dpp(li, vat) for li in lines), Decimal(0))
     if base > 0:
         return base
-    return Decimal(str(data["total"])) if data.get("total") not in (None, "") else None
+    total = Decimal(str(data["total"])) if data.get("total") not in (None, "") else None
+    return total_dpp(total, vat) if not item_lines(data) else total
 
 
 def vat_breakdown(data: dict, vat: dict | None = None) -> dict:
@@ -186,7 +198,13 @@ def vat_breakdown(data: dict, vat: dict | None = None) -> dict:
     item_sum = sum((_dec(li.get("subtotal")) or Decimal(0) for li in items), Decimal(0))
     total = _dec(data.get("total"))
     warning = None
-    if vat["mode"] == "included":
+    if vat.get("amount") is not None:
+        # Diisi manual PIC: dipakai apa adanya, tanpa hitungan dan peringatan sistem
+        amount = computed = Decimal(vat["amount"]) if vat["mode"] != "none" else Decimal(0)
+    elif not items and total is not None and vat["mode"] != "none":
+        # Tanpa rincian (mode total saja): PPN = total - DPP
+        amount = computed = total - total_dpp(total, vat)
+    elif vat["mode"] == "included":
         computed = sum(((_dec(li.get("subtotal")) or Decimal(0)) - line_dpp(li, vat) for li in taxed), Decimal(0))
         amount = computed
     elif vat["mode"] == "separate":
@@ -236,10 +254,17 @@ def groups(data: dict, rates_by_code: dict[str, dict], vat: dict) -> list[dict]:
 
 def build(rate: TaxRate | None, npwp: bool, base: Decimal | None, base_auto: bool, data: dict,
           source: str = "pic", mode: str = "invoice", table: dict[str, TaxRate] | None = None,
-          vat: dict | None = None) -> dict:
+          vat: dict | None = None, calc: bool = True, manual_amount: Decimal | None = None) -> dict:
     """Pilihan pajak satu invoice, lengkap dengan salinan tarif dan nilai potongan.
-    `mode`: "invoice" (satu jenis PPh untuk seluruh invoice) atau "line" (PPh dipilih per baris)."""
+    `mode`: "invoice" (satu jenis PPh untuk seluruh invoice) atau "line" (PPh dipilih per baris).
+    `calc` False (hitung otomatis dimatikan PIC): DPP, PPN, dan potongan PPh diisi manual dan tidak dihitung ulang."""
     vat = vat_settings({"vat": vat} if vat else data.get("tax"), data)
+    if not calc and mode == "invoice":
+        pct = Decimal(rate.rate_npwp if npwp else rate.rate_no_npwp)
+        cut = Decimal(0) if rate.code == NONE else (manual_amount or Decimal(0))
+        return {"mode": "invoice", "calc": False, "code": rate.code, "name": rate.name, "npwp": npwp, "rate": _num(pct),
+                "base": _num(base), "base_auto": False, "amount": _num(cut), "source": source, "vat": vat}
+    vat.pop("amount", None)  # hitung otomatis: PPN dihitung sistem
     if mode == "line":
         used = {li.get("pph") for _, li in item_lines(data)} - {None, NONE}
         snapshot = {code: {"name": r.name, "rate": _num(Decimal(r.rate_npwp if npwp else r.rate_no_npwp))}
@@ -260,6 +285,8 @@ def recompute(tax: dict | None, data: dict) -> dict | None:
     if not tax:
         return tax
     vat = vat_settings(tax, data)
+    if tax.get("calc") is False:
+        return {**tax, "vat": vat}  # diisi manual PIC: tidak dihitung ulang
     if tax.get("mode") == "line":
         found = groups(data, tax.get("rates") or {}, vat)
         total = sum((Decimal(g["amount"]) for g in found), Decimal(0))
@@ -279,6 +306,10 @@ def label(tax: dict | None) -> str:
                  for g in tax.get("groups") or []]
         npwp = "" if tax.get("npwp") else ", tanpa NPWP"
         return f"PPh per baris{npwp}: {'; '.join(parts) or 'tanpa potongan'}{vat_text}"
+    if vat.get("amount") is not None and vat.get("mode") != "none":
+        vat_text += f" (PPN manual {vat['amount']})"
+    if tax and tax.get("calc") is False:
+        vat_text += "; dihitung manual"
     if not tax or tax.get("code") == NONE:
         return "Tanpa potongan" + vat_text
     npwp = "" if tax.get("npwp") else ", tanpa NPWP"

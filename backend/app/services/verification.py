@@ -69,9 +69,11 @@ REIMBURSE_REQUIRED = ("invoice_date", "total")
 
 
 def verify(data: InvoiceData, duplicate_request_id: str | None = None,
-           payees: list[tuple[str | None, str | None]] | None = None, reimburse: bool = False) -> list[Issue]:
+           payees: list[tuple[str | None, str | None]] | None = None, reimburse: bool = False,
+           itemized: bool = True) -> list[Issue]:
     """`payees`: (vendor, rekening) ternormalisasi per invoice bila satu voucher berisi beberapa invoice.
-    `reimburse`: Voucher Pengeluaran Reimburse; hanya tanggal dan total wajib, boleh banyak vendor."""
+    `reimburse`: Voucher Pengeluaran Reimburse; hanya tanggal dan total wajib, boleh banyak vendor.
+    `itemized`: False untuk mode TOTAL_ONLY (tanpa rincian barang): rincian dan hitungannya tidak diperiksa."""
     issues: list[Issue] = []
 
     required = {k: v for k, v in REQUIRED_FIELDS.items() if not reimburse or k in REIMBURSE_REQUIRED}
@@ -80,7 +82,9 @@ def verify(data: InvoiceData, duplicate_request_id: str | None = None,
             issues.append(Issue(IssueCode.MISSING_EVIDENCE, name,
                                 f"{label} tidak ditemukan di invoice. Lengkapi {label.lower()} di draf, "
                                 "lalu simpan."))
-    if not data.subtotals:
+    if not itemized:
+        pass  # mode total saja: voucher mencetak satu baris per invoice senilai totalnya
+    elif not data.subtotals:
         issues.append(Issue(IssueCode.MISSING_EVIDENCE, "line_items",
                             "Rincian barang/jasa tidak ditemukan di invoice. "
                             "Pastikan invoice memuat daftar barang beserta subtotalnya."))
@@ -100,9 +104,8 @@ def verify(data: InvoiceData, duplicate_request_id: str | None = None,
     if not reimburse and (len(vendors) > 1 or len(accounts) > 1):
         what = "vendor" if len(vendors) > 1 else "nomor rekening tujuan"
         issues.append(Issue(IssueCode.VENDOR_MISMATCH, "vendor_name" if len(vendors) > 1 else "account_no",
-                            f"Invoice dalam pengajuan ini memiliki {what} yang berbeda. Pastikan memang benar, lalu "
-                            "konfirmasi beserta alasannya sebelum mengirim ke reviewer. Pembayaran ke setiap "
-                            "rekening tampil terpisah untuk Finance Reviewer."))
+                            f"Pengingat: invoice dalam pengajuan ini memiliki {what} yang berbeda. Pastikan memang "
+                            "benar sebelum mengirim ke reviewer. Peringatan ini tidak menahan pengajuan."))
 
     if duplicate_request_id:
         issues.append(Issue(IssueCode.POSSIBLE_DUPLICATE, "invoice_no",

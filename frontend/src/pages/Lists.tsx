@@ -43,7 +43,7 @@ export function Submissions() {
       </div>
       {drafts > 0 && (
         <Alert kind="info">
-          <span>{drafts} <b>draf</b> belum dikirim ke reviewer. Periksa datanya lalu klik &quot;Kirim ke reviewer&quot;.{" "}
+          <span>{drafts} <b>draf</b> belum dikirim ke reviewer. Periksa datanya lalu klik &quot;Ajukan untuk Direview&quot;.{" "}
             <button className="btn sm" onClick={() => setStatus("DRAFT")}>Tampilkan</button></span>
         </Alert>
       )}

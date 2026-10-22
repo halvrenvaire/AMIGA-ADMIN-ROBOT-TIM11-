@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from app import db as db_module
 from app.config import settings
 from app.models import (
-    CATEGORY_REIMBURSE, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue,
+    CATEGORY_REIMBURSE, TOTAL_ONLY, AuditLog, DocStatus, Document, DocumentFile, Extraction, IssueCode, LineItem, ValidationIssue,
     Vendor,
 )
 from app.services import audit_service, storage, tax_service
@@ -118,6 +118,13 @@ def part_to_data(p: ExtractedInvoice) -> dict:
     }
 
 
+def default_description(data: dict) -> str | None:
+    """Uraian awal satu invoice di voucher mode TOTAL_ONLY: "Invoice {nomor} - {vendor}" (bisa diedit PIC)."""
+    parts = [f"Invoice {data['invoice_no']}" if data.get("invoice_no") else None, data.get("vendor_name")]
+    text = " - ".join(p for p in parts if p)
+    return text or None
+
+
 def data_to_part(d: dict | None) -> ExtractedInvoice:
     d = d or {}
     dec = lambda v: None if v in (None, "") else Decimal(str(v))  # noqa: E731
@@ -191,11 +198,15 @@ def rebuild_from_files(db, doc: Document) -> Extraction:
 
 # Kendala yang wajib dibereskan PIC sebelum dikirim ke reviewer. Kendala lain (kemungkinan duplikat,
 # struk/nota, perlu pemeriksaan manual, catatan pengembalian) diputuskan Finance Reviewer.
+# Rekening berbeda (ACCOUNT_MISMATCH) tidak lagi menahan draf (Tahap 14): rekening adalah fitur tambahan dan
+# perbedaannya menjadi peringatan yang dicek Finance Reviewer saat menyetujui.
 BLOCKING = {IssueCode.MISSING_EVIDENCE, IssueCode.CALCULATION_DISCREPANCY, IssueCode.NOT_AN_INVOICE,
-            IssueCode.EXTRACTION_FAILED, IssueCode.ACCOUNT_MISMATCH}
-# Peringatan yang cukup dikonfirmasi PIC beserta alasannya (feedback owner: beberapa vendor/rekening dalam satu
-# voucher boleh). Tidak membuat dokumen "Ada kendala", tetapi draf baru bisa dikirim setelah dikonfirmasi.
+            IssueCode.EXTRACTION_FAILED}
+# Peringatan pengingat (Tahap 14: soft-warning). Tidak membuat dokumen "Ada kendala" dan tidak menahan pengiriman;
+# PIC boleh mengonfirmasinya beserta alasan (tampil untuk reviewer), tetapi tidak wajib.
 ACKNOWLEDGEABLE = {IssueCode.VENDOR_MISMATCH}
+# Peringatan yang tidak menahan pengiriman maupun persetujuan (rekening berbeda dikonfirmasi reviewer saat menyetujui)
+WARNINGS = {IssueCode.VENDOR_MISMATCH, IssueCode.ACCOUNT_MISMATCH}
 
 
 def payee_fingerprint(extraction: Extraction | None) -> str:
@@ -369,6 +380,7 @@ def run_verification(db, doc: Document) -> list:
         subtotals=[line.subtotal for line in extraction.line_items],
     )
     reimburse = doc.request_type == CATEGORY_REIMBURSE
+    itemized = getattr(doc, "extraction_mode", None) != TOTAL_ONLY
     class_issues, rejected = _classification_issues(extraction, reimburse)
     if rejected:
         # Pemeriksaan data tidak relevan bila ada file yang bukan dokumen tagihan
@@ -377,7 +389,8 @@ def run_verification(db, doc: Document) -> list:
             db.add(ValidationIssue(document_id=doc.id, code=issue.code, field=issue.field, message=issue.message))
         db.flush()
         return class_issues
-    issues = class_issues + verify(invoice, _duplicate_of(db, doc, extraction), _payees(extraction), reimburse)
+    issues = class_issues + verify(invoice, _duplicate_of(db, doc, extraction),
+                                   _payees(extraction, bool(getattr(doc, "include_account", False))), reimburse, itemized)
     issues = [i for i in issues if not (i.code in ACKNOWLEDGEABLE and acknowledgement(extraction, i.code))]
     db.flush()  # vendor_id baru dipakai pemeriksaan rekening
     db.refresh(doc, ["vendor"])
@@ -396,10 +409,12 @@ def run_verification(db, doc: Document) -> list:
     return issues
 
 
-def _payees(extraction: Extraction) -> list[tuple[str | None, str | None]]:
-    """(vendor, rekening) per invoice dari hasil baca AI, untuk cek satu voucher satu penerima."""
+def _payees(extraction: Extraction, include_account: bool = True) -> list[tuple[str | None, str | None]]:
+    """(vendor, rekening) per invoice dari hasil baca AI, untuk cek satu voucher satu penerima.
+    Rekening diabaikan bila fitur rekening dimatikan untuk pengajuan ini."""
     payees = extraction.raw_json.get("payees") if isinstance(extraction.raw_json, dict) else None
-    return [(normalize(p.get("vendor_name")), normalize(p.get("account_no"))) for p in payees or []]
+    return [(normalize(p.get("vendor_name")), normalize(p.get("account_no")) if include_account else None)
+            for p in payees or []]
 
 
 def send_to_review(db, doc: Document, note: str) -> None:
@@ -423,9 +438,12 @@ def manual_entry(extraction: Extraction | None) -> dict | None:
     return info if isinstance(info, dict) and info.get("files") else None
 
 
-def _manual_message(status: str, files: list[str], total: int) -> str:
+def _manual_message(status: str, files: list[str], total: int, lines_only: bool = False) -> str:
     which = ("invoice ini" if total == 1 else "semua invoice" if len(files) == total
              else f"{len(files)} dari {total} invoice ({', '.join(files)})")
+    if lines_only:
+        return (f"AI belum berhasil membaca rincian barang/jasa {which}. Data invoice lain tetap tersimpan. Isi rincian "
+                "secara manual dari file bukti, atau kembali ke mode total saja.")
     if status == "off":
         return (f"Pembacaan otomatis oleh AI sedang dimatikan, jadi data {which} belum terisi. Isi data invoice "
                 "secara manual dari file bukti, lalu simpan.")
@@ -451,8 +469,11 @@ def first_pages(pdf: bytes, limit: int) -> bytes:
         return pdf
 
 
-def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_manual: bool = False) -> None:
-    """`retry_manual`: hanya baca ulang invoice yang sebelumnya diisi manual karena AI gagal; data invoice lain tetap."""
+def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_manual: bool = False,
+                     lines_only: bool = False) -> None:
+    """`retry_manual`: hanya baca ulang invoice yang sebelumnya diisi manual karena AI gagal; data invoice lain tetap.
+    `lines_only`: mode diganti TOTAL_ONLY → ITEMIZED; AI hanya mengisi rincian barang/jasa, sedangkan data kepala
+    invoice, uraian, dan pilihan pajak yang sudah diisi PIC tetap dipakai."""
     with db_module.SessionLocal() as db:
         doc = db.get(Document, document_id)
         if doc is None:
@@ -468,11 +489,14 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                 f.read_at = None
         db.commit()
 
+        mode = getattr(doc, "extraction_mode", None) or "ITEMIZED"
+        total_only = mode == TOTAL_ONLY
         ai_on = settings.ai_extraction_enabled and extractor is not None
         started = time.monotonic()
         files = doc.files or []
         sources = [(f, f.original_filename, f.file_key) for f in files] or [(None, doc.original_filename, doc.file_key)]
         parts, checks, manual, errors, fresh, read = [], [], [], [], set(), 0
+        usage = {"input_tokens": 0, "output_tokens": 0}
         try:
             for f, name, key in sources:
                 if f is not None and f.id in keep:
@@ -484,12 +508,33 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                 if ai_on:
                     pdf = first_pages(storage.load(key), settings.ai_max_pages)
                     try:
-                        part = extractor.extract(pdf)
+                        part = extractor.extract(pdf, mode=mode, include_account=bool(doc.include_account))
                     except ExtractionError as e:
                         errors.append(f"{name}: {e}")
                     except Exception as e:  # noqa: BLE001 - AI tidak boleh membuat dokumen macet di PROCESSING
                         log.exception("Pembacaan AI %s gagal tak terduga", name)
                         errors.append(f"{name}: {type(e).__name__}")
+                    if part is not None:
+                        for k in usage:
+                            usage[k] += int((getattr(part, "usage", None) or {}).get(k) or 0)
+                if lines_only and f is not None:
+                    # Ganti mode ke rincian: hanya baris barang/jasa yang diambil dari AI
+                    old = file_data(doc, f)
+                    new = {k: v for k, v in old.items() if k not in ("manual", "hidden_line_items")}
+                    if part is None:
+                        manual.append(name)
+                        new["manual"] = True
+                    else:
+                        read += 1
+                        new["line_items"] = part_to_data(part)["line_items"]
+                    new["tax"] = tax_service.recompute(old.get("tax"), new)
+                    f.data = new
+                    parts.append(data_to_part(new))
+                    if name in old_checks:
+                        checks.append(old_checks[name])
+                    f.read_at = datetime.now(timezone.utc)
+                    db.commit()
+                    continue
                 if part is None and f is not None and f.data and not f.data.get("manual"):
                     # Pembacaan ulang gagal: data sebelumnya (hasil AI dan isian PIC) tetap dipakai
                     parts.append(data_to_part(f.data))
@@ -505,10 +550,15 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                 else:
                     checks += document_checks([name], [part])
                     read += 1
+                if total_only:
+                    part.line_items = []  # mode total: satu baris voucher per invoice
                 parts.append(part)
                 if f is not None:
                     f.invoice_no_norm = normalize(part.invoice_no)
-                    f.data = {**part_to_data(part), **({"manual": True} if name in manual else {})}
+                    data = part_to_data(part)
+                    if total_only:
+                        data["description"] = default_description(data)
+                    f.data = {**data, **({"manual": True} if name in manual else {})}
                     # Disimpan per file supaya layar detail menampilkan progres yang nyata
                     f.read_at = datetime.now(timezone.utc)
                     db.commit()
@@ -517,7 +567,7 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
             if manual:
                 status = "failed" if ai_on else "off"
                 data.raw["ai"] = {"status": status, "files": manual, "error": "; ".join(errors)[:500] or None,
-                                  "message": _manual_message(status, manual, len(sources))}
+                                  "message": _manual_message(status, manual, len(sources), lines_only)}
             # Saran pajak tetap ada tanpa AI (aturan kata kunci)
             prefill_tax(db, doc, getattr(extractor, "bedrock", None) if ai_on else None, fresh)
         except storage.StorageError as e:
@@ -530,7 +580,21 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
             return
         duration_ms = int((time.monotonic() - started) * 1000)
 
-        extraction = _save_extraction(db, doc, data, duration_ms)
+        if lines_only:
+            # Data kepala invoice tidak berubah; data gabungan disusun ulang dari data per invoice
+            extraction = rebuild_from_files(db, doc)
+            raw = dict(extraction.raw_json or {})
+            raw["document_checks"] = checks
+            raw.pop("ai", None)
+            if manual:
+                raw["ai"] = data.raw["ai"]
+            extraction.raw_json = raw
+            extraction.extracted_at = datetime.now(timezone.utc)
+            extraction.duration_ms = duration_ms
+        else:
+            extraction = _save_extraction(db, doc, data, duration_ms)
+        extraction.ai_input_tokens = (extraction.ai_input_tokens or 0) + usage["input_tokens"]
+        extraction.ai_output_tokens = (extraction.ai_output_tokens or 0) + usage["output_tokens"]
         if manual or errors:
             log.warning("AI tidak membaca %s (AI %s): %s", doc.request_id, "menyala" if ai_on else "dimatikan",
                         "; ".join(errors))
@@ -539,8 +603,10 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                                       + (f". {len(manual)} bukti diisi manual oleh PIC" if manual
                                          else ". Data sebelumnya tetap dipakai"))
         if read:
+            what = "rincian" if lines_only else ("total" if total_only else "rincian lengkap")
             audit_service.record(db, None, "EXTRACTED", document_id=doc.id, client_id=doc.client_id,
-                                 note=f"AI membaca {read} invoice, {len(extraction.line_items)} baris dalam {duration_ms} ms")
+                                 note=f"AI membaca {read} invoice (mode {what}), {len(extraction.line_items)} baris "
+                                      f"dalam {duration_ms} ms")
 
         issues = run_verification(db, doc)
         settle_status(db, doc, issues, "Menunggu PIC mengisi data secara manual" if manual else

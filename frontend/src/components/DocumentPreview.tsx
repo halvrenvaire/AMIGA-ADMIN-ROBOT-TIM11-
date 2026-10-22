@@ -20,7 +20,7 @@ const DRAFT_FIELDS = ["vendor_name", "invoice_no", "invoice_date", "total", "ban
 export function AccountCheckBox({ check, actions }: { check: AccountCheck; actions?: ReactNode }) {
   const meta = {
     VERIFIED: { icon: ShieldCheck, tone: "ok", title: "Rekening terverifikasi" },
-    MISMATCH: { icon: ShieldAlert, tone: "bad", title: "Rekening tidak cocok dengan data terverifikasi" },
+    MISMATCH: { icon: ShieldAlert, tone: "warn", title: "Pengingat: rekening berbeda dengan data vendor terverifikasi" },
     UNVERIFIED: { icon: ShieldQuestion, tone: "warn", title: "Rekening belum terverifikasi" },
     MISSING: { icon: ShieldQuestion, tone: "gray", title: "Rekening tidak diisi (opsional)" },
   }[check.state as string];
