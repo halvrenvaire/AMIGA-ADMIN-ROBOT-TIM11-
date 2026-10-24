@@ -165,7 +165,7 @@ Sumber: contoh voucher owner `samples/test_case_amiga/1702_…DSS Management Fee
 | T11.1 | Kop data voucher: Nomor, Nama (pengaju), **Peruntukan** (kolom baru diisi PIC, mis. "Pembayaran DSS Management Fee … Maret 2026"), Tanggal/Periode, Nominal (total dibayarkan) | [ ] | — |
 | T11.2 | Format nomor voucher `{urut}-{MM}-{YYYY}` (mis. 1702-04-2026); nomor urut tidak reset per bulan (1702 di April, 1944 di Oktober) | ❓ | — |
 | T11.3 | Kolom tabel NO · TANGGAL · KETERANGAN · JUMLAH · HARGA; tanggal = tanggal voucher | [ ] | — |
-| T11.4 | Satu baris per invoice (keterangan ringkas yang bisa diedit PIC, nilai = total invoice termasuk PPN), bukan per barang — **diganti oleh T14.1/T14.5** (mode "Total saja") | [x] | belum di-commit |
+| T11.4 | Satu baris per invoice (keterangan ringkas yang bisa diedit PIC, nilai = total invoice termasuk PPN), bukan per barang — **diganti oleh T14.1/T14.5** (mode "Total saja") | [x] | `e01d698` |
 | T11.5 | Teks potongan `Potongan PPh 23 ( Rp DPP x 2% ) <keterangan>`, nilai negatif `-Rp…`; baris akhir `TOTAL` | [ ] | — |
 | T11.6 | Kotak tanda tangan ketiga **Diketahui oleh** (nama + jabatan, didaftarkan PIC seperti penanda tangan lain) | [ ] | — |
 | T11.7 | Gross-up PPh 21: contoh 1944 fee Rp 3.076.923 dipotong 2,5% agar bersih tepat Rp 3.000.000 | ❓ | — |
@@ -282,11 +282,11 @@ PIC mengisi DPP sendiri. Invoice yang tidak memisahkan penggantian biaya tetap m
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T18.1 | Halaman awal tiap invoice di berkas gabungan **diperiksa per halaman** (paralel) pada potongan yang memuat invoice, dicocokkan dari nomor invoice. Pembacaan nyata berkas DSS: pemindaian per 5 halaman menyebut 1, 3, 6, 11, 16, 26 (seharusnya 1, 5, 9, 13, 20, 26) sehingga rentang halaman bukti salah | [x] | belum di-commit |
-| T18.2 | Halaman depan sekaligus menyalin **blok ringkasan jumlah** (label + angka). Imbalan jasa ditentukan kode (`fee_from_amounts`) dengan cek silang semua angka di blok itu, sehingga angka yang bergeser satu baris atau baris yang terlewat tetap ditemukan; bila tetap tidak cocok, halaman dibaca ulang sekali | [x] | belum di-commit |
-| T18.3 | Label yang tersalin sebagai angka ditolak (mis. "Management Fee ... DD05592" sebelumnya terbaca imbalan jasa Rp 5.592) | [x] | belum di-commit |
-| T18.4 | Panel pajak menjelaskan batasan DPP PPh 23 (imbalan jasa vendor, bukan penggantian gaji/BPJS/lembur) dan peringatan bila imbalan jasa tidak cocok dengan PPN | [x] | belum di-commit |
-| T18.5 | Test `tests/test_dss_pph23.py` memakai angka pembacaan Nova Lite yang sebenarnya (termasuk salah bacanya); berkas DSS 6 invoice menghasilkan potongan 177.102 dan dibayar Rp 41.719.136, sama dengan voucher 1702 owner. Uji nyata dengan AI: 6/6 halaman awal dan 6/6 DPP benar (±123 ribu token per berkas 32 halaman) | [x] | belum di-commit |
+| T18.1 | Halaman awal tiap invoice di berkas gabungan **diperiksa per halaman** (paralel) pada potongan yang memuat invoice, dicocokkan dari nomor invoice. Pembacaan nyata berkas DSS: pemindaian per 5 halaman menyebut 1, 3, 6, 11, 16, 26 (seharusnya 1, 5, 9, 13, 20, 26) sehingga rentang halaman bukti salah | [x] | `e01d698` |
+| T18.2 | Halaman depan sekaligus menyalin **blok ringkasan jumlah** (label + angka). Imbalan jasa ditentukan kode (`fee_from_amounts`) dengan cek silang semua angka di blok itu, sehingga angka yang bergeser satu baris atau baris yang terlewat tetap ditemukan; bila tetap tidak cocok, halaman dibaca ulang sekali | [x] | `e01d698` |
+| T18.3 | Label yang tersalin sebagai angka ditolak (mis. "Management Fee ... DD05592" sebelumnya terbaca imbalan jasa Rp 5.592) | [x] | `e01d698` |
+| T18.4 | Panel pajak menjelaskan batasan DPP PPh 23 (imbalan jasa vendor, bukan penggantian gaji/BPJS/lembur) dan peringatan bila imbalan jasa tidak cocok dengan PPN | [x] | `e01d698` |
+| T18.5 | Test `tests/test_dss_pph23.py` memakai angka pembacaan Nova Lite yang sebenarnya (termasuk salah bacanya); berkas DSS 6 invoice menghasilkan potongan 177.102 dan dibayar Rp 41.719.136, sama dengan voucher 1702 owner. Uji nyata dengan AI: 6/6 halaman awal dan 6/6 DPP benar (±123 ribu token per berkas 32 halaman) | [x] | `e01d698` |
 ---
 
 ## Riwayat pembaruan
