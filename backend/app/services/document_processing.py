@@ -22,6 +22,7 @@ from app.models import (
     Vendor,
 )
 from app.services import audit_service, invoice_split, storage, tax_service
+from app.services.invoice_splitter import slice_pdf
 from app.services.account_check import MISMATCH, payee_checks
 from app.services.extraction_service import (
     INVOICE, IRRELEVANT, RECEIPT, UNCERTAIN, ExtractedInvoice, ExtractedLine, ExtractionError, InvoiceExtractor,
@@ -109,18 +110,33 @@ def _num(value) -> str | None:
 
 def part_to_data(p: ExtractedInvoice) -> dict:
     """Data satu invoice dalam bentuk JSON (disimpan di document_files.data)."""
-    return {
+    data = {
         "vendor_name": p.vendor_name, "invoice_no": p.invoice_no,
         "invoice_date": p.invoice_date.isoformat() if p.invoice_date else None,
         "total": _num(p.total), "bank_name": p.bank_name, "account_no": p.account_no, "account_name": p.account_name,
         "line_items": [{"description": li.description, "qty": _num(li.qty), "unit_price": _num(li.unit_price),
                         "subtotal": _num(li.subtotal)} for li in p.line_items],
     }
+    # Angka pajak yang tercetak di invoice (hanya bila ada): imbalan jasa penerbit dan PPN. Bukan isian PIC,
+    # jadi tidak ikut diubah saat PIC menyimpan data invoice.
+    if p.service_fee is not None:
+        data["service_fee"] = _num(p.service_fee)
+    if p.vat_printed is not None:
+        data["vat_printed"] = _num(p.vat_printed)
+    if p.service_fee_unverified is not None:
+        data["service_fee_unverified"] = _num(p.service_fee_unverified)
+    if getattr(p, "description", None):
+        data["service_description"] = p.description
+    return data
 
 
 def default_description(data: dict) -> str | None:
-    """Uraian awal satu invoice di voucher mode TOTAL_ONLY: "Invoice {nomor} - {vendor}" (bisa diedit PIC)."""
-    parts = [f"Invoice {data['invoice_no']}" if data.get("invoice_no") else None, data.get("vendor_name")]
+    """Uraian awal satu invoice di voucher mode TOTAL_ONLY: "Invoice {nomor} - {vendor} - {uraian spesifik}" (bisa diedit PIC)."""
+    curr = (data.get("description") or "").strip()
+    if curr and curr.startswith("Invoice "):
+        return curr
+    extra = data.get("service_description") or (curr if curr and not curr.startswith("Invoice ") else None)
+    parts = [f"Invoice {data['invoice_no']}" if data.get("invoice_no") else None, data.get("vendor_name"), extra]
     text = " - ".join(p for p in parts if p)
     return text or None
 
@@ -135,6 +151,9 @@ def data_to_part(d: dict | None) -> ExtractedInvoice:
         account_name=d.get("account_name"),
         line_items=[ExtractedLine(li.get("description"), dec(li.get("qty")), dec(li.get("unit_price")),
                                   dec(li.get("subtotal"))) for li in d.get("line_items") or []],
+        service_fee=dec(d.get("service_fee")), vat_printed=dec(d.get("vat_printed")),
+        service_fee_unverified=dec(d.get("service_fee_unverified")),
+        description=d.get("service_description"),
     )
 
 
@@ -159,21 +178,31 @@ def vendor_npwp(db, client_id, vendor_name: str | None) -> bool | None:
     return None if npwp is None else bool((npwp[0] or "").strip())
 
 
-def prefill_tax(db, doc: Document, bedrock, only: set | None = None) -> None:
+def prefill_tax(db, doc: Document, bedrock, only: set | None = None, force_apply: bool = False) -> None:
     """Saran pajak per invoice dari AI (cadangan: aturan) dan NPWP vendor dari data referensi.
-    Pajak TIDAK dipilih otomatis: PIC wajib memilihnya sendiri sebelum draf dikirim (keputusan owner).
-    `only`: id file yang baru dibaca; file lain (pilihan pajak PIC) tidak disentuh."""
+    Bila doc.auto_tax aktif (bawaan True) atau force_apply=True: langsung terapkan pilihan pajak ke f.data["tax"].
+    Bila doc.auto_tax False: PIC memilihnya sendiri sebelum draf dikirim."""
     files = [f for f in doc.files or [] if only is None or f.id in only]
     table = tax_service.rates(db)
     if not files or not table:
         return
     items = [f.data or {} for f in files]
     suggestions = tax_service.suggest(bedrock, items, doc.request_type == CATEGORY_REIMBURSE, set(table))
+    should_apply = force_apply or getattr(doc, "auto_tax", True)
     for f, data, sug in zip(files, items, suggestions):
         known = vendor_npwp(db, doc.client_id, data.get("vendor_name"))
         rate = table.get(sug.code) or table[tax_service.NONE]
-        f.data = {**{k: v for k, v in data.items() if k != "tax"}, "npwp_known": known,
-                  "tax_suggestion": {"code": rate.code, "name": rate.name, "reason": sug.reason, "source": sug.source}}
+        suggestion = {"code": rate.code, "name": rate.name, "reason": sug.reason, "source": sug.source}
+        if sug.base is not None:
+            suggestion["base"] = str(sug.base)  # dasar potongan: imbalan jasa saja (bukan seluruh tagihan)
+        new_data = {**data, "npwp_known": known, "tax_suggestion": suggestion}
+        if should_apply and (force_apply or "tax" not in data):
+            npwp_val = True if known is not False else False
+            base_val = Decimal(str(sug.base)) if sug.base is not None else None
+            tax_dict = tax_service.build(rate, npwp_val, base=base_val, base_auto=(base_val is None),
+                                         data=data, source="auto", table=table)
+            new_data["tax"] = tax_dict
+        f.data = new_data
 
 
 def rebuild_from_files(db, doc: Document) -> Extraction:
@@ -532,11 +561,87 @@ def split_uploads(db, doc: Document, extractor, keep: set, include_account: bool
     return scanned, note
 
 
+def split_combined_files(db, doc: Document, extractor, only: set[int] | None = None) -> dict:
+    """Pecah berkas gabungan (beberapa invoice dalam satu PDF) menjadi satu bagian per invoice.
+
+    Tiap bagian menjadi satu file/invoice sendiri (tab bukti sendiri, baris voucher sendiri, pajak sendiri), berurutan
+    di tempat berkas asalnya. Semua halaman tetap ada: bagian-bagian itu menggantikan berkas asal, dan PDF gabungan
+    di `documents.file_key` tidak berubah. Berkas yang sudah pernah dibaca AI tidak diperiksa lagi (kecuali yang
+    sebelumnya diisi manual). `only`: posisi bukti yang diminta PIC lewat tombol; bukti itu diperiksa walau sudah pernah
+    dibaca AI. Mengembalikan token AI yang terpakai untuk pemeriksaan halaman."""
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    locate = getattr(extractor, "locate_invoices", None)
+    if locate is None or not settings.ai_split_enabled:
+        return usage
+    plan: dict[uuid.UUID, tuple[bytes, list]] = {}
+    for f in doc.files or []:
+        already_read = f.data is not None and not f.data.get("manual")
+        if only is not None:
+            if f.position not in only:
+                continue
+        elif already_read:
+            continue
+        if not settings.ai_split_min_pages <= f.page_count <= settings.ai_split_max_pages or f.source_format:
+            continue  # terlalu pendek, atau terlalu panjang (biaya token: ~2.000 token per halaman)
+        try:
+            pdf = storage.load(f.file_key)
+            segments, used = locate(pdf)
+        except Exception as e:  # noqa: BLE001 - pemeriksaan gagal: berkas diproses utuh seperti biasa
+            log.warning("Berkas %s tidak bisa diperiksa untuk dipecah: %s", f.original_filename, e)
+            continue
+        for k in usage:
+            usage[k] += int((used or {}).get(k) or 0)
+        if segments:
+            plan[f.id] = (pdf, segments)
+    if not plan:
+        if only:
+            audit_service.record(db, None, "INVOICES_SPLIT_CHECKED", document_id=doc.id, client_id=doc.client_id,
+                                 note="AI tidak menemukan lebih dari satu invoice pada bukti " + ", ".join(map(str, sorted(only))))
+        return usage
+
+    final: list[DocumentFile] = []
+    created: list[str] = []
+    for f in doc.files:
+        if f.id not in plan:
+            final.append(f)
+            continue
+        pdf, segments = plan[f.id]
+        for n, seg in enumerate(segments, start=1):
+            key = f"invoices/{doc.request_id}/pisah-{f.position:02d}-{n:02d}.pdf"
+            storage.save(key, slice_pdf(pdf, seg.start, seg.end))
+            label = f"{f.original_filename} - invoice {n}" + (f" ({seg.invoice_no})" if seg.invoice_no else "")
+            final.append(DocumentFile(document_id=doc.id, file_key=key, original_filename=label[:300],
+                                      page_count=seg.pages, upload_key=f.upload_key or f.file_key,
+                                      page_from=seg.start + 1, page_to=seg.end, upload_pages=f.upload_pages or f.page_count))
+        created.append(f"{f.original_filename}: {len(segments)} invoice "
+                       f"({', '.join(s.invoice_no or '-' for s in segments)})")
+    replaced = [f for f in doc.files if f.id in plan]
+    kept = [f for f in final if f.id is not None]
+    for f in replaced:
+        db.delete(f)
+    db.flush()
+    # Posisi harus unik per dokumen: geser dulu semua yang tetap, baru beri nomor urut baru
+    for f in kept:
+        f.position += 1000
+    db.flush()
+    for position, f in enumerate(final, start=1):
+        f.position = position
+        if f.id is None:
+            db.add(f)
+    db.flush()
+    db.expire(doc, ["files"])
+    audit_service.record(db, None, "INVOICES_SPLIT", document_id=doc.id, client_id=doc.client_id,
+                         note=f"Berkas gabungan dipisah per invoice. {'; '.join(created)}"[:1000])
+    return usage
+
+
 def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_manual: bool = False,
-                     lines_only: bool = False) -> None:
+                     lines_only: bool = False, split_positions: set[int] | None = None) -> None:
     """`retry_manual`: hanya baca ulang invoice yang sebelumnya diisi manual karena AI gagal; data invoice lain tetap.
     `lines_only`: mode diganti TOTAL_ONLY → ITEMIZED; AI hanya mengisi rincian barang/jasa, sedangkan data kepala
-    invoice, uraian, dan pilihan pajak yang sudah diisi PIC tetap dipakai."""
+    invoice, uraian, dan pilihan pajak yang sudah diisi PIC tetap dipakai.
+    `split_positions`: PIC meminta bukti pada posisi ini diperiksa dan dipecah bila berisi beberapa invoice (tombol
+    "Pisahkan otomatis"); gunakan bersama `retry_manual` supaya bukti lain yang sudah terbaca tidak dibaca ulang."""
     with db_module.SessionLocal() as db:
         doc = db.get(Document, document_id)
         if doc is None:
@@ -544,6 +649,16 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
             return
         if doc.status != DocStatus.PROCESSING:
             set_status(db, doc, DocStatus.PROCESSING, "AI mulai membaca invoice")
+        db.commit()
+        split_usage = {"input_tokens": 0, "output_tokens": 0}
+        if settings.ai_extraction_enabled and extractor is not None and (settings.ai_split_auto or split_positions):
+            try:
+                split_usage = split_combined_files(db, doc, extractor, split_positions)
+                db.commit()
+            except Exception:  # noqa: BLE001 - gagal memecah tidak boleh membuat dokumen macet; diproses utuh
+                db.rollback()
+                doc = db.get(Document, document_id)
+                log.exception("Berkas gabungan %s gagal dipecah; diproses utuh", document_id)
         previous = (doc.extraction.raw_json if doc.extraction and isinstance(doc.extraction.raw_json, dict) else {})
         old_checks = {c.get("file"): c for c in previous.get("document_checks") or []}
         keep = {f.id for f in doc.files or [] if retry_manual and f.data is not None and not f.data.get("manual")}
@@ -557,10 +672,10 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
         ai_on = settings.ai_extraction_enabled and extractor is not None
         started = time.monotonic()
         parts, checks, manual, errors, fresh, read = [], [], [], [], set(), 0
-        usage = {"input_tokens": 0, "output_tokens": 0}
+        usage = dict(split_usage)
         scanned, limit_note = {}, None
         try:
-            if ai_on and not lines_only and getattr(extractor, "scan_chunk", None) is not None and doc.files:
+            if not split_positions and ai_on and not lines_only and getattr(extractor, "scan_chunk", None) is not None and doc.files:
                 # Tahap 15: satu PDF bisa berisi beberapa invoice; dipecah dulu menjadi bukti per invoice
                 scanned, limit_note = split_uploads(db, doc, extractor, keep, bool(doc.include_account), usage)
             files = doc.files or []

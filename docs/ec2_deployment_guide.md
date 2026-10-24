@@ -14,6 +14,7 @@ Panduan ini disusun berdasarkan pengalaman deployment nyata yang mencakup penang
 4. [Konfigurasi Komponen Lanjutan](#4-konfigurasi-komponen-lanjutan)
    - [A. Mengatur Telegram Bot](#a-mengatur-telegram-bot)
    - [B. Menghapus / Menonaktifkan Telegram Bot](#b-menghapus--menonaktifkan-telegram-bot)
+   - [C. Panduan Restart Layanan (Backend, Frontend, dan Telegram Bot)](#c-panduan-restart-layanan-backend-frontend-dan-telegram-bot)
 5. [Troubleshooting & Solusi Masalah Nyata](#5-troubleshooting--solusi-masalah-nyata)
    - [Kendala 1: Layar Hitam Kosong (Blank Screen) & `crypto.randomUUID is not a function`](#kendala-1-layar-hitam-kosong-blank-screen--cryptorandomuuid-is-not-a-function)
    - [Kendala 2: Error Kompilasi TypeScript (`TS1005: '}' expected`) Akibat Escaping Bash `sed`](#kendala-2-error-kompilasi-typescript-ts1005--expected-akibat-escaping-bash-sed)
@@ -22,6 +23,7 @@ Panduan ini disusun berdasarkan pengalaman deployment nyata yang mencakup penang
    - [Kendala 5: Browser Loading Selamanya / Timeout (Security Group Port 80)](#kendala-5-browser-loading-selamanya--timeout-security-group-port-80)
    - [Kendala 6: Telegram Bot Error `409 Conflict: terminated by other getUpdates request`](#kendala-6-telegram-bot-error-409-conflict-terminated-by-other-getupdates-request)
    - [Kendala 7: Error SQLAlchemy `e3q8` pada Step 5/8 (Migrasi Alembic)](#kendala-7-error-sqlalchemy-e3q8-pada-step-58-migrasi-alembic)
+   - [Kendala 8: Browser Otomatis Ter-redirect ke HTTPS (`ERR_CONNECTION_TIMED_OUT`)](#kendala-8-browser-otomatis-ter-redirect-ke-https-err_connection_timed_out)
 6. [Lembar Contek Operasional (Operational Cheat Sheet)](#6-lembar-contek-operasional-operational-cheat-sheet)
 
 ---
@@ -178,6 +180,114 @@ Jika ingin aplikasi web berjalan murni tanpa bot Telegram:
    nohup .venv/bin/uvicorn app.serve:app --host 127.0.0.1 --port 3000 --proxy-headers --forwarded-allow-ips 127.0.0.1 > ~/app.log 2>&1 &
    echo $! > ~/app.pid
    ```
+
+### C. Panduan Restart Layanan (Backend, Frontend, dan Telegram Bot)
+
+Memahami cara kerja runtime aplikasi di EC2:
+- **Frontend (React SPA)** tidak berjalan sebagai Node server terpisah (bukan `npm run dev`), melainkan di-*build* menjadi aset statis di `frontend/dist` dan disajikan langsung oleh **Backend Uvicorn (`app.serve:app`)** di port 3000, lalu di-*proxy* oleh **Nginx** di port 80.
+- **Backend (FastAPI)** berjalan di background dengan PID tersimpan di file `~/app.pid`.
+- **Bot Telegram** berjalan sebagai proses background mandiri dengan PID tersimpan di file `~/bot.pid`.
+
+Berikut adalah panduan praktis untuk me-restart masing-masing komponen:
+
+#### 1. Cara Restart Backend Server (FastAPI / Uvicorn)
+Gunakan perintah ini setelah Anda mengubah kode Python di `backend/`, mengubah nilai konfigurasi `backend/.env`, atau setelah menjalankan migrasi database:
+
+```bash
+# 1. Hentikan proses backend lama
+kill $(cat ~/app.pid) 2>/dev/null || true
+pkill -f "uvicorn app.serve:app" 2>/dev/null || true
+
+# 2. Jalankan kembali backend di background
+cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend
+nohup .venv/bin/uvicorn app.serve:app --host 127.0.0.1 --port 3000 --proxy-headers --forwarded-allow-ips 127.0.0.1 > ~/app.log 2>&1 &
+echo $! > ~/app.pid
+
+# 3. Verifikasi backend sudah aktif
+sleep 2
+curl -s http://127.0.0.1:3000/api/health
+```
+
+Untuk memantau log aplikasi secara real-time:
+```bash
+tail -f ~/app.log
+```
+
+---
+
+#### 2. Cara Update & "Restart" Frontend Server (React + Nginx)
+Karena frontend disajikan dari build statis `frontend/dist`, perubahan kode frontend (file di `frontend/src/`) memerlukan proses **build ulang**:
+
+```bash
+# Pindah ke direktori frontend dan aktifkan Node 22 via nvm
+cd ~/AMIGA-ADMIN-ROBOT-TIM11-/frontend
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use 22
+
+# Build bundle frontend ke frontend/dist
+NODE_OPTIONS=--max-old-space-size=1536 npm run build
+```
+
+*(Opsional)* Jika konfigurasi Nginx diubah atau ingin membersihkan cache buffer proxy:
+```bash
+sudo systemctl restart nginx
+```
+
+> **PENTING UNTUK BROWSER LAPTOP:** Setelah proses build selesai, buka browser Anda dan lakukan **Hard Refresh** dengan menekan **`Ctrl + F5`** (Windows) atau **`Cmd + Shift + R`** (Mac) agar browser memuat aset JavaScript/CSS terbaru dan membuang cache lama.
+
+---
+
+#### 3. Cara Restart Bot Telegram
+Gunakan perintah ini setelah Anda mengubah token Telegram di `backend/.env` atau memperbarui skrip `bot/`:
+
+```bash
+# 1. Hentikan proses bot lama
+kill $(cat ~/bot.pid) 2>/dev/null || true
+pkill -f "bot.telegram_bot" 2>/dev/null || true
+
+# 2. Jalankan kembali bot di background
+cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend
+nohup .venv/bin/python -m bot.telegram_bot > ~/bot.log 2>&1 &
+echo $! > ~/bot.pid
+```
+
+Untuk memantau log bot Telegram secara real-time:
+```bash
+tail -f ~/bot.log
+```
+
+---
+
+#### 4. Cara Menjalankan Migrasi Database (Alembic Upgrade)
+Gunakan perintah ini setelah ada file migrasi baru di folder `backend/alembic/versions/` (misalnya setelah `git pull`):
+
+```bash
+# 1. Pindah ke direktori backend
+cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend
+
+# 2. Jalankan migrasi ke versi paling baru (head)
+.venv/bin/alembic upgrade head
+
+# 3. (Opsional) Cek versi skema database saat ini
+.venv/bin/alembic current
+
+# 4. (Opsional) Sinkronkan data dummy jika diperlukan
+.venv/bin/python seed.py
+```
+
+> **Catatan:** Setelah migrasi selesai, lakukan restart backend (Uvicorn) agar FastAPI memuat skema ORM model yang baru.
+
+---
+
+#### 5. Cara Restart Seluruh Layanan Sekaligus (All-in-One)
+Jika Anda baru saja melakukan `git pull` atau ingin me-restart seluruh tumpukan aplikasi secara bersih sekaligus (Alembic migration, Frontend build, Backend Uvicorn, Nginx, dan Bot):
+
+```bash
+cd ~/AMIGA-ADMIN-ROBOT-TIM11-
+bash scripts/deploy_ec2.sh
+```
+*(Skrip deployment ini secara otomatis sudah menyertakan langkah `alembic upgrade head` pada Step 5/8).*
 
 ---
 
@@ -433,20 +543,58 @@ Pada saat eksekusi `bash scripts/deploy_ec2.sh`, proses terhenti mendadak di lan
 
 ---
 
+### Kendala 8: Browser Otomatis Ter-redirect ke HTTPS (`ERR_CONNECTION_TIMED_OUT`)
+
+#### Gejala
+Saat membuka alamat IP publik server (misalnya `http://13.212.201.121/login`), browser otomatis mengubah URL menjadi `https://13.212.201.121/login`, loading lama, lalu gagal dengan pesan:
+```text
+This site can’t be reached
+13.212.201.121 took too long to respond.
+ERR_CONNECTION_TIMED_OUT
+```
+
+#### Penyebab
+1. **Fitur Keamanan Browser (Brave Shields / HTTPS-First Mode)**: Browser modern seperti **Brave Browser** memiliki fitur bawaan *Upgrade connections to HTTPS* (HTTPS Everywhere). Chrome dan Edge juga memiliki fitur serupa (*"Always use secure connections"*). Fitur ini otomatis memaksa setiap koneksi HTTP biasa menjadi HTTPS.
+2. **Server EC2 Hanya Membuka Port 80 (HTTP)**: Karena deployment awal tidak memasang sertifikat SSL/TLS domain pada port 443, permintaan HTTPS ke port 443 akan diabaikan/didrop oleh Security Group AWS EC2, sehingga browser mengalami *Connection Timed Out*.
+
+#### Solusi Tuntas
+- **Solusi 1 (Khusus Brave Browser - Paling Cepat)**:
+  1. Klik ikon **Kepala Singa (Brave Shields)** di sebelah kanan address bar.
+  2. Matikan toggle **Shields** untuk alamat IP tersebut, atau klik menu dropdown di bawahnya dan matikan opsi **"Upgrade connections to HTTPS"**.
+  3. Muat ulang halaman (*Reload*).
+- **Solusi 2 (Ketik Awalan `http://` Eksplisit)**:
+  Ketikkan alamat lengkap di address bar dengan protokol HTTP biasa:
+  ```text
+  http://13.212.201.121/login
+  ```
+  *(Pastikan tertulis `http://`, bukan `https://`)*.
+- **Solusi 3 (Buka di Private / Incognito Window)**:
+  Buka jendela baru dengan **`Ctrl + Shift + N`** (Private Window) untuk memastikan ekstensi atau cache browser tidak memaksa redirect.
+- **Solusi 4 (Matikan 'Always use secure connections' di Settings Browser)**:
+  - Di Brave: buka `brave://settings/security` -> Nonaktifkan **"Always use secure connections"**.
+  - Di Chrome: buka `chrome://settings/security` -> Nonaktifkan **"Always use secure connections"**.
+
+---
+
 ## 6. Lembar Contek Operasional (Operational Cheat Sheet)
 
 Gunakan perintah-perintah berikut untuk pemeliharaan rutin di terminal SSM EC2:
 
 | Kebutuhan | Perintah Terminal |
 | :--- | :--- |
+| **Restart Backend (Uvicorn)** | `kill $(cat ~/app.pid) 2>/dev/null; pkill -f "uvicorn app.serve:app" 2>/dev/null; cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && nohup .venv/bin/uvicorn app.serve:app --host 127.0.0.1 --port 3000 --proxy-headers --forwarded-allow-ips 127.0.0.1 > ~/app.log 2>&1 & echo $! > ~/app.pid` |
+| **Build Ulang / Restart Frontend** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11-/frontend && export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm use 22 && NODE_OPTIONS=--max-old-space-size=1536 npm run build` *(lalu tekan `Ctrl + F5` di browser)* |
+| **Restart Bot Telegram** | `kill $(cat ~/bot.pid) 2>/dev/null; pkill -f "bot.telegram_bot" 2>/dev/null; cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && nohup .venv/bin/python -m bot.telegram_bot > ~/bot.log 2>&1 & echo $! > ~/bot.pid` |
+| **Restart Nginx Reverse Proxy** | `sudo systemctl restart nginx` |
+| **Restart Seluruh Layanan (All-in-One)** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11- && bash scripts/deploy_ec2.sh` |
+| **Update Aplikasi Pasca Git Pull** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11- && git pull && bash scripts/deploy_ec2.sh` |
 | **Cek Log Backend (Uvicorn)** | `tail -f ~/app.log` |
 | **Cek Log Telegram Bot** | `tail -f ~/bot.log` |
 | **Cek Log Error Nginx** | `sudo tail -f /var/log/nginx/error.log` |
 | **Cek Log Akses Nginx** | `sudo tail -f /var/log/nginx/access.log` |
 | **Cek Status Service Nginx** | `sudo systemctl status nginx` |
-| **Cek Status Database Lokal** | `sudo -u postgres psql -c "SELECT version();"` |
 | **Health Check API Internal** | `curl -s http://127.0.0.1/api/health \| jq .` |
+| **Migrasi Database (Alembic)** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && .venv/bin/alembic upgrade head` |
+| **Cek Versi Migrasi DB** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && .venv/bin/alembic current` |
+| **Seed / Reset Akun Dummy** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && .venv/bin/python seed.py` |
 | **Melihat Password Akun Dummy** | `grep SEED_DEFAULT_PASSWORD ~/AMIGA-ADMIN-ROBOT-TIM11-/backend/.env` |
-| **Restart Backend Cepat (1 Detik)** | `kill $(cat ~/app.pid) 2>/dev/null; cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && nohup .venv/bin/uvicorn app.serve:app --host 127.0.0.1 --port 3000 --proxy-headers --forwarded-allow-ips 127.0.0.1 > ~/app.log 2>&1 & echo $! > ~/app.pid` |
-| **Restart Bot Telegram** | `kill $(cat ~/bot.pid) 2>/dev/null; cd ~/AMIGA-ADMIN-ROBOT-TIM11-/backend && nohup .venv/bin/python -m bot.telegram_bot > ~/bot.log 2>&1 & echo $! > ~/bot.pid` |
-| **Update Aplikasi Pasca Git Pull** | `cd ~/AMIGA-ADMIN-ROBOT-TIM11- && git pull && bash scripts/deploy_ec2.sh` |

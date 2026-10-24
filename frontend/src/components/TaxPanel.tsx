@@ -344,6 +344,18 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
             <b>{suggestion.name}</b> · {suggestion.reason}. Keputusan tetap di Anda.
           </p>
         )}
+        {mode === "invoice" && file.data?.service_fee_unverified && (
+          <Alert kind="warn">AI membaca imbalan jasa {rupiah(Number(file.data.service_fee_unverified))}, tetapi angka itu tidak
+            cocok dengan PPN yang tercetak di invoice, jadi tidak dipakai. Isi DPP potongan PPh secara manual sesuai dokumen.</Alert>
+        )}
+        {mode === "invoice" && (file.data?.service_fee || file.data?.vat_printed) && (
+          <p className="tax-hint">
+            Angka pajak yang tercetak di invoice (disalin AI, cocokkan dengan dokumen):
+            {file.data?.service_fee && <> imbalan jasa <b>{rupiah(Number(file.data.service_fee))}</b></>}
+            {file.data?.service_fee && file.data?.vat_printed && " ·"}
+            {file.data?.vat_printed && <> PPN <b>{rupiah(Number(file.data.vat_printed))}</b></>}.
+          </p>
+        )}
 
         <div className="grid-2">
           {mode === "invoice" && (

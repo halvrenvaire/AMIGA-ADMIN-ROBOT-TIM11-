@@ -26,6 +26,9 @@ const ACTION: Record<string, [string, "" | "ok" | "warn" | "bad"]> = {
   CLASSIFICATION_DECIDED: ["Klasifikasi dokumen diputuskan reviewer", "warn"],
   ACCOUNT_CONFIRMED_BY_REVIEWER: ["Rekening dikonfirmasi manual oleh reviewer", "warn"],
   TAX_AI_SUGGESTED: ["Rekomendasi AI untuk PPh per baris diminta", ""],
+  INVOICES_SPLIT: ["Berkas gabungan dipisah per invoice oleh AI", ""],
+  SPLIT_REQUESTED: ["PIC meminta AI memeriksa bukti gabungan", ""],
+  INVOICES_SPLIT_CHECKED: ["AI memeriksa bukti: hanya satu invoice, tidak dipisah", ""],
   AI_UNAVAILABLE: ["AI tidak membaca invoice; data diisi manual oleh PIC", "warn"],
   WARNING_ACKNOWLEDGED: ["Peringatan dikonfirmasi PIC", "warn"],
 };

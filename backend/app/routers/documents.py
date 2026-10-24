@@ -37,7 +37,7 @@ from app.services.extraction_service import ExtractedInvoice
 from app.services.account_check import check_account, payee_checks
 from app.services.document_processing import (
     ACKNOWLEDGEABLE, BLOCKING, DATA_FIELDS, PIC_FIELDS, acknowledgement, classification, default_description, file_data,
-    line_subtotal, manual_entry, parse_pic_value, part_to_data, payee_fingerprint, process_document, rebuild_from_files,
+    line_subtotal, manual_entry, parse_pic_value, part_to_data, payee_fingerprint, prefill_tax, process_document, rebuild_from_files,
     run_verification, send_to_review, set_status, settle_status,
 )
 
@@ -72,6 +72,7 @@ def _summary(doc: Document, names: dict[uuid.UUID, str]) -> dict:
         total=extraction.total if extraction else None,
         created_at=doc.created_at, updated_at=doc.updated_at,
         extraction_mode=doc.extraction_mode or ITEMIZED, include_account=bool(doc.include_account),
+        auto_tax=bool(getattr(doc, "auto_tax", True)),
     )
 
 
@@ -212,6 +213,7 @@ async def upload_document(
         "Mode baca AI: TOTAL_ONLY (bawaan) = hanya total per invoice, 1 baris voucher per invoice; "
         "ITEMIZED = rincian barang/jasa, 1 baris voucher per item"))] = TOTAL_ONLY,
     include_account: Annotated[bool, Form(description="Fitur tambahan: isi, cek, dan cetak rekening tujuan")] = False,
+    auto_tax: Annotated[bool, Form(description="Otomatis terapkan saran pajak per invoice")] = False,
     submitter_source: Annotated[Literal["PIC", "MANUAL"] | None, Form(description=(
         "Sumber \"Diajukan oleh\": PIC = profil akun PIC Klien (dikunci, termasuk tanda tangan); MANUAL = nama, "
         "jabatan, perusahaan, dan tanda tangan diisi di sini (tidak diingat). Tidak dikirim = MANUAL bila ada isian "
@@ -322,6 +324,7 @@ async def upload_document(
         status=DocStatus.QUEUED, file_key=main_key,
         original_filename=summary_name[:300], page_count=total_pages, pic_overrides={},
         signers=signers, extraction_mode=extraction_mode, include_account=include_account,
+        auto_tax=auto_tax,
         submitter_signature_png=signature,
         files=[DocumentFile(position=i, file_key=key, original_filename=part.name, page_count=part.pages,
                             source_file_key=source_key, source_format=part.source_format)
@@ -666,7 +669,7 @@ def set_file_tax(document_id: uuid.UUID, position: int, body: TaxChoice,
                 li.pop("pph", None)
     data["line_items"] = lines
     old = data.get("tax")
-    vat = body.vat.model_dump(mode="json") if body.vat else (old or {}).get("vat")
+    vat = body.vat.model_dump(mode="json") if body.vat else ((old or {}).get("vat") if (old or {}).get("source") != "auto" else None)
     if not body.calc:
         if body.mode != "invoice":
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -712,6 +715,19 @@ def suggest_line_taxes_ai(document_id: uuid.UUID, position: int, request: Reques
     part.data = {**data, "line_suggestions_ai": {"key": tax_service.descriptions_key(data), "items": items}}
     audit_service.record(db, user, "TAX_AI_SUGGESTED", document_id=doc.id, client_id=doc.client_id,
                          note=f"Rekomendasi AI PPh per baris untuk bukti {position}")
+    db.commit()
+    return _detail(db, doc)
+
+
+@router.post("/{document_id}/tax/apply-all", response_model=DocumentDetail)
+def apply_all_taxes(document_id: uuid.UUID, user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """Terapkan saran pajak AI/aturan langsung ke semua bukti yang ada di dokumen ini."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    prefill_tax(db, doc, None, force_apply=True)
+    rebuild_from_files(db, doc)
+    audit_service.record(db, user, "TAX_APPLIED_ALL", document_id=doc.id, client_id=doc.client_id,
+                         note=f"Pajak otomatis diterapkan ke {len(doc.files)} bukti")
     db.commit()
     return _detail(db, doc)
 
@@ -1038,6 +1054,15 @@ def set_options(document_id: uuid.UUID, body: OptionsUpdate, request: Request, b
                              new_value=str(body.include_account).lower())
         doc.include_account = body.include_account
         changed = True
+    if body.auto_tax is not None and body.auto_tax != bool(getattr(doc, "auto_tax", True)):
+        audit_service.record(db, user, "OPTION_CHANGED", document_id=doc.id, client_id=doc.client_id,
+                             field="auto_tax", old_value=str(bool(getattr(doc, "auto_tax", True))).lower(),
+                             new_value=str(body.auto_tax).lower())
+        doc.auto_tax = body.auto_tax
+        changed = True
+        if body.auto_tax:
+            prefill_tax(db, doc, None, force_apply=True)
+            rebuild_from_files(db, doc)
     if body.extraction_mode and body.extraction_mode != (doc.extraction_mode or ITEMIZED):
         audit_service.record(db, user, "EXTRACTION_MODE_CHANGED", document_id=doc.id, client_id=doc.client_id,
                              field="extraction_mode", old_value=doc.extraction_mode, new_value=body.extraction_mode)
@@ -1067,6 +1092,37 @@ def set_options(document_id: uuid.UUID, body: OptionsUpdate, request: Request, b
         issues = run_verification(db, doc)
         settle_status(db, doc, issues, "Pengaturan pengajuan diubah PIC")
         db.commit()
+    return _detail(db, doc)
+
+
+@router.post("/{document_id}/files/{position}/split", response_model=DocumentDetail)
+def split_file(document_id: uuid.UUID, position: int, request: Request, background: BackgroundTasks,
+               user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """PIC meminta AI memeriksa SATU bukti yang berisi beberapa invoice (berkas gabungan) dan memecahnya per invoice.
+    Token AI terpakai hanya saat tombol ini ditekan (sekitar 2.000 token input per halaman, lalu tiap bagian dibaca).
+    Bukti dipecah bila AI menemukan lebih dari satu halaman depan invoice dengan nomor berbeda; bukti lain, termasuk
+    isian dan pajaknya, tidak berubah. Bagian baru dibaca AI, lalu draf diverifikasi ulang."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Bukti hanya bisa dipisah saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    if not settings.ai_extraction_enabled or not settings.ai_split_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Pemisahan otomatis oleh AI sedang dimatikan.")
+    part = _file(doc, position)
+    if part.source_format:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bukti ini foto satu halaman, tidak ada yang perlu dipisah.")
+    if part.page_count < settings.ai_split_min_pages:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bukti ini hanya satu halaman, tidak ada yang perlu dipisah.")
+    if part.page_count > settings.ai_split_max_pages:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Bukti ini {part.page_count} halaman; batas pemeriksaan {settings.ai_split_max_pages} halaman "
+                            "(untuk menjaga biaya AI). Pecah PDF-nya dulu, lalu unggah per bagian.")
+    audit_service.record(db, user, "SPLIT_REQUESTED", document_id=doc.id, client_id=doc.client_id,
+                         note=f"Bukti {position} ({part.original_filename}, {part.page_count} hal.) diperiksa AI")
+    set_status(db, doc, DocStatus.PROCESSING, f"AI memeriksa bukti {position} untuk dipisah per invoice")
+    db.commit()
+    background.add_task(process_document, doc.id, request.app.state.extractor, True, False, {position})
     return _detail(db, doc)
 
 

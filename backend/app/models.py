@@ -238,6 +238,8 @@ class Document(Base):
     extraction_mode: Mapped[str] = mapped_column(String(20), default=ITEMIZED, server_default=ITEMIZED)
     # Fitur tambahan: rekening tujuan diisi, dicek ke data vendor, dan dicetak di voucher. Bawaan mati.
     include_account: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Otomatis terapkan saran pajak AI/aturan ke setiap invoice (bawaan aktif)
+    auto_tax: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Spesimen tanda tangan "Diajukan oleh" yang diunggah/dipilih saat pengajuan (salinan, bukan rujukan)
     submitter_signature_png: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
     status: Mapped[DocStatus] = mapped_column(Enum(DocStatus, name="doc_status"), index=True)

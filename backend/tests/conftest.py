@@ -27,7 +27,7 @@ if not os.environ["DATABASE_URL"].rsplit("/", 1)[1].endswith("_test"):
     raise SystemExit("Menolak: database test harus berakhiran _test")
 
 # Skema terbaru dan akun seed di database test (aman diulang)
-for cmd in ([str(BACKEND / ".venv/bin/alembic"), "upgrade", "head"], [sys.executable, "seed.py"]):
+for cmd in ([sys.executable, "-m", "alembic", "upgrade", "head"], [sys.executable, "seed.py"]):
     subprocess.run(cmd, cwd=BACKEND, check=True, capture_output=True)
 
 import pytest  # noqa: E402
