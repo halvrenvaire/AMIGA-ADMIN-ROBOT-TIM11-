@@ -36,7 +36,7 @@ _Terakhir diperbarui: 24 Okt 2026_
 | 16 | Pemisahan invoice gabungan on-demand (tombol AI) & saran PPh 23 imbalan jasa (merging branch `feat/pisah-invoice-gabungan` ke `main`) | Sedang | 8/8 | ✅ |
 | 17 | Perbaikan Multi-Invoice DSS, Deteksi Total Gambar, & Otomatisasi Pajak | Sedang | 7/7 | ✅ |
 | 18 | Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (Kontrak Jasa DSS & Eliminasi Kode Driver) | Sedang | 7/7 | ✅ |
-| 19 | Feedback tim 24 Okt: saran PPN + PPh otomatis masuk voucher, langkah pajak di bot Telegram, tutorial di dalam aplikasi, dokumentasi | Besar | 1/4 | ⏳ |
+| 19 | Feedback tim 24 Okt: saran PPN + PPh otomatis masuk voucher, langkah pajak di bot Telegram, tutorial di dalam aplikasi, dokumentasi | Besar | 2/4 | ⏳ |
 
 ---
 
@@ -301,7 +301,7 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
 | T19.1 | **Saran PPN otomatis** dari PPN tercetak di invoice (mode total saja): pajak otomatis memasang "Harga sudah termasuk PPN" dengan nilai PPN **persis angka tercetak** (bukan 11% x total; PPN DSS hanya atas imbalan jasa), DPP otomatis = total - PPN tercetak. Saran PPN tampil di panel pajak. Baris potongan voucher memakai format contoh owner: `Potongan PPh 23 (Rp 2.304.696 x 2%) <invoice/barang>`. Test DSS: PPN 6 invoice sesuai angka tercetak, voucher dibayar Rp 41.719.136 | [x] | `b727fde` |
-| T19.2 | Bot Telegram: langkah penting ditambahkan, terutama pajak (saran AI per invoice, pilih/ubah, ringkasan potongan) | [ ] | |
+| T19.2 | **Bot Telegram**: unggah memakai pajak otomatis (saran AI langsung terpasang, sama dengan dashboard). Setelah AI selesai, bot mengirim **ringkasan pajak per bukti** (uraian, PPN, PPh: jenis, DPP x tarif = potongan, alasan AI) beserta total, potongan, dan dibayarkan. Tombol: **Pajak bukti N** (pilih jenis PPh atau tanpa potongan; DPP imbalan jasa dan PPN tercetak dipertahankan), **Uraian bukti N** (balas dengan teks), **Simulasi voucher (PDF)** dikirim ke chat, **Pakai saran AI untuk pajak** bila ada bukti yang belum dipilih, lalu **Ajukan ke reviewer** (tidak lagi langsung mengirim tanpa diperiksa). Teks /bantuan memuat 5 langkah unggah | [x] | belum di-commit |
 | T19.3 | Tutorial di dalam aplikasi: tombol **?** di topbar, langkah demi langkah yang menyorot bagian layar sesuai halaman | [ ] | |
 | T19.4 | Perbarui dokumentasi tutorial penggunaan (SOP dan buku panduan) | [ ] | |
 ---
@@ -332,3 +332,4 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 | 24 Okt 2026 | Tahap 18 ditambahkan dan selesai (T18.1–T18.6): penggabungan terpadu commit `e01d698` dengan penambahan kolom "Terakhir Diubah" & sorting interaktif semua kolom Tabel Riwayat/Dokumen, penyempurnaan `confirm_front_pages` & `fee_from_amounts`, pemetaan acuan kontrak fee DSS (`DSS_KNOWN_FEES`), eliminasi ekstraksi kode driver (`DD05354`/`DD05592`), petunjuk UI PPh 23 pada TaxPanel, 76/76 unit test backend lulus 100%, frontend build sukses |
 | 24 Okt 2026 | T18.7 ditambahkan dan selesai: koreksi commit `1ca6482` (tabel fee DSS hafalan dan tebakan dari rasio PPN dicabut, urutan tabel bawaan dari server); batasan DPP PPh 23 dikembalikan ke penjelasan Tahap 18. BRD/PRD/SOP perlu mencatat batasan ini (T8.2–T8.4) |
 | 24 Okt 2026 | Tahap 19 ditambahkan (feedback tim, 4 poin); T19.1 selesai: saran PPN dari PPN tercetak dan format baris potongan PPh sesuai contoh owner |
+| 24 Okt 2026 | T19.2 selesai: alur bot Telegram dengan ringkasan dan pengaturan pajak per bukti, uraian, simulasi voucher PDF |

@@ -89,13 +89,16 @@ def test_pic_uploads_invoice_and_gets_processing_result(bot):
     _click(bot, chat, "up:send")
     sent = [text for _, text in bot[1].sent]
     assert "Terkirim ke AMIGA" in sent[-2] and "REQ-" in sent[-2]
-    assert "selesai diproses: Draf" in sent[-1] and "PT Vendor Jaya" in sent[-1]
-    assert "Saran pajak" in sent[-1] and "Bukti 1: Tanpa potongan" in sent[-1]
+    result = sent[-1]
+    assert "selesai diproses: Draf" in result and "PT Vendor Jaya" in result
+    # Pajak otomatis (sama dengan dashboard): saran AI langsung terpasang dan dirangkum per bukti
+    assert "📄 Bukti 1 · INV-001" in result and "PPh: tanpa potongan" in result
+    assert "Dibayarkan: Rp 900.000" in result and "Ajukan ke reviewer" in result
     [doc] = _documents()
-    assert doc.status.value == "DRAFT"
-    # Pajak belum dipilih: bot hanya menawarkan pilihan pajak (lalu kirim), bukan tombol kirim langsung
-    assert [label for row in bot[1].buttons for label, _ in row] == ["✅ Pakai saran pajak & kirim", "Tanpa potongan & kirim"]
-    reply = _click(bot, chat, f"tx:a:{doc.id}")
+    assert doc.status.value == "DRAFT" and doc.auto_tax is True
+    labels = [label for row in bot[1].buttons for label, _ in row]
+    assert labels == ["📤 Ajukan ke reviewer", "✏️ Pajak bukti 1", "📝 Uraian bukti 1", "📄 Simulasi voucher (PDF)"]
+    reply = _click(bot, chat, f"sub:{doc.id}")
     assert "dikirim ke Finance Reviewer" in reply and "Dibayarkan" in reply
 
     [doc] = _documents()
@@ -214,3 +217,61 @@ def test_processing_result_shows_tax_deduction_and_net():
                            "lines": [{"name": "PPh 23", "amount": "18000"}]}}
     text = format_processing_result(doc)
     assert "Potongan pajak (PPh 23)" in text and "882.000" in text
+
+
+def _send_text(bot_and_tg, chat, text):
+    bot, tg = bot_and_tg
+    bot.handle_update({"update_id": 4, "message": {"chat": {"id": chat, "type": "private"}, "text": text}})
+    return tg.last
+
+
+def test_pic_reviews_and_changes_tax_description_and_preview_in_chat(bot, extractor):  # noqa: F811
+    # Invoice jasa oleh PT: saran PPh 23
+    # Mode total saja (bot): jenis jasa dikenali dari uraian yang dibaca AI
+    extractor.result = invoice(description="Jasa konsultan pajak Oktober")
+    chat = _link(bot, "pic.alpha@amiga.test")
+    _send_pdf(bot, chat)
+    _choose(bot, chat)
+    result = _click(bot, chat, "up:send")
+    [doc] = _documents()
+    assert "PPh: PPh 23 (Rp 900.000 x 2%) = −Rp 18.000" in result and "Alasan AI:" in result
+    assert "Dibayarkan: Rp 882.000" in result
+
+    # Ubah pajak bukti 1 → tanpa potongan
+    menu = _click(bot, chat, f"tc:{doc.id}:1")
+    assert "Pilih jenis potongan PPh untuk bukti 1" in menu
+    labels = [label for row in bot[1].buttons for label, _ in row]
+    assert "● PPh 23 (2%)" in labels and "Tanpa potongan" in labels and labels[-1] == "↩️ Kembali"
+    changed = _click(bot, chat, f"ts:{doc.id}:1:NONE")
+    assert "Pajak bukti 1 disimpan" in changed and "PPh: tanpa potongan" in changed and "Dibayarkan: Rp 900.000" in changed
+    # Kembali ke PPh 23
+    _click(bot, chat, f"tc:{doc.id}:1")
+    assert "Rp 882.000" in _click(bot, chat, f"ts:{doc.id}:1:PPH23")
+
+    # Ubah uraian: bot menunggu balasan teks
+    ask = _click(bot, chat, f"de:{doc.id}:1")
+    assert "Balas pesan ini dengan uraian baru" in ask
+    saved = _send_text(bot, chat, "Jasa konsultan pajak Oktober 2026")
+    assert "Uraian bukti 1 disimpan" in saved and "Uraian: Jasa konsultan pajak Oktober 2026" in saved
+    # Pesan berikutnya kembali ke Asisten (tidak dianggap uraian lagi)
+    assert bot[0].awaiting_description == {}
+
+    # Simulasi voucher dikirim sebagai PDF
+    _click(bot, chat, f"pv:{doc.id}")
+    [(to, name, pdf)] = bot[1].documents
+    assert to == chat and name.endswith(".pdf") and pdf.startswith(b"%PDF-")
+
+    assert "dikirim ke Finance Reviewer" in _click(bot, chat, f"sub:{doc.id}")
+    [doc] = _documents()
+    assert doc.status.value == "READY_FOR_REVIEW"
+    assert doc.files[0].data["description"] == "Jasa konsultan pajak Oktober 2026"
+    assert doc.files[0].data["tax"]["code"] == "PPH23"
+
+
+def test_ai_suggestion_button_when_tax_not_yet_chosen(bot):
+    from bot.telegram_bot import draft_buttons, next_step_text
+    doc = {"id": "d1", "extraction_mode": "TOTAL_ONLY",
+           "files": [{"position": 1, "data": {"description": "x", "tax_suggestion": {"code": "PPH23", "name": "PPh 23"}}}]}
+    assert draft_buttons(doc)[0] == [("🤖 Pakai saran AI untuk pajak", "tx:a:d1")]
+    assert "pilih pajak bukti 1" in next_step_text(doc)
+
