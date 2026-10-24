@@ -1,11 +1,11 @@
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, Circle, FileText, ListOrdered, Receipt, Save, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, Circle, Eye, FileText, ListOrdered, Receipt, Save, UploadCloud, X } from "lucide-react";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { SignerPicker } from "../components/SignerPicker";
 import { SubmitterProfileFields, type SubmitterProfile } from "../components/SubmitterProfile";
-import { Alert } from "../components/ui";
+import { Alert, Modal } from "../components/ui";
 import { tanggal, todayIso, REQUEST_CATEGORIES } from "../format";
 import type { DocumentSummary, ExtractionMode, Me, Signatory } from "../types";
 
@@ -62,6 +62,8 @@ export function Upload() {
   const [dueDate, setDueDate] = useState("");
   const [includeAccount, setIncludeAccount] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  // File yang sedang dilihat di pratinjau (hanya di browser, belum dikirim ke server)
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -233,6 +235,8 @@ export function Upload() {
                 <FileText />
                 <span className="name">{i + 1}. {f.name}</span>
                 <span className="muted">{(f.size / 1024).toFixed(0)} KB</span>
+                <button type="button" className="btn ghost sm" aria-label={`Lihat ${f.name}`} title="Lihat file"
+                        onClick={() => setPreviewFile(f)}><Eye /></button>
                 <button type="button" className="btn ghost sm" aria-label={`Hapus ${f.name}`}
                         onClick={() => setFiles(files.filter((_, j) => j !== i))}><X /></button>
               </li>
@@ -247,7 +251,7 @@ export function Upload() {
             <div style={{ marginTop: 6 }}>
               Seret file PDF atau foto invoice ke sini atau <b>ketuk untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
             </div>
-            <small className="muted">Bisa beberapa file sekaligus. Maks. {MAX_MB} MB per file. Satu file boleh berisi invoice beserta Faktur Pajak dan timesheet.</small>
+            <small className="muted">Bisa beberapa file sekaligus. Maks. {MAX_MB} MB per file. Satu file boleh berisi invoice beserta Faktur Pajak dan timesheet, atau beberapa invoice sekaligus: AI memisahkannya per invoice.</small>
           </div>
         )}
         <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(e) => add(e.target.files)} />
@@ -258,10 +262,31 @@ export function Upload() {
           </button>
         </div>
       </form>
+      {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
       <UploadAside company={company?.name} requestType={requestType} dueDate={extras ? dueDate : ""} files={files}
                    approvers={approvers} mode={mode} submitter={submitterLabel} includeAccount={includeAccount} />
       </div>
     </>
+  );
+}
+
+/** Pratinjau file yang baru dipilih, langsung dari memori browser. Tidak ada yang dikirim atau disimpan ke server;
+ *  tujuannya hanya memastikan PIC tidak salah memilih file. */
+function FilePreviewModal({ file, onClose }: { file: File; onClose: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+  return (
+    <Modal title={file.name} onClose={onClose} wide>
+      <div className="pdf-preview" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        {url && (isImage(file)
+          ? <img className="photo-preview" src={url} alt={`Pratinjau ${file.name}`} />
+          : <iframe src={url} title={`Pratinjau ${file.name}`} style={{ height: "100%", minHeight: "60vh" }} />)}
+      </div>
+    </Modal>
   );
 }
 

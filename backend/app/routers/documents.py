@@ -912,6 +912,37 @@ def set_options(document_id: uuid.UUID, body: OptionsUpdate, request: Request, b
     return _detail(db, doc)
 
 
+@router.post("/{document_id}/files/{position}/split", response_model=DocumentDetail)
+def split_file(document_id: uuid.UUID, position: int, request: Request, background: BackgroundTasks,
+               user: User = Depends(uploader_roles), db: Session = Depends(get_db)):
+    """PIC meminta AI memeriksa SATU bukti yang berisi beberapa invoice (berkas gabungan) dan memecahnya per invoice.
+    Token AI terpakai hanya saat tombol ini ditekan (sekitar 2.000 token input per halaman, lalu tiap bagian dibaca).
+    Bukti dipecah bila AI menemukan lebih dari satu halaman depan invoice dengan nomor berbeda; bukti lain, termasuk
+    isian dan pajaknya, tidak berubah. Bagian baru dibaca AI, lalu draf diverifikasi ulang."""
+    doc = _get_document(db, user, document_id)
+    ensure_submit_access(db, user, doc.client_id)
+    if doc.status not in EDITABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Bukti hanya bisa dipisah saat Draf atau Ada kendala (sekarang {doc.status.value}).")
+    if not settings.ai_extraction_enabled or not settings.ai_split_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Pemisahan otomatis oleh AI sedang dimatikan.")
+    part = _file(doc, position)
+    if part.source_format:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bukti ini foto satu halaman, tidak ada yang perlu dipisah.")
+    if part.page_count < settings.ai_split_min_pages:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bukti ini hanya satu halaman, tidak ada yang perlu dipisah.")
+    if part.page_count > settings.ai_split_max_pages:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Bukti ini {part.page_count} halaman; batas pemeriksaan {settings.ai_split_max_pages} halaman "
+                            "(untuk menjaga biaya AI). Pecah PDF-nya dulu, lalu unggah per bagian.")
+    audit_service.record(db, user, "SPLIT_REQUESTED", document_id=doc.id, client_id=doc.client_id,
+                         note=f"Bukti {position} ({part.original_filename}, {part.page_count} hal.) diperiksa AI")
+    set_status(db, doc, DocStatus.PROCESSING, f"AI memeriksa bukti {position} untuk dipisah per invoice")
+    db.commit()
+    background.add_task(process_document, doc.id, request.app.state.extractor, True, False, {position})
+    return _detail(db, doc)
+
+
 CANCELLABLE = (DocStatus.EXCEPTION, DocStatus.READY_FOR_REVIEW)
 
 

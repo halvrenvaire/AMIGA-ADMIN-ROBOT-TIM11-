@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     # dan timesheet. AI hanya membaca N halaman pertama (data invoice dan Faktur Pajak); semua halaman tetap
     # dilampirkan di voucher. Juga menjaga batas ukuran dokumen Amazon Bedrock (±4,5 MB).
     ai_max_pages: int = 5
+    # Berkas gabungan (beberapa invoice dalam satu PDF, mis. tagihan bulanan per pengemudi): AI memeriksa tiap halaman
+    # untuk menemukan halaman depan invoice, lalu berkas dipecah menjadi satu invoice per bagian. Tiap bagian menjadi
+    # satu baris (beserta pajaknya) di voucher. Hanya berkas dengan halaman >= ai_split_min_pages yang diperiksa.
+    ai_split_enabled: bool = True
+    # false (bawaan) = berkas TIDAK dipecah otomatis saat unggah; PIC menekan tombol "Pisahkan otomatis (AI)" pada bukti
+    # yang berisi beberapa invoice, jadi token AI terpakai hanya bila diminta. true = setiap berkas multi-halaman diperiksa.
+    ai_split_auto: bool = False
+    ai_split_min_pages: int = 2
+    ai_split_max_pages: int = 40  # berkas lebih panjang tidak diperiksa (biaya: sekitar 2.000 token input per halaman)
+    ai_split_max_invoices: int = 30  # lebih dari ini dianggap salah baca; berkas tidak dipecah
+    ai_split_workers: int = 4  # halaman yang diperiksa AI bersamaan
     # Estimasi biaya AI di Dasbor (System Admin & Service Lead): harga per 1.000 token model pembaca invoice (USD)
     # dan kurs. Bawaan = harga publik Amazon Nova Lite; sesuaikan dengan tagihan AWS sebenarnya.
     ai_price_input_per_1k_usd: float = 0.00006
