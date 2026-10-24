@@ -20,7 +20,7 @@ JASA = [ExtractedLine("Jasa konsultan pajak Oktober", Decimal(1), Decimal(900000
 
 
 def pdf_text(content: bytes) -> str:
-    return re.sub(r"\s+", " ", " ".join(p.extract_text() for p in PdfReader(io.BytesIO(content)).pages))
+    return re.sub(r"\s+", " ", " ".join(p.extract_text(extraction_mode="layout") for p in PdfReader(io.BytesIO(content)).pages))
 
 
 def draft(**kw):

@@ -8,7 +8,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from itertools import combinations
 
 from app.config import settings
@@ -122,7 +122,7 @@ TOTAL_INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain):
 penerbit tagihan, bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar (Grand
 Total / Total Bayar / Amount Due), ditulis persis seperti di dokumen sebagai teks (mis. "Rp 2.695.000").
 "service_fee": imbalan jasa penerbit (mis. "Management Fee"), disalin persis HANYA bila invoice memecah tagihan menjadi
-imbalan jasa dan penggantian biaya; null bila tidak. "vat_amount": PPN yang tercetak; null bila tidak ada.
+imbalan jasa dan penggantian biaya; null bila tidak. JANGAN mengisi dengan kode pegawai/driver (mis. DD00002). Harus berupa nominal uang (rupiah) atau null. "vat_amount": PPN yang tercetak; null bila tidak ada.
 "description": uraian ringkas peruntukan atau jenis jasa/barang (mis. "Management Fee & Development Driver A", "Cetak Payung", atau "Pengadaan seragam"), disalin dari invoice atau lampirannya; null bila tidak ada.
 Tanggal dokumen Indonesia ditulis hari-bulan-tahun ("12-10-2026" = "2026-10-12")."""
 
@@ -141,7 +141,7 @@ Kena Pajak/Penerima Jasa Kena Pajak") BUKAN lembar utama invoice = false, dan no
 "invoice_no": nomor invoice yang tertulis di halaman ini persis seperti aslinya (mis. dari "Invoice No" / "No. Tagihan"),
 atau null bila halaman ini bukan lembar utama invoice."""
 
-# Halaman depan + blok ringkasan jumlahnya. Dipakai untuk memastikan halaman awal tiap invoice di berkas gabungan dan
+# Tahap 18: bila pemindaian per 5 halaman menemukan invoice, setiap halaman depan diperiksa tersendiri untuk
 # mengambil dasar potongan PPh 23 dari angka tercetak. Pembacaan nyata (berkas DSS): pemindaian per 5 halaman sering
 # salah menyebut halaman awal dan menyalin LABEL sebagai angka imbalan jasa; pembacaan satu halaman jauh lebih akurat.
 FRONT_PAGE_INSTRUCTION = PAGE_INSTRUCTION.replace(
@@ -197,7 +197,7 @@ Beberapa struk dalam satu halaman = beberapa entri dengan "page" yang sama. "ven
 bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar, ditulis persis seperti
 di dokumen sebagai teks (mis. "Rp 2.695.000").
 "service_fee": imbalan jasa penerbit (mis. "Management Fee" atau "Management Fee & Development"), disalin persis
-HANYA bila invoice memecah tagihan menjadi imbalan jasa dan penggantian biaya/basic fee; null bila tidak.
+HANYA bila invoice memecah tagihan menjadi imbalan jasa dan penggantian biaya/basic fee; null bila tidak. JANGAN mengisi dengan kode pegawai/driver (mis. DD00002). Harus berupa NOMINAL UANG (rupiah), atau null jika tidak ada.
 "vat_amount": nilai PPN / VAT yang tercetak di invoice (mis. "VAT / PPN", "Jumlah PPN"); null bila tidak ada.
 "description": uraian singkat peruntukan atau nama layanan/driver jika tertulis (mis. "Management Fee & Development Driver A", "Overtime Driver - Driver A"); null bila tidak ada.
 PENTING: Faktur Pajak (nomor seri 16 digit, diawali 040 atau semacamnya) BUKAN invoice dan TIDAK BOLEH masuk ke daftar invoices.
@@ -488,6 +488,11 @@ def parse_response(text: str) -> ExtractedInvoice:
     # Pembacaan nyata: AI kadang memilih angka komponen yang salah; PPN tercetak menangkap kesalahan itu.
     fee = service_fee_from_components(data.get("components")) or _positive(data.get("service_fee"))
     vat, unverified_fee = _positive(data.get("vat_amount")), None
+
+    # Sanity check: nilai imbalan jasa tidak boleh berupa angka kecil kode driver (mis. 5354 dari DD00002) bila total jutaan
+    if fee is not None and total is not None and total >= Decimal("1000000") and fee < Decimal("50000"):
+        fee = None
+
     if fee is not None and vat is not None and not fee_matches_vat(fee, vat):
         fee, unverified_fee = None, fee
         data = {**data, "service_fee_rejected": str(unverified_fee)}
