@@ -19,6 +19,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from itertools import combinations
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
@@ -64,6 +65,8 @@ potongan PPh yang paling mungkin dipotong pemberi kerja saat membayar:
 - PPH21: honor/jasa orang pribadi (BUKAN untuk PT, CV, UD, koperasi, yayasan)
 - PPH4_2: sewa tanah/bangunan, jasa konstruksi (final)
 - PPH26: vendor luar negeri
+Bila input menyebut "imbalan jasa terpisah", invoice itu memisahkan fee jasa dari penggantian biaya (gaji, BPJS,
+lembur). Pilih jenis pajak untuk jasanya (badan usaha = PPH23); sistem yang menentukan dasar potongannya.
 Jawab HANYA JSON: {"invoices": [{"code": "...", "reason": "alasan singkat bahasa Indonesia, maks 15 kata"}]}
 dengan urutan sama seperti input."""
 
@@ -73,6 +76,8 @@ class Suggestion:
     code: str
     reason: str
     source: str  # "ai" atau "aturan"
+    # Dasar potongan yang disarankan bila invoice memisahkan imbalan jasa dari penggantian biaya; None = DPP otomatis
+    base: Decimal | None = None
 
 
 def rates(db) -> dict[str, TaxRate]:
@@ -84,6 +89,30 @@ def _text_of(data: dict) -> str:
     return f"{data.get('vendor_name') or ''} ; {lines}"
 
 
+def service_fee(data: dict) -> Decimal | None:
+    """Imbalan jasa penerbit yang disalin AI dari invoice (mis. Management Fee), bila dipisah dari penggantian biaya."""
+    try:
+        value = Decimal(str(data.get("service_fee"))) if data.get("service_fee") not in (None, "") else None
+    except ArithmeticError:
+        return None
+    return value if value is not None and value > 0 else None
+
+
+def _money(value: Decimal) -> str:
+    return f"Rp {value:,.0f}".replace(",", ".")
+
+
+def with_service_fee_base(sug: Suggestion, data: dict) -> Suggestion:
+    """PPh 23 atas invoice yang memisahkan imbalan jasa dari penggantian biaya (gaji, BPJS, lembur) dipotong dari
+    imbalan jasanya saja. Nilainya disalin dari invoice; PIC bisa mengubahnya."""
+    fee = service_fee(data)
+    if fee is not None and sug.code == "PPH23":
+        sug.base = fee
+        sug.reason = (f"{sug.reason.rstrip('.')}. Dasar potongan hanya imbalan jasa {_money(fee)}, "
+                      f"bukan penggantian biaya (gaji, BPJS, lembur)")[:300]
+    return sug
+
+
 def suggest_by_rules(data: dict, reimburse: bool) -> Suggestion:
     if reimburse:
         return Suggestion(NONE, "Reimburse karyawan umumnya tidak dipotong PPh", "aturan")
@@ -91,16 +120,19 @@ def suggest_by_rules(data: dict, reimburse: bool) -> Suggestion:
     for code, pattern, reason in RULES:
         if pattern.search(text):
             return Suggestion(code, reason, "aturan")
+    if service_fee(data) is not None and ENTITY.search(data.get("vendor_name") or ""):
+        return Suggestion("PPH23", "Invoice memisahkan imbalan jasa (fee) dari penggantian biaya", "aturan")
     return Suggestion(NONE, "Pembelian barang; umumnya tidak dipotong PPh", "aturan")
 
 
 def suggest(bedrock, items: list[dict], reimburse: bool, valid: set[str]) -> list[Suggestion]:
     """Saran jenis pajak untuk tiap invoice. Memakai AI bila tersedia; bila gagal, aturan kata kunci."""
-    fallback = [suggest_by_rules(d, reimburse) for d in items]
+    fallback = [with_service_fee_base(suggest_by_rules(d, reimburse), d) for d in items]
     if reimburse or bedrock is None or not items:
         return fallback
     listing = "\n".join(f"{i}. Vendor: {d.get('vendor_name') or '-'}; rincian: "
                         f"{'; '.join((li.get('description') or '-') for li in (d.get('line_items') or [])[:12])}"
+                        f"{'; imbalan jasa terpisah: ' + _money(service_fee(d)) if service_fee(d) else ''}"
                         for i, d in enumerate(items, start=1))
     try:
         text = bedrock.generate(SYSTEM_PROMPT, [{"role": "user", "content": listing}], max_tokens=400, temperature=0)
@@ -117,7 +149,11 @@ def suggest(bedrock, items: list[dict], reimburse: bool, valid: set[str]) -> lis
         if code == "PPH21" and ENTITY.search(data.get("vendor_name") or "") and "PPH23" in valid:
             # Pengaman: AI kadang memilih PPh 21 untuk jasa oleh badan usaha
             code, reason = "PPH23", "Jasa oleh badan usaha (PT/CV), bukan orang pribadi"
-        result.append(Suggestion(code, reason, "ai") if code in valid else rule)
+        if (code == NONE and service_fee(data) is not None and ENTITY.search(data.get("vendor_name") or "")
+                and "PPH23" in valid):
+            # Pengaman: invoice badan usaha yang memisahkan imbalan jasa (fee) tetap dikenai PPh 23 atas fee-nya
+            code, reason = "PPH23", "Invoice memisahkan imbalan jasa (fee) dari penggantian biaya"
+        result.append(with_service_fee_base(Suggestion(code, reason, "ai"), data) if code in valid else rule)
     return result
 
 
@@ -329,6 +365,39 @@ def descriptions_key(data: dict) -> str:
     return json.dumps([li.get("description") or "" for li in data.get("line_items") or []])
 
 
+def fee_line_indexes(data: dict) -> set[int] | None:
+    """Indeks baris yang membentuk imbalan jasa, dicocokkan dari nilainya (satu sampai tiga baris yang jumlahnya persis
+    sama dengan `service_fee`). None = invoice tidak memisahkan imbalan jasa, atau barisnya tidak cocok."""
+    fee = service_fee(data)
+    if fee is None:
+        return None
+    candidates = [(i, _dec(li.get("subtotal"))) for i, li in item_lines(data)
+                  if _dec(li.get("subtotal")) not in (None, Decimal(0))]
+    for size in (1, 2, 3):
+        for combo in combinations(candidates, size):
+            if sum((value for _, value in combo), Decimal(0)) == fee:
+                return {i for i, _ in combo}
+    return None
+
+
+def apply_service_fee(data: dict, out: list[dict | None], entity: bool) -> list[dict | None]:
+    """Baris imbalan jasa (badan usaha) dipotong PPh 23; baris lain adalah penggantian biaya (gaji, BPJS, lembur)
+    sehingga tidak dipotong. Hanya berlaku bila invoice memisahkan keduanya dan angkanya cocok."""
+    fee_lines = fee_line_indexes(data)
+    if fee_lines is None:
+        return out
+    result = list(out)
+    for i, entry in enumerate(result):
+        if entry is None:
+            continue
+        if i not in fee_lines:
+            result[i] = {"code": NONE, "reason": "Penggantian biaya (gaji, BPJS, lembur), bukan imbalan jasa",
+                         "source": entry.get("source", "aturan")}
+        elif entity and entry["code"] == NONE:
+            result[i] = {"code": "PPH23", "reason": "Imbalan jasa (fee) oleh badan usaha", "source": entry.get("source", "aturan")}
+    return result
+
+
 def suggest_lines_by_rules(data: dict, reimburse: bool) -> list[dict | None]:
     """Saran jenis PPh tiap baris dari aturan kata kunci (tanpa AI). Baris PPN: None."""
     vendor_foreign = RULES[0][1].search(data.get("vendor_name") or "")
@@ -343,7 +412,9 @@ def suggest_lines_by_rules(data: dict, reimburse: bool) -> list[dict | None]:
         else:
             code, reason = _line_rule(li.get("description") or "")
             out.append({"code": code, "reason": reason, "source": "aturan"})
-    return out
+    if reimburse or vendor_foreign:
+        return out
+    return apply_service_fee(data, out, bool(ENTITY.search(data.get("vendor_name") or "")))
 
 
 def line_suggestions(data: dict, reimburse: bool) -> list[dict | None]:
@@ -392,7 +463,7 @@ def suggest_lines_ai(bedrock, data: dict, valid: set[str]) -> list[dict | None]:
             code, reason = "PPH23", "Jasa oleh badan usaha (PT/CV), bukan orang pribadi"
         if code in valid:
             out[n - 1] = {"code": code, "reason": reason or "Saran AI", "source": "ai"}
-    return out
+    return apply_service_fee(data, out, entity)
 
 
 @dataclass

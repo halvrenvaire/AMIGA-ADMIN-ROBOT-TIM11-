@@ -95,8 +95,10 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const [mode, setMode] = useState<"invoice" | "line">(currentMode);
   const [code, setCode] = useState(current && currentMode === "invoice" ? current.code : suggestion?.code ?? "NONE");
   const [npwp, setNpwp] = useState(current?.npwp ?? known !== false);
-  const [manual, setManual] = useState(current && currentMode === "invoice" ? !current.base_auto : false);
-  const [base, setBase] = useState(current && currentMode === "invoice" && !current.base_auto ? plainNumber(current.base ?? null) : "");
+  // Invoice yang memisahkan imbalan jasa dari penggantian biaya: dasar potongan awal = imbalan jasa (bisa diubah PIC)
+  const suggestedBase = !current && suggestion?.base ? plainNumber(suggestion.base) : "";
+  const [manual, setManual] = useState(current && currentMode === "invoice" ? !current.base_auto : Boolean(suggestedBase));
+  const [base, setBase] = useState(current && currentMode === "invoice" && !current.base_auto ? plainNumber(current.base ?? null) : suggestedBase);
   // Hitung pajak otomatis (bawaan). Dimatikan: DPP, PPN, dan potongan PPh diisi sendiri oleh PIC
   const [calc, setCalc] = useState(current?.calc !== false);
   const [vatAmount, setVatAmount] = useState(current?.calc === false ? plainNumber(current.vat?.amount ?? null) : "");
@@ -332,6 +334,18 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           <p className="tax-hint">
             <span className="chip gray">{suggestion.source === "ai" ? "Saran AI" : "Saran sistem"}</span>{" "}
             <b>{suggestion.name}</b> · {suggestion.reason}. Keputusan tetap di Anda.
+          </p>
+        )}
+        {mode === "invoice" && file.data?.service_fee_unverified && (
+          <Alert kind="warn">AI membaca imbalan jasa {rupiah(Number(file.data.service_fee_unverified))}, tetapi angka itu tidak
+            cocok dengan PPN yang tercetak di invoice, jadi tidak dipakai. Isi DPP potongan PPh secara manual sesuai dokumen.</Alert>
+        )}
+        {mode === "invoice" && (file.data?.service_fee || file.data?.vat_printed) && (
+          <p className="tax-hint">
+            Angka pajak yang tercetak di invoice (disalin AI, cocokkan dengan dokumen):
+            {file.data?.service_fee && <> imbalan jasa <b>{rupiah(Number(file.data.service_fee))}</b></>}
+            {file.data?.service_fee && file.data?.vat_printed && " ·"}
+            {file.data?.vat_printed && <> PPN <b>{rupiah(Number(file.data.vat_printed))}</b></>}.
           </p>
         )}
 

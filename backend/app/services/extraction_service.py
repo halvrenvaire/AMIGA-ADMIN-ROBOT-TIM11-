@@ -9,8 +9,14 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from itertools import combinations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
 from app.config import settings
 from app.services.bedrock_client import BedrockClient, BedrockError
+from app.services.invoice_splitter import PageInfo, Segment, find_segments, split_pages
+
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Kamu adalah Invoice Verification Officer berpengalaman di bagian keuangan (back office).
 Tugasmu dua, berurutan:
@@ -35,6 +41,20 @@ Tugasmu dua, berurutan:
    atau mengarang data yang tidak tertulis (mis. rekening yang tidak ada di dokumen).
    Untuk "irrelevant", isi semua field data dengan null dan line_items dengan []."""
 
+# Komponen biaya dan PPN tercetak. Dipakai kedua mode baca. AI hanya MENYALIN label dan angka yang tercetak (pembacaan
+# nyata: model kecil tidak andal bila disuruh memilih mana yang imbalan jasa). Kode yang menentukan mana imbalan jasa
+# dari labelnya (service_fee_from_components); potongan PPh dihitung sistem, dan PIC yang memeriksa serta mengubahnya.
+FEE_RULES = """"components": hanya bila invoice jasa memecah tagihan menjadi beberapa komponen biaya di blok ringkasan
+(mis. "Total Basic Fee", "Total Overtime", "Total Management Fee & Development") sebelum baris "Total Amount" / "Sub total"
+/ PPN. Salin SETIAP komponen itu apa adanya: "label" persis seperti tertulis dan "amount" angkanya persis seperti
+tertulis. Jangan memilih, menjumlahkan, atau menghitung. Jangan masukkan "Total Amount", "Sub total", PPN, Biaya Meterai,
+atau "Total Invoice". Bila invoice tidak memecah tagihan seperti itu, isi [].
+"vat_amount": nilai PPN / VAT yang tercetak di invoice (mis. "VAT / PPN", "Jumlah PPN"), disalin persis; null bila tidak ada."""
+
+# Hanya mode rincian: PDF jasa sering mengulang komponen yang sama di halaman invoice, lampiran, dan Faktur Pajak
+DEDUP_RULE = """Satu komponen biaya sering tertulis berulang di halaman invoice, lampiran rincian, dan Faktur Pajak. Catat
+setiap komponen di "line_items" SEKALI saja, dari halaman invoice utama, dan lewati komponen bernilai 0."""
+
 INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentuk:
 {
   "document_class": "invoice"|"receipt"|"irrelevant"|"uncertain",
@@ -45,10 +65,13 @@ INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain) dengan bentu
   "invoice_date": "YYYY-MM-DD"|null,
   "line_items": [{"kind": "item"|"fee"|"tax"|"discount"|"summary", "description": string|null, "qty": number|null, "unit_price": string|null, "subtotal": string|null}],
   "total": string|null,
+  "components": [{"label": string, "amount": string}],
+  "vat_amount": string|null,
   "bank_name": string|null,
   "account_no": string|null,
   "account_name": string|null
 }
+""" + FEE_RULES + "\n" + DEDUP_RULE + """
 Aturan: "document_class" adalah hasil langkah 1. "document_type" adalah jenis dokumen
 dalam bahasa Indonesia (mis. "Invoice", "Struk kasir", "Purchase order", "Surat lamaran"). "not_invoice_reason"
 diisi satu kalimat singkat bila document_class bukan "invoice", selain itu null. Tulis setiap angka uang PERSIS seperti di invoice sebagai teks, termasuk titik dan koma (contoh
@@ -90,8 +113,11 @@ TOTAL_INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain):
   "vendor_name": string|null,
   "invoice_no": string|null,
   "invoice_date": "YYYY-MM-DD"|null,
-  "total": string|null{account}
+  "total": string|null,
+  "components": [{{"label": string, "amount": string}}],
+  "vat_amount": string|null{account}
 }}
+""" + FEE_RULES + """
 "document_type": jenis dokumen dalam bahasa Indonesia (mis. "Invoice", "Struk kasir"). "vendor_name": nama penjual/
 penerbit tagihan, bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar (Grand
 Total / Total Bayar / Amount Due), ditulis persis seperti di dokumen sebagai teks (mis. "Rp 2.695.000").
@@ -101,6 +127,21 @@ TOTAL_ACCOUNT_FIELDS = """,
   "bank_name": string|null,
   "account_no": string|null,
   "account_name": string|null"""
+
+# Memeriksa SATU halaman dari berkas gabungan (beberapa invoice dalam satu PDF): apakah ini halaman depan invoice?
+PAGE_SYSTEM_PROMPT = """Kamu staf administrasi yang memilah tumpukan dokumen tagihan yang dipindai jadi satu PDF.
+Untuk halaman yang diberikan, tentukan apakah halaman ini adalah HALAMAN DEPAN sebuah invoice. Salin saja yang
+tertulis; jangan menebak atau mengarang nomor."""
+
+PAGE_INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain):
+{"starts_invoice": true|false, "invoice_no": string|null}
+"starts_invoice" true HANYA bila halaman ini adalah lembar utama sebuah invoice/tagihan: ada judul seperti INVOICE,
+FAKTUR, atau TAGIHAN, ada nomor invoice, dan ada ringkasan jumlah yang ditagih. Halaman lampiran rincian (daftar
+item dengan kolom No/Amount), timesheet, absensi, surat jalan, dan halaman lanjutan atau kosong = false.
+Faktur Pajak (judul "Faktur Pajak", ada "Kode dan Nomor Seri Faktur Pajak", "Pengusaha Kena Pajak", "Pembeli Barang
+Kena Pajak/Penerima Jasa Kena Pajak") BUKAN lembar utama invoice = false, dan nomor serinya (16-17 digit) bukan nomor invoice.
+"invoice_no": nomor invoice yang tertulis di halaman ini persis seperti aslinya (mis. dari "Invoice No" / "No. Tagihan"),
+atau null bila halaman ini bukan lembar utama invoice."""
 
 FOLLOWUP_SYSTEM_PROMPT = """Kamu memeriksa ulang satu invoice untuk bagian keuangan. Tugasmu HANYA mencari baris
 pajak, biaya, atau potongan yang terlewat pada pembacaan sebelumnya, lalu menyalinnya persis seperti tertulis.
@@ -167,6 +208,12 @@ class ExtractedInvoice:
     doc_class: str | None = None
     # Token AI yang terpakai untuk membaca invoice ini: {"input_tokens", "output_tokens"}
     usage: dict = field(default_factory=dict)
+    # Disalin dari invoice: nilai imbalan jasa penerbit (mis. Management Fee) bila dipisah dari penggantian biaya,
+    # dan PPN yang tercetak. Dasar saran potongan PPh; PIC yang memutuskan.
+    service_fee: Decimal | None = None
+    vat_printed: Decimal | None = None
+    # Imbalan jasa yang dibaca AI tetapi tidak cocok dengan PPN tercetak: tidak dipakai, hanya ditampilkan ke PIC
+    service_fee_unverified: Decimal | None = None
 
     def __post_init__(self):
         if self.doc_class is None or (self.doc_class == INVOICE and not self.is_invoice):
@@ -367,6 +414,13 @@ def parse_response(text: str) -> ExtractedInvoice:
         lines, total = [], None
 
     keep = doc_class != IRRELEVANT
+    # Imbalan jasa dari AI hanya dipakai bila cocok dengan PPN yang tercetak (PPN dikenakan atas imbalan jasa itu).
+    # Pembacaan nyata: AI kadang memilih angka komponen yang salah; PPN tercetak menangkap kesalahan itu.
+    fee = service_fee_from_components(data.get("components")) or _positive(data.get("service_fee"))
+    vat, unverified_fee = _positive(data.get("vat_amount")), None
+    if fee is not None and vat is not None and not fee_matches_vat(fee, vat):
+        fee, unverified_fee = None, fee
+        data = {**data, "service_fee_rejected": str(unverified_fee)}
     text = lambda key: to_text(data.get(key)) if keep else None  # noqa: E731
     return ExtractedInvoice(
         vendor_name=vendor_name if keep else None,
@@ -381,7 +435,48 @@ def parse_response(text: str) -> ExtractedInvoice:
         not_invoice_reason=reason,
         raw=data,
         doc_class=doc_class,
+        service_fee=fee if keep else None,
+        vat_printed=vat if keep else None,
+        service_fee_unverified=unverified_fee if keep else None,
     )
+
+
+# Label komponen biaya. Imbalan jasa = milik penerbit invoice; penggantian biaya = diteruskan tanpa margin.
+SERVICE_FEE_LABEL = re.compile(
+    r"(management|manajemen|handling|service|pengelolaan)\s*(&\s*development\s*)?fee|fee\s*(management|manajemen|pengelolaan)"
+    r"|jasa\s+pengelolaan|biaya\s+(manajemen|pengelolaan)", re.IGNORECASE)
+PASS_THROUGH_LABEL = re.compile(
+    r"basic\s*fee|\bgaji\b|salary|bpjs|overtime|lembur|tunjangan|allowance|transport|uang\s+makan|reimburs|penggantian"
+    r"|pass[- ]?through", re.IGNORECASE)
+
+
+def service_fee_from_components(components) -> Decimal | None:
+    """Imbalan jasa dari komponen yang disalin AI: jumlah komponen berlabel imbalan jasa, HANYA bila invoice juga
+    memuat komponen penggantian biaya (gaji, lembur, dll.). Tanpa pemisahan itu bukan kasus ini, sehingga mis. satu baris
+    "Service Fee" pada invoice biasa tidak dianggap dasar PPh 23."""
+    if not isinstance(components, list):
+        return None
+    fee, has_pass_through = Decimal(0), False
+    for item in components:
+        if not isinstance(item, dict):
+            continue
+        label, amount = str(item.get("label") or ""), to_decimal(item.get("amount"))
+        if PASS_THROUGH_LABEL.search(label) and not SERVICE_FEE_LABEL.search(label):
+            has_pass_through = True
+        elif SERVICE_FEE_LABEL.search(label) and amount is not None and amount > 0:
+            fee += amount
+    return fee if fee > 0 and has_pass_through else None
+
+
+def fee_matches_vat(fee: Decimal, vat: Decimal, tolerance: Decimal = Decimal(100)) -> bool:
+    """PPN tercetak sama dengan 11% atau 12% dari imbalan jasa (selisih pembulatan maks. Rp 100)."""
+    return any(abs(fee * rate / 100 - vat) <= tolerance for rate in (Decimal(11), Decimal(12)))
+
+
+def _positive(value) -> Decimal | None:
+    """Angka yang disalin AI; nol, negatif, atau tidak terbaca dianggap tidak ada."""
+    number = to_decimal(value)
+    return number if number is not None and number > 0 else None
 
 
 def _followup_items(answer) -> list[dict]:
@@ -434,6 +529,48 @@ class InvoiceExtractor:
             self._find_missing_charges(pdf_bytes, result, usage)
         result.usage = usage
         return result
+
+    def read_page(self, page_pdf: bytes, usage: dict) -> PageInfo:
+        """Apakah halaman ini lembar depan sebuah invoice, dan nomornya. Jawaban yang tidak terbaca = bukan lembar depan."""
+        text = self._read(PAGE_SYSTEM_PROMPT, page_pdf, PAGE_INSTRUCTION, 120, usage)
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        try:
+            data = json.loads(match.group(0)) if match else {}
+        except json.JSONDecodeError:
+            data = {}
+        if not isinstance(data, dict):
+            return PageInfo()
+        starts = data.get("starts_invoice")
+        return PageInfo(starts is True or str(starts).strip().lower() == "true", to_text(data.get("invoice_no")))
+
+    def locate_invoices(self, pdf_bytes: bytes) -> tuple[list[Segment], dict]:
+        """Bagian-bagian invoice dalam berkas gabungan, dan token AI yang terpakai. Daftar kosong = satu invoice.
+
+        Setiap halaman diperiksa sendiri-sendiri (paralel), jadi nomor halaman selalu pasti. Halaman yang gagal
+        diperiksa dicoba sekali lagi; bila tetap gagal, dianggap bukan halaman depan."""
+        pages = split_pages(pdf_bytes)
+        usage: dict = {}
+        if len(pages) < 2:
+            return [], usage
+        page_usage = [dict() for _ in pages]
+
+        def check(i: int) -> PageInfo | None:
+            for _ in range(2):
+                try:
+                    return self.read_page(pages[i], page_usage[i])
+                except BedrockError as e:
+                    log.warning("Halaman %d gagal diperiksa: %s", i + 1, e)
+            return None
+
+        with ThreadPoolExecutor(max_workers=max(1, settings.ai_split_workers)) as pool:
+            infos = list(pool.map(check, range(len(pages))))
+        for u in page_usage:
+            for key in ("input_tokens", "output_tokens"):
+                usage[key] = usage.get(key, 0) + int(u.get(key) or 0)
+        failed = sum(info is None for info in infos)
+        if failed:
+            log.warning("%d dari %d halaman tidak bisa diperiksa; dianggap bukan halaman depan", failed, len(pages))
+        return find_segments([info or PageInfo() for info in infos], settings.ai_split_max_invoices), usage
 
     def _find_missing_charges(self, pdf_bytes: bytes, result: ExtractedInvoice, usage: dict | None = None) -> None:
         """Bila jumlah rincian tidak sama dengan total, minta AI sekali lagi mencari baris pajak/biaya/potongan

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { Link, useParams } from "react-router-dom";
 import {
   Ban, CheckCircle2, CloudOff, Download, Equal, ExternalLink, Eye, FileClock, ListOrdered, Maximize2, Minimize2, PenLine, Plus, Receipt,
-  RotateCcw, Save, Send, ShieldCheck, Trash2, Undo2, UserPlus,
+  RotateCcw, Save, Scissors, Send, ShieldCheck, Trash2, Undo2, UserPlus,
 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
@@ -65,13 +65,25 @@ export function DocumentPage() {
   const d = doc.data;
   // Ringkasan hasil AI dianimasikan bila prosesnya selesai saat halaman ini terbuka
   const sawProcessing = useRef(false);
+  // Jumlah bukti sebelum PIC menekan "Pisahkan otomatis (AI)"; dipakai untuk memberi tahu hasilnya setelah AI selesai
+  const splitBefore = useRef<number | null>(null);
   const [fresh, setFresh] = useState(false);
   const [resultClosed, setResultClosed] = useState(false);
   useEffect(() => {
     if (!d) return;
     const busy = d.status === "QUEUED" || d.status === "PROCESSING";
     if (busy) { sawProcessing.current = true; setResultClosed(false); }
-    else if (sawProcessing.current) { sawProcessing.current = false; setFresh(true); }
+    else if (sawProcessing.current) {
+      sawProcessing.current = false;
+      setFresh(true);
+      const before = splitBefore.current;
+      splitBefore.current = null;
+      if (before !== null) {
+        setNotice(d.files.length > before
+          ? { kind: "ok", text: `Bukti dipisah menjadi ${d.files.length - before + 1} invoice. Periksa data dan pilih pajak tiap invoice.` }
+          : { kind: "info", text: "AI tidak menemukan lebih dari satu invoice pada bukti ini, jadi bukti tetap utuh." });
+      }
+    }
   }, [d?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ekstraksi dan verifikasi berjalan di background: muat ulang sampai selesai
@@ -254,7 +266,8 @@ export function DocumentPage() {
             </Anchor>
           )}
           {canEdit
-            ? <DraftEditor doc={d} pos={filePos} onPos={setPos} onChange={update} onNotice={setNotice} />
+            ? <DraftEditor doc={d} pos={filePos} onPos={setPos} onChange={update} onNotice={setNotice}
+                           onSplit={(before) => { splitBefore.current = before; }} />
             : d.extraction && <Anchor id="data"><ReadOnlyData doc={d} onChange={update} /></Anchor>}
           {!canEdit && d.extraction && d.status !== "CANCELLED" && !hasVoucher && <SimulationButton docId={d.id} />}
           {canReview && <Anchor id="keputusan"><ReviewDecision doc={d} onChange={update} onNotice={setNotice} /></Anchor>}
@@ -460,9 +473,10 @@ const dataLines = (d: FileData | null | undefined): Line[] =>
   }));
 
 /** Draf oleh PIC Klien / Intake Support: edit per invoice, lihat simulasi voucher, kirim ke reviewer (feedback owner). */
-function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
+function DraftEditor({ doc, pos, onPos, onChange, onNotice, onSplit }: {
   doc: DocumentDetail; pos: number; onPos: (p: number) => void;
   onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
+  onSplit: (before: number | null) => void;
 }) {
   const file = doc.files.find((f) => f.position === pos) ?? doc.files[0];
   const totalOnly = isTotalOnly(doc);
@@ -520,6 +534,27 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
     }
   }
 
+  /** Token AI hanya terpakai di sini: ~2.000 token input per halaman untuk memeriksa, lalu tiap bagian dibaca (~4.100 per halaman
+   *  keseluruhan). Rp 4,1 per halaman memakai harga Amazon Nova Lite di backend; konfirmasi dulu supaya biaya tidak mengejutkan. */
+  async function split() {
+    const tokens = file.page_count * 4100;
+    if (!confirm(`AI akan memeriksa ${file.page_count} halaman bukti ${file.position} untuk mencari invoice yang tergabung.\n`
+      + `Perkiraan pemakaian ${tokens.toLocaleString("id-ID")} token AI (sekitar Rp ${Math.ceil(file.page_count * 4.1).toLocaleString("id-ID")}).\n\n`
+      + "Bila ditemukan lebih dari satu invoice, bukti ini dipecah dan tiap bagian dibaca ulang. Isian dan pajak bukti ini akan diganti; "
+      + "bukti lain tidak berubah. Lanjutkan?")) return;
+    setBusy(true);
+    onSplit(doc.files.length);
+    try {
+      onChange(await api.post<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/split`),
+        { kind: "info", text: "AI sedang memeriksa bukti ini. Hasilnya muncul beberapa saat lagi." });
+    } catch (e) {
+      onSplit(null);
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit() {
     setBusy(true);
     try {
@@ -565,6 +600,15 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       )}
       <small className="muted">{file.original_filename} · {file.page_count} hal.
         {file.data?.manual && <> <span className="chip warn"><PenLine size={11} /> diisi manual: AI tidak membaca bukti ini</span></>}</small>
+      {doc.ai_enabled !== false && !file.source_format && file.page_count >= 2 && (
+        <div className="actions" style={{ alignItems: "center" }}>
+          <button type="button" className="btn sm" disabled={busy || dirty} onClick={split}
+                  title={dirty ? "Simpan atau batalkan perubahan bukti ini dulu" : "AI memeriksa halaman dan memecah bukti yang berisi beberapa invoice"}>
+            <Scissors /> Pisahkan otomatis (AI)
+          </button>
+          <small className="muted">Bila file ini berisi beberapa invoice sekaligus. Memakai token AI, jadi hanya dijalankan saat Anda menekan tombol ini.</small>
+        </div>
+      )}
 
       <Anchor id="data">
         <div className="section-title">Informasi utama</div>
