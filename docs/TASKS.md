@@ -300,7 +300,7 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 
 | ID | Tugas | Status | Commit |
 | --- | --- | --- | --- |
-| T19.1 | **Saran PPN otomatis** dari PPN tercetak di invoice (mode total saja): pajak otomatis memasang "Harga sudah termasuk PPN" dengan nilai PPN **persis angka tercetak** (bukan 11% x total; PPN DSS hanya atas imbalan jasa), DPP otomatis = total - PPN tercetak. Saran PPN tampil di panel pajak. Baris potongan voucher memakai format contoh owner: `Potongan PPh 23 (Rp 2.304.696 x 2%) <invoice/barang>`. Test DSS: PPN 6 invoice sesuai angka tercetak, voucher dibayar Rp 41.719.136 | [x] | belum di-commit |
+| T19.1 | **Saran PPN otomatis** dari PPN tercetak di invoice (mode total saja): pajak otomatis memasang "Harga sudah termasuk PPN" dengan nilai PPN **persis angka tercetak** (bukan 11% x total; PPN DSS hanya atas imbalan jasa), DPP otomatis = total - PPN tercetak. Saran PPN tampil di panel pajak. Baris potongan voucher memakai format contoh owner: `Potongan PPh 23 (Rp 2.304.696 x 2%) <invoice/barang>`. Test DSS: PPN 6 invoice sesuai angka tercetak, voucher dibayar Rp 41.719.136 | [x] | `b727fde` |
 | T19.2 | Bot Telegram: langkah penting ditambahkan, terutama pajak (saran AI per invoice, pilih/ubah, ringkasan potongan) | [ ] | |
 | T19.3 | Tutorial di dalam aplikasi: tombol **?** di topbar, langkah demi langkah yang menyorot bagian layar sesuai halaman | [ ] | |
 | T19.4 | Perbarui dokumentasi tutorial penggunaan (SOP dan buku panduan) | [ ] | |
