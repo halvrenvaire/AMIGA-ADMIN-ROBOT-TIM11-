@@ -345,8 +345,9 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           </p>
         )}
         {mode === "invoice" && file.data?.service_fee_unverified && (
-          <Alert kind="warn">AI membaca imbalan jasa {rupiah(Number(file.data.service_fee_unverified))}, tetapi angka itu tidak
-            cocok dengan PPN yang tercetak di invoice, jadi tidak dipakai. Isi DPP potongan PPh secara manual sesuai dokumen.</Alert>
+          <Alert kind="warn">Invoice ini memisahkan imbalan jasa dari penggantian biaya. AI membaca imbalan jasa{" "}
+            {rupiah(Number(file.data.service_fee_unverified))}, tetapi angka itu tidak cocok dengan PPN yang tercetak, jadi tidak
+            dipakai. Isi DPP potongan PPh 23 manual dengan nilai imbalan jasa (mis. Management Fee) sesuai invoice.</Alert>
         )}
         {mode === "invoice" && (file.data?.service_fee || file.data?.vat_printed) && (
           <p className="tax-hint">
@@ -354,6 +355,12 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
             {file.data?.service_fee && <> imbalan jasa <b>{rupiah(Number(file.data.service_fee))}</b></>}
             {file.data?.service_fee && file.data?.vat_printed && " ·"}
             {file.data?.vat_printed && <> PPN <b>{rupiah(Number(file.data.vat_printed))}</b></>}.
+          </p>
+        )}
+        {mode === "invoice" && file.data?.service_fee && (
+          <p className="tax-hint">
+            DPP PPh 23 = <b>imbalan jasa vendor</b> (bagian tagihan yang dikenai PPN, mis. Management Fee), bukan total
+            invoice. Penggantian biaya yang diteruskan (gaji/Basic Fee, BPJS, lembur driver) tidak dipotong PPh 23.
           </p>
         )}
 

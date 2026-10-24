@@ -7,7 +7,7 @@ pemecahan itu sendiri murni aturan di sini, supaya hasilnya bisa diuji tanpa AI.
 import io
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pypdf import PdfReader, PdfWriter
 
@@ -19,6 +19,8 @@ class PageInfo:
     """Hasil pemeriksaan satu halaman oleh AI."""
     starts_invoice: bool = False
     invoice_no: str | None = None
+    # Baris blok ringkasan jumlah di halaman depan (label + angka tercetak), bila diminta (read_front_page)
+    amounts: list = field(default_factory=list)
 
 
 @dataclass

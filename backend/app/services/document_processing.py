@@ -710,6 +710,11 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                     if part is not None:
                         for k in usage:
                             usage[k] += int((getattr(part, "usage", None) or {}).get(k) or 0)
+                        seen = scanned.get(f.id) if f is not None else None
+                        if seen is not None and part.service_fee is None and seen.service_fee is not None:
+                            # Dasar PPh 23 yang sudah dicocokkan dengan PPN saat pemindaian (halaman depan)
+                            part.service_fee, part.vat_printed = seen.service_fee, seen.vat_printed or part.vat_printed
+                            part.service_fee_unverified = None
                 if lines_only and f is not None:
                     # Ganti mode ke rincian: hanya baris barang/jasa yang diambil dari AI
                     old = file_data(doc, f)
