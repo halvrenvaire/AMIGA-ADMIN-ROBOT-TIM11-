@@ -34,6 +34,8 @@ _Terakhir diperbarui: 24 Okt 2026_
 | 14 | Mode AI total saja/rincian, rekening jadi fitur tambahan, pajak otomatis/manual, profil & tanda tangan pengaju, pratinjau voucher, estimasi biaya AI | Besar | 10/10 | ✅ |
 | 15 | Toggle "Diajukan oleh" (profil PIC terkunci / isi manual), banyak invoice dalam satu PDF (pindai per 5 halaman, satu bukti per invoice, rentang halaman bisa diubah), tanda tangan di mode gelap, PPN "harga belum termasuk PPN" | Besar | 9/9 | ✅ |
 | 16 | Pemisahan invoice gabungan on-demand (tombol AI) & saran PPh 23 imbalan jasa (merging branch `feat/pisah-invoice-gabungan` ke `main`) | Sedang | 8/8 | ✅ |
+| 17 | Perbaikan multi-invoice DSS, deteksi total gambar, pajak otomatis | Sedang | 7/7 | ✅ |
+| 18 | DPP PPh 23 kasus DSS: imbalan jasa (bagian kena PPN), bukan total invoice; halaman awal invoice diperiksa per halaman | Sedang | 5/5 | ✅ |
 
 ---
 
@@ -268,6 +270,23 @@ dan kompatibilitas migrasi di OS Windows.
 | T17.6 | **Skema DB, Migrasi & Endpoint Backend**: Penambahan kolom `auto_tax` (default True) via Alembic revision `c9e4a8b2d1f7`, endpoint `POST /{id}/tax/apply-all`, dan update `PUT /{id}/options` | [x] | `backend/alembic/versions/c9e4a8b2d1f7_auto_tax_option.py`, `models.py`, `routers/documents.py`, `schemas/schemas.py` |
 | T17.7 | **Pengujian Komprehensif**: Test suite baru `tests/test_dss_and_tax_improvements.py` (5/5 passed), 52/52 test split & tax backend passed, dan frontend build sukses tanpa error | [x] | `backend/tests/test_dss_and_tax_improvements.py` |
 
+
+## Tahap 18 — DPP PPh 23 untuk invoice jasa yang memisahkan imbalan jasa (temuan voucher DSS 1702, 24 Okt 2026)
+
+Temuan: di voucher bayar DSS, PPh 23 2% dipotong dari **Management Fee & Development** (mis. Rp 2.304.696), bukan dari
+total invoice (Rp 8.933.846). Istilah "jasa" membingungkan karena driver juga jasa. **Batasan yang dipakai sistem:**
+DPP PPh 23 = imbalan jasa milik vendor, yaitu bagian tagihan yang **dikenai PPN**. Penggantian biaya yang diteruskan
+(Basic Fee/gaji, BPJS, Overtime driver) tidak dikenai PPN dan tidak dipotong PPh 23. Imbalan jasa hanya dipakai bila
+cocok dengan angka PPN tercetak (imbalan x 11% = PPN, atau Sub total terkena PPN = imbalan x 11/12); bila tidak cocok,
+PIC mengisi DPP sendiri. Invoice yang tidak memisahkan penggantian biaya tetap memakai DPP penuh seperti sebelumnya.
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T18.1 | Halaman awal tiap invoice di berkas gabungan **diperiksa per halaman** (paralel) pada potongan yang memuat invoice, dicocokkan dari nomor invoice. Pembacaan nyata berkas DSS: pemindaian per 5 halaman menyebut 1, 3, 6, 11, 16, 26 (seharusnya 1, 5, 9, 13, 20, 26) sehingga rentang halaman bukti salah | [x] | belum di-commit |
+| T18.2 | Halaman depan sekaligus menyalin **blok ringkasan jumlah** (label + angka). Imbalan jasa ditentukan kode (`fee_from_amounts`) dengan cek silang semua angka di blok itu, sehingga angka yang bergeser satu baris atau baris yang terlewat tetap ditemukan; bila tetap tidak cocok, halaman dibaca ulang sekali | [x] | belum di-commit |
+| T18.3 | Label yang tersalin sebagai angka ditolak (mis. "Management Fee ... DD00003" sebelumnya terbaca imbalan jasa Rp 5.592) | [x] | belum di-commit |
+| T18.4 | Panel pajak menjelaskan batasan DPP PPh 23 (imbalan jasa vendor, bukan penggantian gaji/BPJS/lembur) dan peringatan bila imbalan jasa tidak cocok dengan PPN | [x] | belum di-commit |
+| T18.5 | Test `tests/test_dss_pph23.py` memakai angka pembacaan Nova Lite yang sebenarnya (termasuk salah bacanya); berkas DSS 6 invoice menghasilkan potongan 177.102 dan dibayar Rp 41.719.136, sama dengan voucher 1702 owner. Uji nyata dengan AI: 6/6 halaman awal dan 6/6 DPP benar (±123 ribu token per berkas 32 halaman) | [x] | belum di-commit |
 ---
 
 ## Riwayat pembaruan
@@ -293,4 +312,4 @@ dan kompatibilitas migrasi di OS Windows.
 | 24 Okt 2026 | Hash `07b8c19` diisi untuk Tahap 15 |
 | 24 Okt 2026 | Tahap 16 ditambahkan dan selesai (T16.1–T16.8): penggabungan branch `feat/pisah-invoice-gabungan` ke `main` (tombol AI split on-demand di draf, proteksi serial Faktur Pajak `_is_tax_serial`, saran PPh 23 imbalan jasa dicocokkan PPN 11%/12%, pratinjau lokal file upload, label audit log, alembic Windows fix, 52/52 backend test lulus, frontend build lulus) |
 | 24 Okt 2026 | Tahap 17 ditambahkan dan selesai (T17.1–T17.7): perbaikan multi-invoice DSS (filter Faktur Pajak & format uraian transaksi), deteksi total gambar dengan desimal `,-`, serta implementasi toggle & tombol cepat "Atur pajak secara otomatis" di Upload dan Editor Draf |
-
+| 24 Okt 2026 | Tahap 18 ditambahkan dan selesai (T18.1–T18.5): DPP PPh 23 dari imbalan jasa yang dicocokkan dengan PPN, halaman awal invoice diperiksa per halaman. BRD/PRD/SOP perlu mencatat batasan DPP PPh 23 ini (T8.2–T8.4) |

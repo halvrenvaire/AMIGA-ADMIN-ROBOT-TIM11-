@@ -12,13 +12,14 @@ import io
 import logging
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from pypdf import PdfReader, PdfWriter
 
 from app.config import settings
 from app.models import Document, DocumentFile
 from app.services import storage
-from app.services.extraction_service import ExtractedInvoice
+from app.services.extraction_service import ExtractedInvoice, fee_from_amounts
 from app.services.verification import normalize
 
 log = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ def scan(extractor, pdf: bytes, include_account: bool, usage: dict) -> tuple[lis
     found: list[ExtractedInvoice] = []
     seen: set = set()
     general = None
+    chunks: list[tuple[int, int]] = []  # potongan halaman yang memuat tagihan
     for first in range(1, limit + 1, step):
         last = min(first + step - 1, limit)
         chunk = pdf if (first, last) == (1, total_pages) else cut_pages(pdf, first, last)
@@ -72,6 +74,8 @@ def scan(extractor, pdf: bytes, include_account: bool, usage: dict) -> tuple[lis
             usage[k] = usage.get(k, 0) + int((result.usage or {}).get(k) or 0)
         if general is None:
             general = result.document
+        if result.invoices:
+            chunks.append((first, last))
         for inv in result.invoices:
             key = normalize(inv.invoice_no) or (inv.page, inv.total, normalize(inv.vendor_name))
             if key in seen:
@@ -80,8 +84,83 @@ def scan(extractor, pdf: bytes, include_account: bool, usage: dict) -> tuple[lis
             found.append(inv)
         if first == 1 and not found:
             break
+    confirm_front_pages(extractor, pdf, found, chunks, usage)
     found.sort(key=lambda inv: inv.page or 1)
     return found, general or ExtractedInvoice()
+
+
+def confirm_front_pages(extractor, pdf: bytes, found: list[ExtractedInvoice], chunks: list[tuple[int, int]],
+                        usage: dict) -> None:
+    """Periksa per halaman: halaman depan tiap invoice dan blok ringkasan jumlahnya.
+
+    Pemindaian per potongan halaman sering menyebut halaman awal potongan, bukan halaman invoice sebenarnya (berkas
+    DSS: invoice di halaman 5, 9, 13, 20 terbaca 3, 6, 11, 16), sehingga rentang halaman bukti salah. Bila ada beberapa
+    invoice, setiap halaman di potongan yang memuat invoice diperiksa sendiri (paralel) dan halaman awal dicocokkan dari
+    nomor invoicenya. Satu invoice: hanya halaman depannya, dan hanya bila AI melihat pemisahan imbalan jasa.
+    Blok ringkasan dipakai untuk dasar potongan PPh 23 (fee_from_amounts). Gagal baca = hasil pindai tetap dipakai."""
+    reader = getattr(extractor, "read_front_page", None)
+    if reader is None or not found:
+        return
+    if len(found) > 1:
+        pages = sorted({p for first, last in chunks for p in range(first, last + 1)})
+    elif found[0].raw.get("service_fee") or found[0].service_fee is not None:
+        pages = [found[0].page or 1]
+    else:
+        return
+    page_usage = [dict() for _ in pages]
+
+    def check(i: int):
+        try:
+            return reader(cut_pages(pdf, pages[i], pages[i]), page_usage[i])
+        except Exception as e:  # noqa: BLE001 - halaman ini memakai hasil pindai
+            log.warning("Halaman %d gagal diperiksa: %s", pages[i], e)
+            return None
+
+    with ThreadPoolExecutor(max_workers=max(1, settings.ai_split_workers)) as pool:
+        infos = list(pool.map(check, range(len(pages))))
+    for u in page_usage:
+        for k in ("input_tokens", "output_tokens"):
+            usage[k] = usage.get(k, 0) + int(u.get(k) or 0)
+    fronts = [(p, info) for p, info in zip(pages, infos) if info is not None and info.starts_invoice]
+    for inv in found:
+        if len(found) == 1:
+            match = next(iter(fronts), None)
+        else:
+            match = next(((p, info) for p, info in fronts
+                          if normalize(info.invoice_no) and normalize(info.invoice_no) == normalize(inv.invoice_no)), None)
+        if match is None:
+            continue
+        page, info = match
+        inv.page = page
+        apply_fee_reading(inv, info.amounts)
+        if inv.service_fee is None and inv.service_fee_unverified is not None:
+            # Angka tidak saling cocok: baca ulang halaman depan itu sekali (AI kadang salah baca satu angka)
+            again = check_page(reader, pdf, page, usage)
+            if again is not None and again.starts_invoice:
+                apply_fee_reading(inv, again.amounts)
+
+
+def check_page(reader, pdf: bytes, page: int, usage: dict):
+    try:
+        return reader(cut_pages(pdf, page, page), usage)
+    except Exception as e:  # noqa: BLE001 - hasil sebelumnya tetap dipakai
+        log.warning("Halaman %d gagal dibaca ulang: %s", page, e)
+        return None
+
+
+def apply_fee_reading(inv: ExtractedInvoice, amounts: list) -> None:
+    """Dasar potongan PPh 23 dari blok ringkasan halaman depan. Hanya untuk invoice yang memisahkan imbalan jasa dari
+    penggantian biaya; imbalan yang tidak cocok dengan PPN tercetak tidak dipakai (PIC mengisi DPP sendiri)."""
+    reading = fee_from_amounts(amounts)
+    if not reading.split:
+        return
+    inv.raw = {**(inv.raw or {}), "summary_amounts": amounts}
+    if reading.fee is not None:
+        inv.service_fee, inv.service_fee_unverified = reading.fee, None
+        inv.vat_printed = reading.vat or inv.vat_printed
+    else:
+        inv.service_fee = None
+        inv.service_fee_unverified = reading.unverified or inv.service_fee_unverified
 
 
 def plan(invoices: list[ExtractedInvoice], total_pages: int) -> list[tuple[ExtractedInvoice, int, int]]:

@@ -8,7 +8,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from itertools import combinations
 
 from app.config import settings
@@ -140,6 +140,18 @@ Faktur Pajak (judul "Faktur Pajak", ada "Kode dan Nomor Seri Faktur Pajak", "Pen
 Kena Pajak/Penerima Jasa Kena Pajak") BUKAN lembar utama invoice = false, dan nomor serinya (16-17 digit) bukan nomor invoice.
 "invoice_no": nomor invoice yang tertulis di halaman ini persis seperti aslinya (mis. dari "Invoice No" / "No. Tagihan"),
 atau null bila halaman ini bukan lembar utama invoice."""
+
+# Halaman depan + blok ringkasan jumlahnya. Dipakai untuk memastikan halaman awal tiap invoice di berkas gabungan dan
+# mengambil dasar potongan PPh 23 dari angka tercetak. Pembacaan nyata (berkas DSS): pemindaian per 5 halaman sering
+# salah menyebut halaman awal dan menyalin LABEL sebagai angka imbalan jasa; pembacaan satu halaman jauh lebih akurat.
+FRONT_PAGE_INSTRUCTION = PAGE_INSTRUCTION.replace(
+    '{"starts_invoice": true|false, "invoice_no": string|null}',
+    '{"starts_invoice": true|false, "invoice_no": string|null, "amounts": [{"label": string, "amount": string}]}') + """
+"amounts": HANYA bila starts_invoice true: SETIAP baris berangka di blok ringkasan jumlah tagihan (mis. di bawah
+"Detail" sampai "Total Invoice"), berurutan dari atas ke bawah, termasuk baris bernilai 0, "Sub total", PPN/VAT, materai,
+dan total akhir. "label" disalin persis; "amount" adalah ANGKA di kolom kanan baris itu, disalin persis
+(mis. "2,304,696.00"). Jangan menyalin label sebagai amount. Bila starts_invoice false, isi []."""
+FRONT_PAGE_MAX_TOKENS = 700
 
 TOTAL_ACCOUNT_FIELDS = """,
   "bank_name": string|null,
@@ -532,8 +544,74 @@ def fee_matches_vat(fee: Decimal, vat: Decimal, tolerance: Decimal = Decimal(100
     return any(abs(fee * rate / 100 - vat) <= tolerance for rate in (Decimal(11), Decimal(12)))
 
 
+AMOUNT_TEXT = re.compile(r"\s*(rp\.?\s*)?-?[\d.,\s]+(,-+|\.-+|-+)?\s*", re.IGNORECASE)
+
+
+VAT_LABEL = re.compile(r"\b(vat|ppn)\b", re.IGNORECASE)
+EXACT = Decimal(1)  # selisih pembulatan PPN (Rp) saat mencocokkan angka tercetak satu sama lain
+
+
+@dataclass
+class FeeReading:
+    """Dasar potongan PPh 23 dari blok ringkasan invoice yang memisahkan imbalan jasa dari penggantian biaya."""
+    split: bool = False  # invoice memuat komponen penggantian biaya (gaji, BPJS, lembur) di samping imbalan jasa
+    fee: Decimal | None = None  # imbalan jasa yang cocok dengan PPN tercetak
+    vat: Decimal | None = None
+    unverified: Decimal | None = None  # imbalan jasa menurut label, tetapi tidak cocok dengan PPN
+
+
+def fee_from_amounts(rows) -> FeeReading:
+    """Imbalan jasa dari baris ringkasan yang disalin AI (label + angka).
+
+    Batasan (invoice DSS, voucher 1702): PPh 23 dipotong dari imbalan jasa milik vendor, yaitu bagian tagihan yang
+    dikenai PPN (mis. "Management Fee & Development"). Penggantian biaya yang diteruskan (Basic Fee, BPJS, Overtime
+    driver) tidak dikenai PPN dan bukan dasar PPh 23. Karena itu imbalan jasa harus cocok dengan PPN tercetak:
+    imbalan x 11% = PPN, atau DPP nilai lain x 12% = PPN dengan imbalan = DPP x 12/11 (PPN 12% sejak 2025).
+    AI kadang menggeser angka satu baris, jadi pencocokan memakai semua angka di blok itu, bukan hanya labelnya."""
+    if not isinstance(rows, list):
+        return FeeReading()
+    labelled, values, vat, split = Decimal(0), [], None, False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        label, value = str(row.get("label") or ""), _positive(row.get("amount"))
+        if PASS_THROUGH_LABEL.search(label) and not SERVICE_FEE_LABEL.search(label):
+            split = True
+        elif SERVICE_FEE_LABEL.search(label) and value is not None:
+            labelled += value
+        if value is not None:
+            values.append(value)
+            if VAT_LABEL.search(label) and vat is None:
+                vat = value
+    if not split:
+        return FeeReading()
+    candidates: set[Decimal] = set()
+    for a in values:
+        for v in values:
+            if v >= a:
+                continue
+            if abs(a * 11 / 100 - v) <= EXACT:
+                candidates.add(a)
+            elif abs(a * 12 / 100 - v) <= EXACT:
+                candidates.add((a * 12 / 11).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    labelled = labelled or None
+    if labelled is not None and (any(abs(labelled - c) <= EXACT for c in candidates)
+                                 or any(abs(labelled * 11 / 12 - v) <= EXACT for v in values)):
+        # Cocok dengan PPN, atau dengan "Sub total terkena PPN" (DPP nilai lain = imbalan x 11/12)
+        fee = labelled
+    elif len(candidates) == 1:
+        fee = next(iter(candidates))
+    else:
+        return FeeReading(split=True, vat=vat, unverified=labelled)
+    matched = next((v for v in values if abs(fee * 11 / 100 - v) <= EXACT), vat)
+    return FeeReading(split=True, fee=fee, vat=matched)
+
+
 def _positive(value) -> Decimal | None:
-    """Angka yang disalin AI; nol, negatif, atau tidak terbaca dianggap tidak ada."""
+    """Angka yang disalin AI; nol, negatif, atau tidak terbaca dianggap tidak ada. Teks yang bukan angka (mis. AI
+    menyalin label "Management Fee ... DD00003") ditolak, supaya angka di dalam label tidak terbaca sebagai nilai."""
+    if isinstance(value, str) and not AMOUNT_TEXT.fullmatch(value):
+        return None
     number = to_decimal(value)
     return number if number is not None and number > 0 else None
 
@@ -662,6 +740,21 @@ class InvoiceExtractor:
             return PageInfo()
         starts = data.get("starts_invoice")
         return PageInfo(starts is True or str(starts).strip().lower() == "true", to_text(data.get("invoice_no")))
+
+    def read_front_page(self, page_pdf: bytes, usage: dict) -> PageInfo:
+        """Seperti read_page, ditambah baris blok ringkasan jumlah bila halaman ini lembar depan invoice."""
+        text = self._read(PAGE_SYSTEM_PROMPT, page_pdf, FRONT_PAGE_INSTRUCTION, FRONT_PAGE_MAX_TOKENS, usage)
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        try:
+            data = json.loads(match.group(0)) if match else {}
+        except json.JSONDecodeError:
+            data = {}
+        if not isinstance(data, dict):
+            return PageInfo()
+        starts = data.get("starts_invoice")
+        starts = starts is True or str(starts).strip().lower() == "true"
+        amounts = data.get("amounts") if starts and isinstance(data.get("amounts"), list) else []
+        return PageInfo(starts, to_text(data.get("invoice_no")), amounts)
 
     def locate_invoices(self, pdf_bytes: bytes) -> tuple[list[Segment], dict]:
         """Bagian-bagian invoice dalam berkas gabungan, dan token AI yang terpakai. Daftar kosong = satu invoice.
