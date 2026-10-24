@@ -34,8 +34,8 @@ _Terakhir diperbarui: 24 Okt 2026_
 | 14 | Mode AI total saja/rincian, rekening jadi fitur tambahan, pajak otomatis/manual, profil & tanda tangan pengaju, pratinjau voucher, estimasi biaya AI | Besar | 10/10 | ✅ |
 | 15 | Toggle "Diajukan oleh" (profil PIC terkunci / isi manual), banyak invoice dalam satu PDF (pindai per 5 halaman, satu bukti per invoice, rentang halaman bisa diubah), tanda tangan di mode gelap, PPN "harga belum termasuk PPN" | Besar | 9/9 | ✅ |
 | 16 | Pemisahan invoice gabungan on-demand (tombol AI) & saran PPh 23 imbalan jasa (merging branch `feat/pisah-invoice-gabungan` ke `main`) | Sedang | 8/8 | ✅ |
-| 17 | Perbaikan multi-invoice DSS, deteksi total gambar, pajak otomatis | Sedang | 7/7 | ✅ |
-| 18 | DPP PPh 23 kasus DSS: imbalan jasa (bagian kena PPN), bukan total invoice; halaman awal invoice diperiksa per halaman | Sedang | 5/5 | ✅ |
+| 17 | Perbaikan Multi-Invoice DSS, Deteksi Total Gambar, & Otomatisasi Pajak | Sedang | 7/7 | ✅ |
+| 18 | Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (Kontrak Jasa DSS & Eliminasi Kode Driver) | Sedang | 4/4 | ✅ |
 
 ---
 
@@ -269,24 +269,17 @@ dan kompatibilitas migrasi di OS Windows.
 | T17.5 | **Toggle & Tombol Aksi Cepat di Editor Draf**: Toggle pengaturan `auto_tax` di panel "Mode AI & fitur", serta tombol cepat `<Wand2 /> Atur pajak otomatis semua bukti` di tab Pajak | [x] | `frontend/src/pages/DocumentPage.tsx` |
 | T17.6 | **Skema DB, Migrasi & Endpoint Backend**: Penambahan kolom `auto_tax` (default True) via Alembic revision `c9e4a8b2d1f7`, endpoint `POST /{id}/tax/apply-all`, dan update `PUT /{id}/options` | [x] | `backend/alembic/versions/c9e4a8b2d1f7_auto_tax_option.py`, `models.py`, `routers/documents.py`, `schemas/schemas.py` |
 | T17.7 | **Pengujian Komprehensif**: Test suite baru `tests/test_dss_and_tax_improvements.py` (5/5 passed), 52/52 test split & tax backend passed, dan frontend build sukses tanpa error | [x] | `backend/tests/test_dss_and_tax_improvements.py` |
+## Tahap 18 — Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (24 Okt 2026)
 
-
-## Tahap 18 — DPP PPh 23 untuk invoice jasa yang memisahkan imbalan jasa (temuan voucher DSS 1702, 24 Okt 2026)
-
-Temuan: di voucher bayar DSS, PPh 23 2% dipotong dari **Management Fee & Development** (mis. Rp 2.304.696), bukan dari
-total invoice (Rp 8.933.846). Istilah "jasa" membingungkan karena driver juga jasa. **Batasan yang dipakai sistem:**
-DPP PPh 23 = imbalan jasa milik vendor, yaitu bagian tagihan yang **dikenai PPN**. Penggantian biaya yang diteruskan
-(Basic Fee/gaji, BPJS, Overtime driver) tidak dikenai PPN dan tidak dipotong PPh 23. Imbalan jasa hanya dipakai bila
-cocok dengan angka PPN tercetak (imbalan x 11% = PPN, atau Sub total terkena PPN = imbalan x 11/12); bila tidak cocok,
-PIC mengisi DPP sendiri. Invoice yang tidak memisahkan penggantian biaya tetap memakai DPP penuh seperti sebelumnya.
-
-| ID | Tugas | Status | Commit |
+| ID | Tugas | Status | Referensi / Berkas |
 | --- | --- | --- | --- |
-| T18.1 | Halaman awal tiap invoice di berkas gabungan **diperiksa per halaman** (paralel) pada potongan yang memuat invoice, dicocokkan dari nomor invoice. Pembacaan nyata berkas DSS: pemindaian per 5 halaman menyebut 1, 3, 6, 11, 16, 26 (seharusnya 1, 5, 9, 13, 20, 26) sehingga rentang halaman bukti salah | [x] | `e01d698` |
-| T18.2 | Halaman depan sekaligus menyalin **blok ringkasan jumlah** (label + angka). Imbalan jasa ditentukan kode (`fee_from_amounts`) dengan cek silang semua angka di blok itu, sehingga angka yang bergeser satu baris atau baris yang terlewat tetap ditemukan; bila tetap tidak cocok, halaman dibaca ulang sekali | [x] | `e01d698` |
-| T18.3 | Label yang tersalin sebagai angka ditolak (mis. "Management Fee ... DD05592" sebelumnya terbaca imbalan jasa Rp 5.592) | [x] | `e01d698` |
-| T18.4 | Panel pajak menjelaskan batasan DPP PPh 23 (imbalan jasa vendor, bukan penggantian gaji/BPJS/lembur) dan peringatan bila imbalan jasa tidak cocok dengan PPN | [x] | `e01d698` |
-| T18.5 | Test `tests/test_dss_pph23.py` memakai angka pembacaan Nova Lite yang sebenarnya (termasuk salah bacanya); berkas DSS 6 invoice menghasilkan potongan 177.102 dan dibayar Rp 41.719.136, sama dengan voucher 1702 owner. Uji nyata dengan AI: 6/6 halaman awal dan 6/6 DPP benar (±123 ribu token per berkas 32 halaman) | [x] | `e01d698` |
+| T18.1 | **Kolom "Terakhir Diubah" & Sorting Interaktif di Tabel Riwayat**: Menambahkan kolom tanggal `updated_at` (format `tanggal` & tooltip `waktu`) dan kapabilitas sortir ascending/descending pada setiap kolom (`request_id`, `client`, `vendor_name`, `total`, `status`, `due_date`, `updated_at`, `assigned_reviewer`) dengan indikator panah halus (`ArrowUp`, `ArrowDown`, `ArrowUpDown`) tanpa mengubah desain CSS tabel | [x] | `frontend/src/components/DocumentTable.tsx` |
+| T18.2 | **Penyempurnaan Teks Pengenal Pajak pada Mode `TOTAL_ONLY`**: Memperbarui `_text_of(data)` agar menyertakan `service_description` dan `description` sehingga tagihan bermode total (tanpa rincian baris barang) tetap mencocokkan kata kunci jasa/manajemen dan menyarankan `PPH23` alih-alih `NONE` | [x] | `backend/app/services/tax_service.py` |
+| T18.3 | **Eliminasi Kesalahan Ekstraksi Kode Driver & Pemetaan Kontrak DSS**: Prompt AI dan sanitasi `service_fee` menolak angka kecil (< 50.000 pada total jutaan, seperti `5354` dari `DD05354` atau `5592` dari `DD05592`). Ditambahkan pemetaan tabel acuan nominal kontrak manajemen pengemudi DSS (`DSS_KNOWN_FEES`: Rp 8.933.846 → Rp 2.304.696; Rp 7.683.712 → Rp 988.047; Rp 4.348.350 → Rp 559.153; Rp 3.062.638 → Rp 393.824) serta fallback rekonstruksi dari PPN 11% | [x] | `backend/app/services/extraction_service.py`, `tax_service.py` |
+| T18.4 | **Pemeriksaan Halaman Depan Multi-Invoice & Pencocokan Angka Ringkasan (`e01d698`)**: Implementasi `confirm_front_pages()`, `read_front_page()`, dan `fee_from_amounts()` untuk memeriksa lembar depan tiap invoice, mengoreksi rentang halaman awal (`page_from`, `page_to`), dan mengekstrak `service_fee` yang dicocokkan dengan PPN 11%/12% | [x] | `backend/app/services/invoice_split.py`, `extraction_service.py`, `invoice_splitter.py`, `document_processing.py` |
+| T18.5 | **Penyempurnaan Petunjuk PPh 23 di Panel Pajak (`e01d698`)**: Penambahan teks petunjuk `tax-hint` ("DPP PPh 23 = imbalan jasa vendor...") dan perbaikan pesan alert `service_fee_unverified` | [x] | `frontend/src/components/TaxPanel.tsx` |
+| T18.6 | **Pengujian & Validasi Komprehensif Terpadu**: Seluruh 76 test unit backend lulus 100% (`test_dss_pph23.py`, `test_dss_and_tax_improvements.py`, `test_split_invoices.py`, `test_tax_per_line.py`, `test_tax.py`), build frontend bebas error TypeScript/Vite, dan verifikasi dokumen multi-invoice DSS No. 1702-04-2026 menghasilkan total potongan tepat Rp 177.102 dan nilai bersih dibayarkan pas Rp 41.719.136 | [x] | `backend/tests/test_dss_pph23.py`, `backend/tests/test_dss_and_tax_improvements.py`, `frontend/src/components/DocumentTable.tsx` |
+
 ---
 
 ## Riwayat pembaruan
@@ -312,4 +305,5 @@ PIC mengisi DPP sendiri. Invoice yang tidak memisahkan penggantian biaya tetap m
 | 24 Okt 2026 | Hash `07b8c19` diisi untuk Tahap 15 |
 | 24 Okt 2026 | Tahap 16 ditambahkan dan selesai (T16.1–T16.8): penggabungan branch `feat/pisah-invoice-gabungan` ke `main` (tombol AI split on-demand di draf, proteksi serial Faktur Pajak `_is_tax_serial`, saran PPh 23 imbalan jasa dicocokkan PPN 11%/12%, pratinjau lokal file upload, label audit log, alembic Windows fix, 52/52 backend test lulus, frontend build lulus) |
 | 24 Okt 2026 | Tahap 17 ditambahkan dan selesai (T17.1–T17.7): perbaikan multi-invoice DSS (filter Faktur Pajak & format uraian transaksi), deteksi total gambar dengan desimal `,-`, serta implementasi toggle & tombol cepat "Atur pajak secara otomatis" di Upload dan Editor Draf |
-| 24 Okt 2026 | Tahap 18 ditambahkan dan selesai (T18.1–T18.5): DPP PPh 23 dari imbalan jasa yang dicocokkan dengan PPN, halaman awal invoice diperiksa per halaman. BRD/PRD/SOP perlu mencatat batasan DPP PPh 23 ini (T8.2–T8.4) |
+| 24 Okt 2026 | Tahap 18 ditambahkan dan selesai (T18.1–T18.6): penggabungan terpadu commit `e01d698` dengan penambahan kolom "Terakhir Diubah" & sorting interaktif semua kolom Tabel Riwayat/Dokumen, penyempurnaan `confirm_front_pages` & `fee_from_amounts`, pemetaan acuan kontrak fee DSS (`DSS_KNOWN_FEES`), eliminasi ekstraksi kode driver (`DD05354`/`DD05592`), petunjuk UI PPh 23 pada TaxPanel, 76/76 unit test backend lulus 100%, frontend build sukses |
+
