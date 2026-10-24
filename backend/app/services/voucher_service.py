@@ -206,8 +206,9 @@ def _qty(value: Decimal) -> str:
 
 
 def _cut_text(tax: dict, name: str, rate, base, what: str) -> str:
-    npwp = "" if tax.get("npwp") else " (tanpa NPWP)"
-    return f"Potongan {name} {_qty(Decimal(str(rate)))}%{npwp} x DPP {_money(_dec(base))} ({what})"
+    """Format contoh owner (voucher DSS 1702): "Potongan PPh 23 (Rp 2.304.696 x 2%) <yang dipotong>"."""
+    npwp = " tanpa NPWP" if not tax.get("npwp") else ""
+    return f"Potongan {name} ({_money(_dec(base))} x {_qty(Decimal(str(rate)))}%{npwp}) {what}"
 
 
 def voucher_rows(doc) -> tuple[list[tuple[str, Decimal, bool]], Decimal]:

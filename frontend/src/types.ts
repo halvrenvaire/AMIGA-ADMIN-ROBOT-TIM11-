@@ -117,7 +117,8 @@ export interface FileData {
   /** Saran PPh tiap baris (aturan kata kunci, atau AI bila diminta PIC); null untuk baris PPN. */
   line_suggestions?: (LineSuggestion | null)[];
   /** `base`: dasar potongan yang disarankan (imbalan jasa saja) bila invoice memisahkan fee dari penggantian biaya. */
-  tax_suggestion?: { code: string; name: string; reason: string; source: "ai" | "aturan"; base?: string } | null;
+  tax_suggestion?: { code: string; name: string; reason: string; source: "ai" | "aturan"; base?: string;
+    vat?: { mode: "included" | "excluded" | "none"; rate: string; amount: string; reason: string } } | null;
   /** Disalin AI dari invoice: imbalan jasa penerbit (mis. Management Fee) dan PPN yang tercetak. */
   service_fee?: string | null;
   /** Imbalan jasa yang dibaca AI tetapi tidak cocok dengan PPN tercetak, sehingga tidak dipakai. */

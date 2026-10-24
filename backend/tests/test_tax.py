@@ -119,7 +119,7 @@ def test_voucher_shows_deduction_and_pays_net(extractor):
     text = pdf_text(api(PIC).get(f"/documents/{doc['id']}/voucher").content)
     # Potongan menjadi baris bernomor tepat di bawah barangnya (feedback owner 20 Okt 2026)
     assert re.search(r"1 Jasa konsultan pajak Oktober \(1 x Rp ?900\.000\) Rp ?900\.000 "
-                     r"2 Potongan PPh 23 2% x DPP Rp ?900\.000 \(Jasa konsultan pajak Oktober\) \(Rp ?18\.000\)", text)
+                     r"2 Potongan PPh 23 \(Rp ?900\.000 x 2%\) Jasa konsultan pajak Oktober \(Rp ?18\.000\)", text)
     assert re.search(r"TOTAL DIBAYARKAN Rp ?882\.000", text)
     row = next(r for r in api(PIC).get("/vouchers").json() if r["document_id"] == doc["id"])
     assert (Decimal(row["total"]), Decimal(row["gross"]), Decimal(row["tax_total"])) == (882000, 900000, 18000)
@@ -201,7 +201,7 @@ def test_owner_example_ppn_not_printed_and_pph23_from_value_before_ppn(extractor
     text = pdf_text(api(PIC).get(f"/documents/{doc_id}/voucher").content)
     # PPN dilebur ke nilai barang; potongan PPh baris bernomor di bawahnya; jumlah baris = total dibayarkan
     assert re.search(r"1 COFFEE PRECIOUS CARGO 1 KG \(3 x Rp ?285\.000, termasuk PPN\) Rp ?949\.050 "
-                     r"2 Potongan PPh 23 2% x DPP Rp ?855\.000 \(COFFEE PRECIOUS CARGO 1 KG\) \(Rp ?17\.100\)", text)
+                     r"2 Potongan PPh 23 \(Rp ?855\.000 x 2%\) COFFEE PRECIOUS CARGO 1 KG \(Rp ?17\.100\)", text)
     assert "94.050" not in text  # PPN tidak tampil sebagai baris sendiri
     assert re.search(r"TOTAL DIBAYARKAN Rp ?931\.950", text)
 
@@ -225,7 +225,7 @@ def test_ppn_split_proportionally_over_items_and_rows_sum_to_paid():
         "tax": {"code": "PPH23", "name": "PPh 23", "rate": "2", "npwp": True, "base": "1000000", "amount": "20000"}}
     rows, paid = voucher_rows(N(files=[N(data=data)], extraction=None))
     assert [(round(a), cut) for _, a, cut in rows] == [(666000, False), (444000, False), (20000, True)]
-    assert rows[2][0].endswith("(INV-9)")  # beberapa barang: potongan menyebut nomor invoice
+    assert rows[2][0].endswith(") INV-9")  # beberapa barang: potongan menyebut nomor invoice
     assert paid == Decimal(1090000)
 
 

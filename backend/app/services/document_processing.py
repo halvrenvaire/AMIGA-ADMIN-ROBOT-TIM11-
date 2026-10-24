@@ -195,12 +195,16 @@ def prefill_tax(db, doc: Document, bedrock, only: set | None = None, force_apply
         suggestion = {"code": rate.code, "name": rate.name, "reason": sug.reason, "source": sug.source}
         if sug.base is not None:
             suggestion["base"] = str(sug.base)  # dasar potongan: imbalan jasa saja (bukan seluruh tagihan)
+        vat_sug = tax_service.suggest_vat(data)
+        if vat_sug is not None:
+            suggestion["vat"] = vat_sug  # PPN tercetak: total sudah termasuk PPN
         new_data = {**data, "npwp_known": known, "tax_suggestion": suggestion}
         if should_apply and (force_apply or "tax" not in data):
             npwp_val = True if known is not False else False
             base_val = Decimal(str(sug.base)) if sug.base is not None else None
+            vat_val = {k: vat_sug[k] for k in ("mode", "rate")} if vat_sug is not None else None
             tax_dict = tax_service.build(rate, npwp_val, base=base_val, base_auto=(base_val is None),
-                                         data=data, source="auto", table=table)
+                                         data=data, source="auto", table=table, vat=vat_val)
             new_data["tax"] = tax_dict
         f.data = new_data
 

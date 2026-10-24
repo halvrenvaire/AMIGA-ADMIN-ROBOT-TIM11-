@@ -138,7 +138,16 @@ def test_dss_file_pages_and_pph23_base_follow_the_owner_voucher(tx):
         tax = data["tax"]  # pajak otomatis: PPh 23 2% dari imbalan jasa
         assert tax["code"] == "PPH23" and Decimal(tax["base"]) == Decimal(fee)
         assert Decimal(tax["amount"]) == (Decimal(fee) * 2 / 100).quantize(Decimal(1))
+        # Saran PPN otomatis: PPN tercetak berarti total sudah termasuk PPN; nilainya angka tercetak, bukan 11% x total
+        assert tax["vat"]["mode"] == "included"
+        assert data["tax_suggestion"]["vat"]["amount"] == vat and "tercetak" in data["tax_suggestion"]["vat"]["reason"]
     summary = doc["tax_summary"]
+    assert [Decimal(v["amount"]) for v in summary["vat"]] == [Decimal(v) for *_, v in DSS]
+    text = " ".join(PdfReader(io.BytesIO(api(PIC).get(f"/documents/{doc['id']}/voucher-preview",
+                                                       params={"attachments": False}).content)).pages[0]
+                    .extract_text().split())
+    assert "Potongan PPh 23 (Rp 2.304.696 x 2%) 005-PI-2604-00322 (Rp 46.094)" in text
+    assert "(termasuk PPN) Rp 8.933.846" in text
     # Voucher 1702 owner: total invoice 41.896.238, potongan PPh 23 177.102, dibayar 41.719.136
     assert Decimal(summary["gross"]) == Decimal("41896238")
     assert Decimal(summary["tax_total"]) == Decimal("177102")
