@@ -223,6 +223,23 @@ def line_dpp(li: dict, vat: dict) -> Decimal:
     return sub
 
 
+def printed_vat(data: dict) -> Decimal | None:
+    """PPN yang tercetak di invoice (disalin AI), bila ada."""
+    value = _dec(data.get("vat_printed"))
+    return value if value is not None and value > 0 else None
+
+
+def suggest_vat(data: dict) -> dict | None:
+    """Saran PPN dari pembacaan invoice (mode total saja): PPN tercetak berarti total invoice sudah termasuk PPN.
+    Nilai PPN memakai angka tercetak, bukan tarif x total: pada invoice jasa seperti DSS, PPN hanya dikenakan atas
+    imbalan jasa sehingga tarif x total akan salah."""
+    vat = printed_vat(data)
+    if vat is None or item_lines(data):
+        return None
+    return {"mode": "included", "rate": _num(DEFAULT_VAT_RATE), "amount": _num(vat),
+            "reason": f"PPN {_money(vat)} tercetak di invoice dan sudah termasuk dalam total tagihan"}
+
+
 def default_base(data: dict, vat: dict | None = None) -> Decimal | None:
     """DPP awal: jumlah DPP rincian tanpa baris PPN; bila tidak ada rincian, total invoice."""
     vat = vat or vat_settings(data.get("tax"), data)
@@ -231,6 +248,8 @@ def default_base(data: dict, vat: dict | None = None) -> Decimal | None:
     if base > 0:
         return base
     total = Decimal(str(data["total"])) if data.get("total") not in (None, "") else None
+    if not item_lines(data) and vat["mode"] == "included" and total is not None and printed_vat(data) is not None:
+        return total - printed_vat(data)  # DPP = total - PPN tercetak
     return total_dpp(total, vat) if not item_lines(data) else total
 
 
@@ -260,7 +279,9 @@ def vat_breakdown(data: dict, vat: dict | None = None) -> dict:
                        f"PPN dan baris yang kena PPN.").replace(",", ".")
     elif not items and total is not None and vat["mode"] != "none":
         # Tanpa rincian (mode total saja): PPN = total - DPP
-        amount = computed = total - total_dpp(total, vat)
+        # Harga sudah termasuk PPN: PPN tercetak di invoice bila ada, selain itu total - DPP hitungan tarif
+        printed = printed_vat(data) if vat["mode"] == "included" else None
+        amount = computed = printed if printed is not None else total - total_dpp(total, vat)
     elif vat["mode"] == "included":
         computed = sum(((_dec(li.get("subtotal")) or Decimal(0)) - line_dpp(li, vat) for li in taxed), Decimal(0))
         amount = computed

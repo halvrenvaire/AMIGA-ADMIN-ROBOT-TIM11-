@@ -115,9 +115,9 @@ def test_multi_select_lines_and_several_pph_types(extractor):
         ("PPH23", "800000", "16000"), ("PPH4_2", "1000000", "100000")]
     text = voucher_text(doc_id)
     # Potongan per jenis tepat di bawah barang terakhir yang dipotong jenis itu
-    assert re.search(r"3 Jasa servis berkala .*? 4 Potongan PPh 23 2% x DPP Rp ?800\.000 "
-                     r"\(Jasa pemasangan AC, Jasa servis berkala\) \(Rp ?16\.000\) 5 Sewa ruang gudang", text)
-    assert re.search(r"6 Potongan PPh 4 ayat 2 \(final\) 10% x DPP Rp ?1\.000\.000 \(Sewa ruang gudang\)", text)
+    assert re.search(r"3 Jasa servis berkala .*? 4 Potongan PPh 23 \(Rp ?800\.000 x 2%\) "
+                     r"Jasa pemasangan AC, Jasa servis berkala \(Rp ?16\.000\) 5 Sewa ruang gudang", text)
+    assert re.search(r"6 Potongan PPh 4 ayat 2 \(final\) \(Rp ?1\.000\.000 x 10%\) Sewa ruang gudang", text)
     assert re.search(r"TOTAL DIBAYARKAN Rp ?3\.684\.000", text)
 
 
@@ -159,7 +159,7 @@ def test_default_voucher_merges_ppn_into_items(extractor):
     text = voucher_text(doc_id)
     assert re.search(r"1 AC Split 1 PK \(2 x Rp ?1\.000\.000, termasuk PPN\) Rp ?2\.220\.000", text)
     assert re.search(r"2 Jasa pemasangan AC \(1 x Rp ?500\.000, termasuk PPN\) Rp ?555\.000 "
-                     r"3 Potongan PPh 23 2% x DPP Rp ?500\.000 \(Jasa pemasangan AC\) \(Rp ?10\.000\)", text)
+                     r"3 Potongan PPh 23 \(Rp ?500\.000 x 2%\) Jasa pemasangan AC \(Rp ?10\.000\)", text)
     assert "275.000" not in text
     assert re.search(r"TOTAL DIBAYARKAN Rp ?2\.765\.000", text)
 

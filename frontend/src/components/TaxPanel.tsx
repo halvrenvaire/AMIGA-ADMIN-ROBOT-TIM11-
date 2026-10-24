@@ -48,7 +48,7 @@ const normalizeVatMode = (m: string | null | undefined): VatMode | null =>
 
 /** PPN dan hitungan sistem (sama dengan backend tax_service.vat_breakdown). `payable`: yang dibayar sebelum PPh bila
  *  PPN ditambahkan ke harga; tanpa `payable` = total invoice. */
-function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number):
+function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number, printed: number | null = null):
   { amount: number; computed: number; warning: string | null; payable?: number } {
   const items = lines.map((l, i) => ({ l, r: rows[i] })).filter(({ r }) => r && r.kind === "item");
   const itemSum = items.reduce((s, { l }) => s + (Number(l.subtotal) || 0), 0);
@@ -65,8 +65,9 @@ function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode,
     return { amount, computed: amount, warning, payable: (items.length ? itemSum : Number(total) || 0) + amount };
   }
   if (!items.length && vatMode !== "none" && total !== "") {
-    // Tanpa rincian, harga sudah termasuk PPN: total = DPP + PPN
-    const amount = Number(total) - totalDpp(Number(total), rate);
+    // Tanpa rincian, harga sudah termasuk PPN: total = DPP + PPN. PPN tercetak di invoice dipakai bila ada
+    // (invoice jasa seperti DSS: PPN hanya atas imbalan jasa, jadi tarif x total akan salah)
+    const amount = vatMode === "included" && printed != null ? printed : Number(total) - totalDpp(Number(total), rate);
     return { amount, computed: amount, warning: null as string | null };
   }
   if (vatMode === "included") {
@@ -114,7 +115,8 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   })), [file.data]);
   const initialVat = current?.vat;
   // Sama dengan backend: tanpa pengaturan, "belum termasuk PPN" bila ada baris PPN, selain itu "tidak ada"
-  const defaultVatMode: VatMode = saved.some(isVatLine) ? "excluded" : "none";
+  // Belum ada pilihan pajak: saran PPN dari pembacaan invoice (PPN tercetak = total sudah termasuk PPN)
+  const defaultVatMode: VatMode = saved.some(isVatLine) ? "excluded" : suggestion?.vat?.mode ?? "none";
   const [vatMode, setVatMode] = useState<VatMode>(normalizeVatMode(initialVat?.mode) ?? defaultVatMode);
   const [vatRate, setVatRate] = useState(initialVat ? plainNumber(initialVat.rate) : "11");
   const [vatShow, setVatShow] = useState(initialVat?.show ?? false);
@@ -142,14 +144,16 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const itemIdx = rows.map((r, i) => (r.kind === "item" ? i : -1)).filter((i) => i >= 0);
   const dpp = (i: number) => lineDpp(lines[i], rows[i], vatMode, vatPct);
   const dppTotal = itemIdx.reduce((s, i) => s + dpp(i), 0);
-  const vat = vatInfo(lines, rows, total, vatMode, vatPct);
+  const printedVat = file.data?.vat_printed ? Number(file.data.vat_printed) : null;
+  const vat = vatInfo(lines, rows, total, vatMode, vatPct, printedVat);
   const gross = total === "" ? null : Number(total);
   // Dibayarkan sebelum PPh: harga + PPN bila PPN ditambahkan, selain itu total invoice
   const payable = gross == null ? null : calc ? vat.payable ?? gross
     : vatMode === "excluded" ? gross + (Number(vatAmount) || 0) : gross;
 
   // Mode satu jenis: DPP otomatis = jumlah DPP baris barang/jasa; tanpa rincian = total dikurangi PPN di dalamnya
-  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode !== "included" ? gross : totalDpp(gross, vatPct);
+  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode !== "included" ? gross
+    : printedVat != null ? gross - printedVat : totalDpp(gross, vatPct);
   const invoiceBase = manual || !calc ? (base === "" ? null : Number(base)) : autoBase;
   const invoiceCut = !calc ? (code === "NONE" ? 0 : Number(cutAmount) || 0)
     : invoiceBase && rateOf(code) ? Math.round((invoiceBase * rateOf(code)) / 100) : 0;
@@ -342,6 +346,11 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           <p className="tax-hint">
             <span className="chip gray">{suggestion.source === "ai" ? "Saran AI" : "Saran sistem"}</span>{" "}
             <b>{suggestion.name}</b> · {suggestion.reason}. Keputusan tetap di Anda.
+          </p>
+        )}
+        {suggestion?.vat && (
+          <p className="tax-hint">
+            <span className="chip gray">Saran PPN</span> Harga sudah termasuk PPN · {suggestion.vat.reason}.
           </p>
         )}
         {mode === "invoice" && file.data?.service_fee_unverified && (

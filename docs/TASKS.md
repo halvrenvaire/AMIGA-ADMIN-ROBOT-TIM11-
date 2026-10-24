@@ -35,7 +35,8 @@ _Terakhir diperbarui: 24 Okt 2026_
 | 15 | Toggle "Diajukan oleh" (profil PIC terkunci / isi manual), banyak invoice dalam satu PDF (pindai per 5 halaman, satu bukti per invoice, rentang halaman bisa diubah), tanda tangan di mode gelap, PPN "harga belum termasuk PPN" | Besar | 9/9 | ✅ |
 | 16 | Pemisahan invoice gabungan on-demand (tombol AI) & saran PPh 23 imbalan jasa (merging branch `feat/pisah-invoice-gabungan` ke `main`) | Sedang | 8/8 | ✅ |
 | 17 | Perbaikan Multi-Invoice DSS, Deteksi Total Gambar, & Otomatisasi Pajak | Sedang | 7/7 | ✅ |
-| 18 | Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (Kontrak Jasa DSS & Eliminasi Kode Driver) | Sedang | 4/4 | ✅ |
+| 18 | Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (Kontrak Jasa DSS & Eliminasi Kode Driver) | Sedang | 7/7 | ✅ |
+| 19 | Feedback tim 24 Okt: saran PPN + PPh otomatis masuk voucher, langkah pajak di bot Telegram, tutorial di dalam aplikasi, dokumentasi | Besar | 1/4 | ⏳ |
 
 ---
 
@@ -289,6 +290,20 @@ penggantian biaya tetap memakai DPP penuh. **Tidak ada nilai fee yang dihafal at
 | T18.6 | **Pengujian & Validasi Komprehensif Terpadu**: Seluruh 76 test unit backend lulus 100% (`test_dss_pph23.py`, `test_dss_and_tax_improvements.py`, `test_split_invoices.py`, `test_tax_per_line.py`, `test_tax.py`), build frontend bebas error TypeScript/Vite, dan verifikasi dokumen multi-invoice DSS No. 1702-04-2026 menghasilkan total potongan tepat Rp 177.102 dan nilai bersih dibayarkan pas Rp 41.719.136 | [x] | `backend/tests/test_dss_pph23.py`, `backend/tests/test_dss_and_tax_improvements.py`, `frontend/src/components/DocumentTable.tsx` |
 | T18.7 | **Koreksi**: tabel `DSS_KNOWN_FEES` (imbalan jasa dihafal dari total invoice contoh) dan tebakan fee = PPN x 100/11 untuk invoice dengan PPN < 8% dari total **dicabut**. Tabel hafalan hanya cocok untuk 6 invoice contoh (invoice DSS bulan lain tidak terbaca, vendor lain berisi "dss" dengan total sama mendapat DPP palsu); tebakan rasio PPN membuat invoice PT yang hanya sebagian barangnya kena PPN ikut dipotong PPh 23. Kasus DSS tetap tepat lewat `fee_from_amounts` (test end-to-end: dibayar Rp 41.719.136). Tabel riwayat kembali memakai **urutan dari server** sampai judul kolom diklik (antrean tetap menurut tenggat). Import ganda di `invoice_split.py` dibersihkan. Test regresi di `tests/test_dss_pph23.py` | [x] | `3037f01` |
 
+
+## Tahap 19 — Feedback tim 24 Okt 2026 (pajak otomatis, bot Telegram, tutorial)
+
+Sumber: pesan tim (4 poin): (1) untuk kasus voucher DSS, AI menyarankan PPN dan PPh dan langsung terpasang dari
+pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditambah langkah penting, terutama pajak
+(saran AI), (3) tutorial di dalam aplikasi: tombol tanda tanya, langkah demi langkah dengan sorotan sesuai alur,
+(4) dokumentasi tutorial penggunaan diperbarui.
+
+| ID | Tugas | Status | Commit |
+| --- | --- | --- | --- |
+| T19.1 | **Saran PPN otomatis** dari PPN tercetak di invoice (mode total saja): pajak otomatis memasang "Harga sudah termasuk PPN" dengan nilai PPN **persis angka tercetak** (bukan 11% x total; PPN DSS hanya atas imbalan jasa), DPP otomatis = total - PPN tercetak. Saran PPN tampil di panel pajak. Baris potongan voucher memakai format contoh owner: `Potongan PPh 23 (Rp 2.304.696 x 2%) <invoice/barang>`. Test DSS: PPN 6 invoice sesuai angka tercetak, voucher dibayar Rp 41.719.136 | [x] | belum di-commit |
+| T19.2 | Bot Telegram: langkah penting ditambahkan, terutama pajak (saran AI per invoice, pilih/ubah, ringkasan potongan) | [ ] | |
+| T19.3 | Tutorial di dalam aplikasi: tombol **?** di topbar, langkah demi langkah yang menyorot bagian layar sesuai halaman | [ ] | |
+| T19.4 | Perbarui dokumentasi tutorial penggunaan (SOP dan buku panduan) | [ ] | |
 ---
 
 ## Riwayat pembaruan
@@ -316,3 +331,4 @@ penggantian biaya tetap memakai DPP penuh. **Tidak ada nilai fee yang dihafal at
 | 24 Okt 2026 | Tahap 17 ditambahkan dan selesai (T17.1–T17.7): perbaikan multi-invoice DSS (filter Faktur Pajak & format uraian transaksi), deteksi total gambar dengan desimal `,-`, serta implementasi toggle & tombol cepat "Atur pajak secara otomatis" di Upload dan Editor Draf |
 | 24 Okt 2026 | Tahap 18 ditambahkan dan selesai (T18.1–T18.6): penggabungan terpadu commit `e01d698` dengan penambahan kolom "Terakhir Diubah" & sorting interaktif semua kolom Tabel Riwayat/Dokumen, penyempurnaan `confirm_front_pages` & `fee_from_amounts`, pemetaan acuan kontrak fee DSS (`DSS_KNOWN_FEES`), eliminasi ekstraksi kode driver (`DD05354`/`DD05592`), petunjuk UI PPh 23 pada TaxPanel, 76/76 unit test backend lulus 100%, frontend build sukses |
 | 24 Okt 2026 | T18.7 ditambahkan dan selesai: koreksi commit `1ca6482` (tabel fee DSS hafalan dan tebakan dari rasio PPN dicabut, urutan tabel bawaan dari server); batasan DPP PPh 23 dikembalikan ke penjelasan Tahap 18. BRD/PRD/SOP perlu mencatat batasan ini (T8.2–T8.4) |
+| 24 Okt 2026 | Tahap 19 ditambahkan (feedback tim, 4 poin); T19.1 selesai: saran PPN dari PPN tercetak dan format baris potongan PPh sesuai contoh owner |
