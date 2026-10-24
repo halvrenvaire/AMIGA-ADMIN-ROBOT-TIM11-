@@ -153,3 +153,15 @@ def test_fee_left_for_pic_when_front_page_numbers_do_not_match(tx):
     data = doc["files"][3]["data"]
     assert data.get("service_fee") is None and Decimal(data["service_fee_unverified"]) == Decimal("988047")
     assert fake.checked.count(13) == 2  # dibaca ulang sekali
+
+
+def test_service_fee_is_never_guessed_from_total_or_vat_ratio():
+    from app.services import tax_service
+    # Total sama persis dengan invoice DSS, tetapi tanpa imbalan jasa yang terbaca: tidak ada tabel angka hafalan
+    assert tax_service.service_fee({"vendor_name": "PT Dayakarya Solusi Sejati (DSS)", "total": "8933846"}) is None
+    # Invoice PT yang hanya sebagian barangnya kena PPN (PPN < 8% dari total) bukan invoice imbalan jasa
+    assert tax_service.service_fee({"vendor_name": "PT Sumber Makmur", "total": "10000000", "vat_printed": "330000"}) is None
+    assert tax_service.suggest_by_rules({"vendor_name": "PT Sumber Makmur", "total": "10000000",
+                                         "vat_printed": "330000"}, False).code == "NONE"
+    # Imbalan jasa yang sudah dicocokkan dengan PPN tetap dipakai
+    assert tax_service.service_fee({"service_fee": "2304696"}) == Decimal("2304696")

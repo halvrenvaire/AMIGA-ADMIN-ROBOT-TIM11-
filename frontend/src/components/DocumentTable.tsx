@@ -20,7 +20,8 @@ export function DocumentTable({ docs, showReviewer = true, action }: {
   showReviewer?: boolean;
   action?: (doc: DocumentSummary) => React.ReactNode;
 }) {
-  const [sortKey, setSortKey] = useState<SortKey>("updated_at");
+  // null = urutan dari server (mis. antrean menurut tenggat); kolom diurutkan hanya setelah judulnya diklik
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortAsc, setSortAsc] = useState<boolean>(false);
 
   function toggleSort(k: SortKey) {
@@ -33,6 +34,7 @@ export function DocumentTable({ docs, showReviewer = true, action }: {
   }
 
   const sortedDocs = useMemo(() => {
+    if (!sortKey) return docs;
     return [...docs].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
