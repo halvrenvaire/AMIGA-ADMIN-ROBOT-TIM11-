@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { Link, useParams } from "react-router-dom";
 import {
   Ban, CheckCircle2, CloudOff, Download, Equal, ExternalLink, Eye, FileClock, ListOrdered, Maximize2, Minimize2, PenLine, Plus, Receipt,
-  RotateCcw, Save, Send, ShieldCheck, Trash2, Undo2, UserPlus,
+  RotateCcw, Save, Scissors, Send, ShieldCheck, Trash2, Undo2, UserPlus, Wand2,
 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
@@ -43,9 +43,13 @@ const BLOCKING = new Set(["MISSING_EVIDENCE", "CALCULATION_DISCREPANCY", "NOT_AN
 /** Peringatan lunak (WARNINGS di backend): pengingat untuk dicek, tidak menahan pengajuan maupun persetujuan. */
 const SOFT = new Set(["VENDOR_MISMATCH", "ACCOUNT_MISMATCH"]);
 const isTotalOnly = (d: DocumentDetail) => d.extraction_mode === "TOTAL_ONLY";
-/** Uraian bawaan satu invoice (sama dengan backend default_description). */
-const defaultDescription = (d: FileData | null | undefined) =>
-  `Invoice ${d?.invoice_no?.trim() || "-"} - ${d?.vendor_name?.trim() || "vendor"}`;
+/** Uraian bawaan satu invoice: "Invoice {nomor} - {vendor} - {uraian spesifik}" (sama dengan backend). */
+const defaultDescription = (d: FileData | null | undefined) => {
+  const inv = `Invoice ${d?.invoice_no?.trim() || "-"}`;
+  const vendor = d?.vendor_name?.trim() || "vendor";
+  const extra = d?.service_description?.trim();
+  return extra ? `${inv} - ${vendor} - ${extra}` : `${inv} - ${vendor}`;
+};
 
 /** Subtotal yang berlaku: qty × harga bila keduanya terisi (dihitung sistem), selain itu isian manual. */
 const effectiveSubtotal = (l: Line) => lineSubtotal(l.qty, l.unit_price) ?? l.subtotal;
@@ -66,13 +70,25 @@ export function DocumentPage() {
   const d = doc.data;
   // Ringkasan hasil AI dianimasikan bila prosesnya selesai saat halaman ini terbuka
   const sawProcessing = useRef(false);
+  // Jumlah bukti sebelum PIC menekan "Pisahkan otomatis (AI)"; dipakai untuk memberi tahu hasilnya setelah AI selesai
+  const splitBefore = useRef<number | null>(null);
   const [fresh, setFresh] = useState(false);
   const [resultClosed, setResultClosed] = useState(false);
   useEffect(() => {
     if (!d) return;
     const busy = d.status === "QUEUED" || d.status === "PROCESSING";
     if (busy) { sawProcessing.current = true; setResultClosed(false); }
-    else if (sawProcessing.current) { sawProcessing.current = false; setFresh(true); }
+    else if (sawProcessing.current) {
+      sawProcessing.current = false;
+      setFresh(true);
+      const before = splitBefore.current;
+      splitBefore.current = null;
+      if (before !== null) {
+        setNotice(d.files.length > before
+          ? { kind: "ok", text: `Bukti dipisah menjadi ${d.files.length - before + 1} invoice. Periksa data dan pilih pajak tiap invoice.` }
+          : { kind: "info", text: "AI tidak menemukan lebih dari satu invoice pada bukti ini, jadi bukti tetap utuh." });
+      }
+    }
   }, [d?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ekstraksi dan verifikasi berjalan di background: muat ulang sampai selesai
@@ -262,7 +278,8 @@ export function DocumentPage() {
             </Anchor>
           )}
           {canEdit
-            ? <DraftEditor doc={d} pos={filePos} onPos={setPos} onChange={update} onNotice={setNotice} />
+            ? <DraftEditor doc={d} pos={filePos} onPos={setPos} onChange={update} onNotice={setNotice}
+                           onSplit={(before) => { splitBefore.current = before; }} />
             : d.extraction && <Anchor id="data"><ReadOnlyData doc={d} onChange={update} /></Anchor>}
           {!canEdit && d.extraction && d.status !== "CANCELLED" && !hasVoucher && <SimulationButton docId={d.id} />}
           {canReview && <Anchor id="keputusan"><ReviewDecision doc={d} onChange={update} onNotice={setNotice} /></Anchor>}
@@ -468,9 +485,10 @@ const dataLines = (d: FileData | null | undefined): Line[] =>
   }));
 
 /** Draf oleh PIC Klien / Intake Support: edit per invoice, lihat simulasi voucher, kirim ke reviewer (feedback owner). */
-function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
+function DraftEditor({ doc, pos, onPos, onChange, onNotice, onSplit }: {
   doc: DocumentDetail; pos: number; onPos: (p: number) => void;
   onChange: (d: DocumentDetail, n?: Notice) => void; onNotice: (n: Notice) => void;
+  onSplit: (before: number | null) => void;
 }) {
   const file = doc.files.find((f) => f.position === pos) ?? doc.files[0];
   const totalOnly = isTotalOnly(doc);
@@ -504,6 +522,27 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
   }));
   const sum = lines.reduce((t, l) => t + (Number(effectiveSubtotal(l)) || 0), 0);
 
+  /** Token AI hanya terpakai di sini: ~2.000 token input per halaman untuk memeriksa, lalu tiap bagian dibaca (~4.100 per halaman
+   *  keseluruhan). Rp 4,1 per halaman memakai harga Amazon Nova Lite di backend; konfirmasi dulu supaya biaya tidak mengejutkan. */
+  async function split() {
+    const tokens = file.page_count * 4100;
+    if (!confirm(`AI akan memeriksa ${file.page_count} halaman bukti ${file.position} untuk mencari invoice yang tergabung.\n`
+      + `Perkiraan pemakaian ${tokens.toLocaleString("id-ID")} token AI (sekitar Rp ${Math.ceil(file.page_count * 4.1).toLocaleString("id-ID")}).\n\n`
+      + "Bila ditemukan lebih dari satu invoice, bukti ini dipecah dan tiap bagian dibaca ulang. Isian dan pajak bukti ini akan diganti; "
+      + "bukti lain tidak berubah. Lanjutkan?")) return;
+    setBusy(true);
+    onSplit(doc.files.length);
+    try {
+      onChange(await api.post<DocumentDetail>(`/documents/${doc.id}/files/${file.position}/split`),
+        { kind: "info", text: "AI sedang memeriksa bukti ini. Hasilnya muncul beberapa saat lagi." });
+    } catch (e) {
+      onSplit(null);
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save() {
     // Data lengkap satu invoice (backend mengganti data bukti ini dan mencatat field yang berubah)
     const data = {
@@ -533,6 +572,18 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
     try {
       const next = await api.post<DocumentDetail>(`/documents/${doc.id}/submit`);
       onChange(next, { kind: "ok", text: `Diajukan ke Finance Reviewer${next.assigned_reviewer ? ` (${next.assigned_reviewer})` : ""}.` });
+    } catch (e) {
+      onNotice({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyAllTaxes() {
+    setBusy(true);
+    try {
+      const next = await api.post<DocumentDetail>(`/documents/${doc.id}/tax/apply-all`);
+      onChange(next, { kind: "ok", text: "Pajak otomatis berhasil diterapkan ke seluruh bukti." });
     } catch (e) {
       onNotice({ kind: "error", text: (e as Error).message });
     } finally {
@@ -574,6 +625,15 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       <small className="muted">{file.original_filename} · {file.page_count} hal.
         {file.data?.manual && <> <span className="chip warn"><PenLine size={11} /> diisi manual: AI tidak membaca bukti ini</span></>}</small>
       <BuktiPages doc={doc} file={file} busy={busy} dirty={dirty} onPos={onPos} onChange={onChange} onNotice={onNotice} />
+      {doc.ai_enabled !== false && !file.source_format && file.page_count >= 2 && (
+        <div className="actions" style={{ alignItems: "center" }}>
+          <button type="button" className="btn sm" disabled={busy || dirty} onClick={split}
+                  title={dirty ? "Simpan atau batalkan perubahan bukti ini dulu" : "AI memeriksa halaman dan memecah bukti yang berisi beberapa invoice"}>
+            <Scissors /> Pisahkan otomatis (AI)
+          </button>
+          <small className="muted">Bila file ini berisi beberapa invoice sekaligus. Memakai token AI, jadi hanya dijalankan saat Anda menekan tombol ini.</small>
+        </div>
+      )}
 
       <Anchor id="data">
         <div className="section-title">Informasi utama</div>
@@ -645,6 +705,19 @@ function DraftEditor({ doc, pos, onPos, onChange, onNotice }: {
       )}
 
       <Anchor id="pajak">
+      {doc.files.length > 1 && (
+        <div style={{ marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.75rem", background: "var(--bg-subtle, #f8fafc)", padding: "0.5rem 0.75rem", borderRadius: "6px", border: "1px solid var(--border-color, #e2e8f0)" }}>
+          <button type="button" className="btn sm" disabled={busy || dirty} onClick={applyAllTaxes}
+                  title="Sistem langsung menerapkan rekomendasi potongan PPh & PPN ke semua bukti">
+            <Wand2 size={15} /> Atur pajak otomatis semua bukti {noTax.length > 0 ? `(${noTax.length} bukti belum diatur)` : ""}
+          </button>
+          <small className="muted">
+            {noTax.length > 0
+              ? `Terapkan rekomendasi pajak ke ${noTax.length} bukti yang belum diatur.`
+              : "Terapkan ulang rekomendasi pajak ke seluruh bukti."}
+          </small>
+        </div>
+      )}
       <TaxPanel key={`${file.position}-${JSON.stringify(file.data?.tax ?? null)}`} doc={doc} file={file} lines={totalOnly ? [] : lines}
                 total={fields.total} disabled={busy || dataDirty} onDirty={setTaxDirty} onChange={onChange} onNotice={onNotice} />
       {noTax.length > 0
@@ -1278,7 +1351,7 @@ function OptionsPanel({ doc, onChange, onNotice }: {
   const [busy, setBusy] = useState(false);
   const mode: ExtractionMode = doc.extraction_mode ?? "ITEMIZED";
 
-  async function put(body: { extraction_mode?: ExtractionMode; include_account?: boolean }, text: string) {
+  async function put(body: { extraction_mode?: ExtractionMode; include_account?: boolean; auto_tax?: boolean }, text: string) {
     setBusy(true);
     try {
       onChange(await api.put<DocumentDetail>(`/documents/${doc.id}/options`, body), { kind: "ok", text });
@@ -1310,6 +1383,12 @@ function OptionsPanel({ doc, onChange, onNotice }: {
           </label>
         ))}
       </div>
+      <label className="toggle">
+        <input type="checkbox" checked={doc.auto_tax !== false} disabled={busy}
+               onChange={(e) => put({ auto_tax: e.target.checked },
+                                    e.target.checked ? "Pajak otomatis diaktifkan dan diterapkan ke semua bukti." : "Pajak otomatis dinonaktifkan. Anda dapat mengatur pajak secara manual.")} />
+        <span>Atur pajak secara otomatis <span className="muted">· otomatis menerapkan rekomendasi potongan PPh &amp; PPN</span></span>
+      </label>
       <label className="toggle">
         <input type="checkbox" checked={Boolean(doc.include_account)} disabled={busy}
                onChange={(e) => put({ include_account: e.target.checked },

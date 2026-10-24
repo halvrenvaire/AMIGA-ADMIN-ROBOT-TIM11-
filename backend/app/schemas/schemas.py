@@ -269,6 +269,7 @@ class DocumentSummary(BaseModel):
     updated_at: datetime
     extraction_mode: Literal["TOTAL_ONLY", "ITEMIZED"] = "ITEMIZED"
     include_account: bool = False  # rekening tujuan diisi, dicek, dan dicetak di voucher
+    auto_tax: bool = True  # otomatis terapkan saran pajak per invoice
 
 
 class IssueItem(BaseModel):
@@ -452,6 +453,7 @@ class OptionsUpdate(BaseModel):
     """Pengaturan pengajuan di halaman detail (Tahap 14); field yang tidak dikirim = tetap."""
     extraction_mode: Literal["TOTAL_ONLY", "ITEMIZED"] | None = None
     include_account: bool | None = None
+    auto_tax: bool | None = None
 
 
 class TaxRateOut(BaseModel):

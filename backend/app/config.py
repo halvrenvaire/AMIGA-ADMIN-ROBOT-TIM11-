@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     ai_max_scan_pages: int = 40
     # Batas jumlah invoice/bukti dalam satu voucher (dihitung per invoice yang terdeteksi, bukan per file)
     max_invoices_per_voucher: int = 30
+    # Berkas gabungan (beberapa invoice dalam satu PDF): AI memeriksa tiap halaman
+    # untuk menemukan halaman depan invoice, lalu berkas dipecah per invoice (tab, baris voucher, dan pajak sendiri).
+    ai_split_enabled: bool = True
+    ai_split_auto: bool = False  # false (bawaan) = hemat token saat unggah; PIC menekan tombol "Pisahkan otomatis" pada draf
+    ai_split_min_pages: int = 2
+    ai_split_max_pages: int = 40  # berkas lebih panjang tidak diperiksa (hemat token)
+    ai_split_max_invoices: int = 30  # batas maksimal invoice terdeteksi
+    ai_split_workers: int = 4  # pekerja paralel pemeriksaan halaman AI
     # Estimasi biaya AI di Dasbor (System Admin & Service Lead): harga per 1.000 token model pembaca invoice (USD)
     # dan kurs. Bawaan = harga publik Amazon Nova Lite; sesuaikan dengan tagihan AWS sebenarnya.
     ai_price_input_per_1k_usd: float = 0.00006
