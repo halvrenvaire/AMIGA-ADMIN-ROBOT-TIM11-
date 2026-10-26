@@ -242,7 +242,10 @@ def format_tax_block(f: dict) -> str:
     if vat.get("mode") and vat["mode"] != "none":
         amount = f" {rupiah(vat['amount'])}" if vat.get("amount") else ""
         lines.append(f"   PPN: {VAT_MODE_LABEL.get(vat['mode'], vat['mode'])}{amount}")
-    if not tax:
+    if not tax and data.get("service_fee_unverified"):
+        lines.append(f"   ⚠️ PPh: imbalan jasa terbaca {rupiah(data['service_fee_unverified'])}, tetapi tidak cocok dengan PPN "
+                     "di invoice. Isi DPP PPh 23 sesuai invoice di dashboard.")
+    elif not tax:
         if sug:
             base = f" · DPP {rupiah(sug['base'])}" if sug.get("base") else ""
             lines.append(f"   PPh: belum dipilih. Saran AI: {sug['name']}{base} — {sug.get('reason') or ''}")
@@ -282,8 +285,18 @@ def _missing(doc: dict) -> tuple[list[int], list[int]]:
     return no_tax, no_desc
 
 
+def _unsure(doc: dict) -> list[int]:
+    """Bukti yang imbalan jasanya tidak cocok dengan PPN: DPP PPh diisi PIC di dashboard."""
+    return [f["position"] for f in doc.get("files") or []
+            if not (f.get("data") or {}).get("tax") and (f.get("data") or {}).get("service_fee_unverified")]
+
+
 def next_step_text(doc: dict) -> str:
     no_tax, no_desc = _missing(doc)
+    unsure = _unsure(doc)
+    if unsure:
+        return (f"Langkah berikutnya: isi DPP PPh 23 bukti {', '.join(map(str, unsure))} di dashboard "
+                f"({doc_url(doc['id'])}), karena angka imbalan jasanya perlu dicek dengan invoice.")
     if no_tax:
         return (f"Langkah berikutnya: pilih pajak bukti {', '.join(map(str, no_tax))}. Tekan \"Pakai saran AI\" atau "
                 "ubah per bukti. AI hanya menyarankan; keputusan di Anda.")
@@ -297,7 +310,7 @@ def draft_buttons(doc: dict) -> list:
     doc_id, files = doc["id"], doc.get("files") or []
     no_tax, no_desc = _missing(doc)
     rows = []
-    if no_tax:
+    if set(no_tax) - set(_unsure(doc)):
         rows.append([("🤖 Pakai saran AI untuk pajak", f"tx:a:{doc_id}")])
     elif not no_desc:
         rows.append([("📤 Ajukan ke reviewer", f"sub:{doc_id}")])
@@ -680,8 +693,8 @@ class AmigaBot:
         doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
         for f in doc.get("files") or []:
             data = f.get("data") or {}
-            if data.get("tax"):
-                continue  # pilihan PIC tidak ditimpa
+            if data.get("tax") or data.get("service_fee_unverified"):
+                continue  # pilihan PIC tidak ditimpa; DPP yang belum pasti diisi PIC di dashboard
             self._put_tax(user, document_id, f["position"], data, (data.get("tax_suggestion") or {}).get("code", "NONE"))
         return self._overview(user, document_id, "✅ Saran pajak AI diterapkan. Periksa sebelum mengajukan:")
 

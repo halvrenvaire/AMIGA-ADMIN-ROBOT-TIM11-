@@ -553,6 +553,7 @@ AMOUNT_TEXT = re.compile(r"\s*(rp\.?\s*)?-?[\d.,\s]+(,-+|\.-+|-+)?\s*", re.IGNOR
 
 
 VAT_LABEL = re.compile(r"\b(vat|ppn)\b", re.IGNORECASE)
+SUBTOTAL_LABEL = re.compile(r"sub\s*total|subjected|terkena|dpp|dasar", re.IGNORECASE)
 EXACT = Decimal(1)  # selisih pembulatan PPN (Rp) saat mencocokkan angka tercetak satu sama lain
 
 
@@ -586,7 +587,7 @@ def fee_from_amounts(rows) -> FeeReading:
             labelled += value
         if value is not None:
             values.append(value)
-            if VAT_LABEL.search(label) and vat is None:
+            if VAT_LABEL.search(label) and not SUBTOTAL_LABEL.search(label) and vat is None:
                 vat = value
     if not split:
         return FeeReading()
@@ -600,15 +601,19 @@ def fee_from_amounts(rows) -> FeeReading:
             elif abs(a * 12 / 100 - v) <= EXACT:
                 candidates.add((a * 12 / 11).quantize(Decimal(1), rounding=ROUND_HALF_UP))
     labelled = labelled or None
+    # Selisih dua angka (mis. Total Invoice - Total Amount = PPN) ikut dipakai bila baris PPN sendiri salah terbaca
+    diffs = {a - b for a in values for b in values if a > b}
     if labelled is not None and (any(abs(labelled - c) <= EXACT for c in candidates)
-                                 or any(abs(labelled * 11 / 12 - v) <= EXACT for v in values)):
-        # Cocok dengan PPN, atau dengan "Sub total terkena PPN" (DPP nilai lain = imbalan x 11/12)
+                                 or any(abs(labelled * 11 / 12 - v) <= EXACT for v in values)
+                                 or any(abs(labelled * 11 / 100 - d) <= EXACT for d in diffs)):
+        # Cocok dengan PPN, dengan "Sub total terkena PPN" (DPP nilai lain = imbalan x 11/12), atau dengan selisih
+        # total invoice dan jumlah sebelum PPN
         fee = labelled
     elif len(candidates) == 1:
         fee = next(iter(candidates))
     else:
         return FeeReading(split=True, vat=vat, unverified=labelled)
-    matched = next((v for v in values if abs(fee * 11 / 100 - v) <= EXACT), vat)
+    matched = next((v for v in [*values, *sorted(diffs)] if abs(fee * 11 / 100 - v) <= EXACT), vat)
     return FeeReading(split=True, fee=fee, vat=matched)
 
 

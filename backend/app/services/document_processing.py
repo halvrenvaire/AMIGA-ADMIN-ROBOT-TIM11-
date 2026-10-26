@@ -199,7 +199,10 @@ def prefill_tax(db, doc: Document, bedrock, only: set | None = None, force_apply
         if vat_sug is not None:
             suggestion["vat"] = vat_sug  # PPN tercetak: total sudah termasuk PPN
         new_data = {**data, "npwp_known": known, "tax_suggestion": suggestion}
-        if should_apply and (force_apply or "tax" not in data):
+        # Invoice memisahkan imbalan jasa, tetapi angkanya tidak cocok dengan PPN: DPP tidak bisa dipastikan, jadi
+        # pajak tidak dipasang otomatis (PIC mengisi DPP sendiri, ada peringatan di panel pajak)
+        unsure_fee = bool(data.get("service_fee_unverified"))
+        if should_apply and not unsure_fee and (force_apply or "tax" not in data):
             npwp_val = True if known is not False else False
             base_val = Decimal(str(sug.base)) if sug.base is not None else None
             vat_val = {k: vat_sug[k] for k in ("mode", "rate")} if vat_sug is not None else None
@@ -692,9 +695,10 @@ def process_document(document_id: uuid.UUID, extractor: InvoiceExtractor, retry_
                         checks.append(old_checks[name])
                     continue
                 part = None
-                if f is not None and f.id in scanned and (total_only or scanned[f.id].doc_class == IRRELEVANT
-                                                          or not scanned[f.id].invoice_no and
-                                                          scanned[f.id].total is None):
+                needs_read = f is not None and f.id in scanned and bool((scanned[f.id].raw or {}).get("needs_read"))
+                if f is not None and f.id in scanned and not needs_read and (
+                        total_only or scanned[f.id].doc_class == IRRELEVANT
+                        or not scanned[f.id].invoice_no and scanned[f.id].total is None):
                     # Mode total: hasil pindai sudah berisi data kepala invoice dan total; tidak dibaca ulang
                     part = scanned[f.id]
                 elif ai_on:

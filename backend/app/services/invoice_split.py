@@ -12,6 +12,8 @@ import io
 import logging
 import re
 import uuid
+from difflib import SequenceMatcher
+from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
 
 from pypdf import PdfReader, PdfWriter
@@ -19,7 +21,7 @@ from pypdf import PdfReader, PdfWriter
 from app.config import settings
 from app.models import Document, DocumentFile
 from app.services import storage
-from app.services.extraction_service import ExtractedInvoice, fee_from_amounts
+from app.services.extraction_service import ExtractedInvoice, _positive, fee_from_amounts
 from app.services.verification import normalize
 
 log = logging.getLogger(__name__)
@@ -122,15 +124,46 @@ def confirm_front_pages(extractor, pdf: bytes, found: list[ExtractedInvoice], ch
         for k in ("input_tokens", "output_tokens"):
             usage[k] = usage.get(k, 0) + int(u.get(k) or 0)
     fronts = [(p, info) for p, info in zip(pages, infos) if info is not None and info.starts_invoice]
-    for inv in found:
-        if len(found) == 1:
-            match = next(iter(fronts), None)
-        else:
-            match = next(((p, info) for p, info in fronts
-                          if normalize(info.invoice_no) and normalize(info.invoice_no) == normalize(inv.invoice_no)), None)
-        if match is None:
-            continue
-        page, info = match
+    matches: dict[int, tuple[int, object]] = {}  # indeks invoice hasil pindai → (halaman, info halaman depan)
+    used: set[int] = set()
+    if len(found) == 1:
+        if fronts:
+            matches[0] = fronts[0]
+            used.add(fronts[0][0])
+    else:
+        # 1) Nomor invoice sama persis
+        for i, inv in enumerate(found):
+            hit = next(((p, info) for p, info in fronts if p not in used and normalize(info.invoice_no)
+                        and normalize(info.invoice_no) == normalize(inv.invoice_no)), None)
+            if hit is not None:
+                matches[i] = hit
+                used.add(hit[0])
+        # 2) Nomor terbaca sedikit berbeda: halaman depan yang belum terpakai di potongan halaman yang sama
+        step = max(settings.ai_max_pages, 1)
+        for i, inv in sorted(enumerate(found), key=lambda x: x[1].page or 1):
+            if i in matches:
+                continue
+            first = ((inv.page or 1) - 1) // step * step + 1
+            hit = next(((p, info) for p, info in fronts if p not in used and first <= p < first + step
+                        and _same_invoice(inv, info)), None)
+            if hit is not None:
+                matches[i] = hit
+                used.add(hit[0])
+    if len(found) > 1:
+        # Hasil pindai tanpa halaman depan yang cocok, padahal halaman yang disebut pemindaian sudah diperiksa dan
+        # BUKAN halaman depan invoice (mis. lampiran rincian "005-DO2311-000001" di halaman 6 berkas DSS): dibuang.
+        # Beberapa struk dalam satu halaman tetap aman karena halamannya sendiri halaman depan.
+        checked = dict(zip(pages, infos))
+        drop = {i for i, inv in enumerate(found) if i not in matches and (inv.page or 1) in checked
+                and checked[inv.page or 1] is not None and not checked[inv.page or 1].starts_invoice}
+        for i in drop:
+            log.info("Halaman %s (%s) bukan halaman depan invoice; tidak dijadikan bukti", found[i].page,
+                     found[i].invoice_no)
+        kept = [(inv, matches.get(i)) for i, inv in enumerate(found) if i not in drop]
+        found[:] = [inv for inv, _ in kept]
+        matches = {i: m for i, (_, m) in enumerate(kept) if m is not None}
+    for i, (page, info) in matches.items():
+        inv = found[i]
         inv.page = page
         apply_fee_reading(inv, info.amounts)
         if inv.service_fee is None and inv.service_fee_unverified is not None:
@@ -138,6 +171,35 @@ def confirm_front_pages(extractor, pdf: bytes, found: list[ExtractedInvoice], ch
             again = check_page(reader, pdf, page, usage)
             if again is not None and again.starts_invoice:
                 apply_fee_reading(inv, again.amounts)
+    if len(found) > 1:
+        # Halaman depan invoice yang terlewat saat pemindaian (berkas DSS: invoice ke-2 di halaman 5 kadang tidak
+        # terdaftar). Ditambahkan sebagai bukti sendiri; data kepalanya dibaca AI dari potongan halamannya nanti.
+        known = {normalize(inv.invoice_no) for inv in found if normalize(inv.invoice_no)}
+        for page, info in fronts:
+            if page in used or (normalize(info.invoice_no) and normalize(info.invoice_no) in known):
+                continue
+            missed = ExtractedInvoice(invoice_no=info.invoice_no, total=total_from_amounts(info.amounts), page=page,
+                                      raw={"needs_read": True, "found_by": "pemeriksaan halaman"})
+            apply_fee_reading(missed, info.amounts)
+            found.append(missed)
+            log.info("Invoice %s di halaman %d terlewat saat pemindaian; ditambahkan", info.invoice_no, page)
+
+
+def _same_invoice(inv: ExtractedInvoice, info) -> bool:
+    """Nomor invoice hampir sama (salah baca 1-2 karakter) atau total akhirnya sama."""
+    a, b = normalize(inv.invoice_no), normalize(info.invoice_no)
+    if a and b and SequenceMatcher(None, a, b).ratio() >= 0.85:
+        return True
+    total = total_from_amounts(info.amounts)
+    return inv.total is not None and total is not None and inv.total == total
+
+
+def total_from_amounts(rows) -> Decimal | None:
+    """Total akhir dari blok ringkasan (baris terakhir berlabel Total), bila ada."""
+    for row in reversed(rows if isinstance(rows, list) else []):
+        if isinstance(row, dict) and re.search(r"total", str(row.get("label") or ""), re.IGNORECASE):
+            return _positive(row.get("amount"))
+    return None
 
 
 def check_page(reader, pdf: bytes, page: int, usage: dict):

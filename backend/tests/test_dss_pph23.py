@@ -174,3 +174,62 @@ def test_service_fee_is_never_guessed_from_total_or_vat_ratio():
                                          "vat_printed": "330000"}, False).code == "NONE"
     # Imbalan jasa yang sudah dicocokkan dengan PPN tetap dipakai
     assert tax_service.service_fee({"service_fee": "2304696"}) == Decimal("2304696")
+
+
+def test_invoice_missed_by_scan_is_added_from_page_check(tx):
+    # Pembacaan nyata 26 Okt 2026: pemindaian per 5 halaman tidak mendaftar invoice 00323 (halaman 5), padahal
+    # pemeriksaan per halaman menemukan halaman depannya
+    fake = DssExtractor(dss_fronts())
+    fake.starts[1] = [i for i in fake.starts[1] if i.invoice_no != "005-PI-2604-00323"]
+    # Bukti yang terlewat dibaca ulang AI (mode total saja) untuk data kepalanya
+    fake.result = inv("005-PI-2604-00323", "8933846", vendor="PT Demo Solusi Sejati")
+    use(fake)
+    doc = detail(upload(numbered_pdf(32), auto_tax="true").json()["id"])
+    files = doc["files"]
+    assert [f["page_from"] for f in files] == [1, 5, 9, 13, 20, 26]
+    assert [f["data"]["invoice_no"] for f in files] == [no for no, *_ in DSS]
+    assert fake.calls == 1  # hanya bukti yang terlewat yang dibaca ulang
+    added = files[1]["data"]
+    assert Decimal(added["service_fee"]) == Decimal("2304696") and added["vendor_name"] == "PT Demo Solusi Sejati"
+    assert Decimal(added["tax"]["base"]) == Decimal("2304696")
+    assert Decimal(doc["tax_summary"]["net"]) == Decimal("41719136")
+
+
+def test_scanned_detail_page_is_dropped_and_unsure_fee_is_not_auto_taxed(tx):
+    # Pembacaan nyata 26 Okt 2026: lampiran rincian di halaman 6 terdaftar sebagai invoice "005-DO2311-000001";
+    # imbalan jasa invoice 00325 tidak cocok dengan PPN
+    fronts = dss_fronts()
+    fronts[13].amounts = rows((OVERTIME, "6,586,980.00"), (FEE, "988,047.00"), (VAT, "908,685.00"))
+    fake = DssExtractor(fronts)
+    detail_page = inv("005-DO2311-000001", "6375633", vendor="PT Demo Solusi Sejati")
+    fake.starts[6].insert(0, detail_page)
+    use(fake)
+    doc = detail(upload(numbered_pdf(32), auto_tax="true").json()["id"])
+    files = doc["files"]
+    assert [f["data"]["invoice_no"] for f in files] == [no for no, *_ in DSS]
+    unsure = files[3]["data"]
+    # Pajak tidak dipasang otomatis dengan DPP seluruh tagihan; PIC mengisi DPP (peringatan di panel pajak)
+    assert unsure.get("tax") is None and Decimal(unsure["service_fee_unverified"]) == Decimal("988047")
+    r = api(PIC).post(f"/documents/{doc['id']}/tax/apply-all")
+    assert r.json()["files"][3]["data"].get("tax") is None
+
+
+def test_misread_number_is_matched_only_when_close():
+    from app.services.invoice_split import _same_invoice
+    front = PageInfo(True, "005-PI-2604-00324", rows((TOTAL, "8,933,846.00")))
+    assert _same_invoice(inv("005-PI-2604-0O324", "1"), front)  # salah baca satu karakter
+    assert _same_invoice(inv(None, "8933846"), front)  # nomor tidak terbaca, total sama
+    assert not _same_invoice(inv("005-DO2311-000001", "6375633"), front)  # lampiran rincian
+
+
+def test_fee_confirmed_by_total_minus_amount_when_vat_and_subtotal_are_misread():
+    # Halaman 13, pembacaan nyata 26 Okt 2026: PPN 908.685 dan "Sub total terkena PPN" 7.575.027 salah terbaca, tetapi
+    # Total Invoice - Total Amount = 7.683.712 - 7.575.027 = 108.685 = 988.047 x 11%
+    misread = rows((BASIC, "0.00"), (OVERTIME, "6,586,980.00"), (FEE, "988,047.00"), (AMOUNT, "7,575,027.00"),
+                   (NOT_VAT, "6,669,317.00"), (VAT_SUB, "7,575,027.00"), (VAT, "908,685.00"), (STAMP, "0.00"),
+                   (TOTAL, "7,683,712.00"))
+    r = fee_from_amounts(misread)
+    assert r.fee == Decimal("988047") and r.vat == Decimal("108685")
+    # Baris "Sub total (NOT subjected to VAT)" bukan baris PPN
+    assert fee_from_amounts(rows((BASIC, "1"), (FEE, "100"), (NOT_VAT, "5"), (VAT, "11"))).vat == Decimal("11")
+
