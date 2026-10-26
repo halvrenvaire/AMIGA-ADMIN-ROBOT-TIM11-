@@ -4,6 +4,34 @@ Proof of Concept untuk **MAIN Hackathon 2026** oleh **Kelompok 11 (TEAM 11 MAIN)
 
 AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi dalam hitungan detik. **AI hanya membaca invoice.** Sistem yang memverifikasi angka, kelengkapan, dan duplikasi, lalu **Finance Reviewer** menyetujui sebelum voucher diserahkan ke klien.
 
+## Coba aplikasi
+
+| | |
+| --- | --- |
+| Login aplikasi | http://13.212.201.121/login (ketik lengkap dengan `http://`) |
+| Bot Telegram | [@amiga_online_ro_bot](https://t.me/amiga_online_ro_bot) |
+| Buku panduan (PDF) | [User Guide Book v4.0](readme/User_Guide_Book_AMIGA_Robot_Admin_v4.0.pdf): persyaratan sistem, instalasi, menjalankan, fitur |
+| Galeri screenshot | [Galeri Dokumentasi](readme/Galeri_Dokumentasi_AMIGA_Robot_Admin.pdf) |
+
+**Fitur utama:** AI (Amazon Bedrock Nova Lite) membaca invoice PDF/foto, termasuk satu PDF berisi banyak invoice; sistem
+memverifikasi angka, kelengkapan, dan duplikat; saran PPN dan potongan PPh otomatis (DPP PPh 23 dari imbalan jasa yang
+dicocokkan dengan PPN tercetak); simulasi dan voucher resmi PDF; peninjauan Finance Reviewer dengan pemisahan tugas;
+Asisten AI (RAG atas SOP); bot Telegram; tutorial di dalam aplikasi; jejak audit permanen.
+
+**Mulai cepat (lokal):**
+
+```bash
+git clone https://github.com/halvrenvaire/AMIGA-ADMIN-ROBOT-TIM11-.git && cd AMIGA-ADMIN-ROBOT-TIM11-
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env            # isi DATABASE_URL, JWT_SECRET, SEED_DEFAULT_PASSWORD, kredensial AWS
+bash scripts/create_db.sh && .venv/bin/alembic upgrade head && .venv/bin/python seed.py
+.venv/bin/uvicorn app.main:app --reload --port 8000      # terminal 1
+cd ../frontend && npm install && npm run dev              # terminal 2, buka http://localhost:5173
+```
+
+Detail lengkap ada di [Menjalankan project](#menjalankan-project). Semua contoh invoice di `samples/` adalah data fiktif;
+contoh kasus DSS dibuat oleh `backend/scripts/make_dss_sample.py`.
+
 > **Dokumen acuan** (folder [`readme/`](readme/)):
 > - [**User Guide Book v4.0**](readme/User_Guide_Book_AMIGA_Robot_Admin_v4.0.pdf): persyaratan sistem, instalasi, menjalankan aplikasi, dan panduan fitur (dibuat ulang dengan `backend/.venv/bin/python docs/user-guide/build_user_guide.py`)
 > - [BRD AMIGA Robot Admin v1.1](readme/BRD_AMIGA_Robot_Admin_v1.1.docx)
