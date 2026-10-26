@@ -58,7 +58,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 | ACCOUNT_MISMATCH | Kendala: nomor rekening berbeda dengan rekening vendor yang sudah diverifikasi Finance Reviewer |
 | Vendor terverifikasi | Vendor di Data Referensi yang rekeningnya sudah dicek Finance Reviewer ke sumber tepercaya. Menjadi acuan pemeriksaan rekening |
 | Saluran | Asal pengajuan invoice, misalnya Email atau WhatsApp. Hanya dicatat sebagai keterangan. Bernilai **Telegram** bila invoice diunggah lewat bot resmi |
-| Bot Telegram resmi | Bot @amiga_ro_bot yang terhubung ke akun AMIGA lewat kode sekali pakai dari Pengaturan akun. Pintu masuk resmi kedua selain dashboard |
+| Bot Telegram resmi | Bot @amiga_online_ro_bot yang terhubung ke akun AMIGA lewat kode sekali pakai dari Pengaturan akun. Pintu masuk resmi kedua selain dashboard |
 | Segregation of Duties (SoD) | Aturan bahwa pengunggah dokumen tidak boleh menyetujui dokumen yang sama |
 
 ## 5. Peran dan Tanggung Jawab
@@ -79,7 +79,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 1. Invoice berformat **PDF** (berapa pun halamannya; satu file boleh berisi invoice beserta Faktur Pajak dan timesheet) atau **foto invoice JPG, PNG, atau WEBP**. Foto otomatis diubah menjadi PDF satu halaman, dan foto aslinya tetap disimpan. Format lain (Word, Excel, dan sebagainya) ditolak.
 2. Setiap invoice **wajib ditinjau** Finance Reviewer sebelum voucher terbit. Hasil AI tidak boleh dipakai tanpa peninjauan.
 3. Pengiriman invoice lewat WhatsApp atau Email **tidak diproses**. PIC diarahkan untuk mengunggah ke sistem, dan asal pengajuan dicatat di kolom **Saluran**.
-4. Invoice boleh diunggah lewat **dashboard** atau lewat **bot Telegram resmi** (@amiga_ro_bot) dari **chat pribadi** akun yang sudah terhubung. Keduanya masuk ke sistem yang sama dengan aturan yang sama. Mengirim invoice ke nomor/akun lain, atau ke grup chat, tetap tidak diproses.
+4. Invoice boleh diunggah lewat **dashboard** atau lewat **bot Telegram resmi** (@amiga_online_ro_bot) dari **chat pribadi** akun yang sudah terhubung. Keduanya masuk ke sistem yang sama dengan aturan yang sama. Mengirim invoice ke nomor/akun lain, atau ke grup chat, tetap tidak diproses.
 5. Pengguna hanya mengakses data klien yang ditugaskan kepadanya.
 6. Jejak audit tidak boleh diubah atau dihapus oleh siapa pun, termasuk System Admin.
 7. Selama PoC, gunakan **data dummy atau data yang sudah dianonimkan**.
@@ -105,7 +105,7 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 
 **Lewat bot Telegram (alternatif):**
 
-1. Hubungkan akun sekali saja: dashboard → **Pengaturan akun** → **Hubungkan Telegram**, lalu kirim kode ke @amiga_ro_bot. **Jangan pernah mengirim password di chat.**
+1. Hubungkan akun sekali saja: dashboard → **Pengaturan akun** → **Hubungkan Telegram**, lalu kirim kode ke @amiga_online_ro_bot. **Jangan pernah mengirim password di chat.**
 2. Kirim file invoice **PDF** atau **foto invoice** ke chat pribadi bot. Foto sebaiknya dikirim sebagai **File** (📎 → File) supaya tidak dikompres Telegram. Beberapa file untuk satu voucher boleh dikirim sekaligus.
 3. Pilih **perusahaan** dan **kategori** lewat tombol, lalu tekan **Kirim ke AMIGA**. Saluran terisi **Telegram** dan tanggal pengajuan terisi hari ini secara otomatis.
 4. Bot mengirim **ringkasan pajak per bukti** (uraian, PPN, PPh dengan DPP dan alasan AI, total dibayarkan). Ubah bila perlu lewat tombol **Pajak bukti N** dan **Uraian bukti N**, dan minta **Simulasi voucher (PDF)**.

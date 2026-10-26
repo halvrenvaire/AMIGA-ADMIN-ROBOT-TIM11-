@@ -257,10 +257,9 @@ def cover(pdf: Guide):
     pdf.set_font("body", "", 10.5)
     pdf.set_text_color(*DARK)
     for label, value in [("Versi dokumen", f"{VERSION} · {UPDATED}"), ("Proyek", "Proyek Akhir MAIN Hackathon 2026 · Kelompok 11"),
-                         ("Dashboard publik", "https://amiga-admin-robot-tim-11.vercel.app"),
-                         ("API publik", "https://amiga-robot-admin.fastapicloud.dev"),
+                         ("Login aplikasi", "http://13.212.201.121/login"),
                          ("Kode sumber", "github.com/halvrenvaire/AMIGA-ADMIN-ROBOT-TIM11-"),
-                         ("Bot Telegram", "@amiga_ro_bot")]:
+                         ("Bot Telegram", "@amiga_online_ro_bot")]:
         pdf.set_font("body", "B", 10.5)
         pdf.cell(42, 7, label)
         pdf.set_font("body", "", 10.5)
@@ -327,7 +326,7 @@ def build():
         "Browser terbaru: Google Chrome, Microsoft Edge, Mozilla Firefox, atau Safari.",
         "Laptop/PC, atau HP dengan lebar layar minimal 360 px (tampilan menyesuaikan HP).",
         "Koneksi internet dan akun AMIGA dari System Admin.",
-        "Opsional: aplikasi Telegram untuk memakai bot @amiga_ro_bot.",
+        "Opsional: aplikasi Telegram untuk memakai bot @amiga_online_ro_bot.",
     ])
     pdf.section("Untuk memasang dan menjalankan (server atau komputer pengembang)")
     pdf.grid([
@@ -400,6 +399,8 @@ def build():
               "",
               "# Terminal 2: dashboard (http://localhost:5173)",
               "cd frontend && npm run dev"])
+    pdf.note("Untuk mencoba tanpa memasang apa pun, buka aplikasi yang sudah berjalan di server tim: "
+             "**http://13.212.201.121/login** (ketik lengkap dengan http://), dan bot Telegram **@amiga_online_ro_bot**.")
     pdf.p("Buka **http://localhost:5173** lalu login dengan salah satu akun demo. Saat pertama dijalankan, backend "
           "membangun index SOP untuk Asisten AI (sekitar 10 detik).")
     pdf.sub("Akun demo (hasil seed.py)")
@@ -446,9 +447,10 @@ def build():
               "# variabel VITE_API_URL = alamat backend. Vercel men-deploy otomatis setiap push ke main."])
     pdf.grid([
         ["Layanan", "Alamat"],
-        ["Dashboard (Vercel)", "https://amiga-admin-robot-tim-11.vercel.app"],
-        ["Backend API (FastAPI Cloud)", "https://amiga-robot-admin.fastapicloud.dev"],
-        ["Server tim (AWS EC2)", "http://13.212.201.121 (HTTP; ketik lengkap dengan http://)"],
+        ["**Aplikasi utama (AWS EC2)**", "**http://13.212.201.121/login** (ketik lengkap dengan http://)"],
+        ["Bot Telegram (server EC2)", "@amiga_online_ro_bot"],
+        ["Alternatif: dashboard (Vercel)", "https://amiga-admin-robot-tim-11.vercel.app"],
+        ["Alternatif: backend API (FastAPI Cloud)", "https://amiga-robot-admin.fastapicloud.dev"],
     ], (60, 114))
 
     # 5 -------------------------------------------------------------------------------------------------------
@@ -591,7 +593,7 @@ def build():
           "dilakukan kalau kena MISSING_EVIDENCE?\". Bisa dibuka dari menu **Asisten AI** atau tombol **Tanya Asisten**.")
     pdf.figure("16-asisten.jpg", "Asisten AI.")
 
-    pdf.section("Bot Telegram @amiga_ro_bot")
+    pdf.section("Bot Telegram @amiga_online_ro_bot")
     pdf.p("PIC Klien dan Intake Support bisa mengajukan voucher langsung dari chat Telegram:")
     pdf.bullets([
         "Kirim file PDF atau foto invoice (boleh beberapa file untuk satu voucher). Kirim foto sebagai **File** agar tidak dikompres.",

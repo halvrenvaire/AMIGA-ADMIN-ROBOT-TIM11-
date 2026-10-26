@@ -337,3 +337,4 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 | 26 Okt 2026 | T19.3 selesai: tutorial di dalam aplikasi (tombol ? dengan sorotan langkah demi langkah) |
 | 26 Okt 2026 | T19.5 ditambahkan dan selesai: perbaikan pemisahan invoice dan DPP PPh 23 dari uji nyata berkas DSS |
 | 26 Okt 2026 | T19.4 selesai: User Guide Book v4.0 (PDF, pengumpulan tugas MAIN) dan SOP v1.3; Tahap 19 selesai. Buku panduan v3.0 digantikan v4.0 |
+| 26 Okt 2026 | User Guide Book v4.0 dan SOP: alamat login utama http://13.212.201.121/login (server EC2) dan bot @amiga_online_ro_bot |
