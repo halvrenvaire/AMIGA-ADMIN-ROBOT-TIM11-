@@ -61,6 +61,7 @@ class Guide(FPDF):
         self.set_title("User Guide Book AMIGA Robot Admin")
         self.set_author("Kelompok 11 · MAIN Hackathon 2026")
         self.set_subject("Panduan instalasi, konfigurasi, menjalankan, dan memakai AMIGA Robot Admin")
+        self.header_text = f"AMIGA Robot Admin · User Guide Book v{VERSION}"
         self.chapter_no = 0
         self.section_no = 0
         self.figure_no = 0
@@ -80,7 +81,7 @@ class Guide(FPDF):
         self.set_y(8)
         self.set_font("body", "", 8)
         self.set_text_color(*MUTED)
-        self.cell(0, 6, f"AMIGA Robot Admin · User Guide Book v{VERSION}", align="L")
+        self.cell(0, 6, self.header_text, align="L")
         self.set_y(20)
 
     def footer(self):
@@ -199,6 +200,9 @@ class Guide(FPDF):
         width = width or self.epw
         from PIL import Image
         w_px, h_px = Image.open(path).size
+        if h_px > w_px:
+            # Gambar potret (HP, halaman voucher) tidak dibuat selebar halaman
+            width = min(width, self.epw * (0.4 if h_px > 1.8 * w_px else 0.72))
         h = width * h_px / w_px
         if self.get_y() + h + 10 > self.h - 18:
             self.add_page()
