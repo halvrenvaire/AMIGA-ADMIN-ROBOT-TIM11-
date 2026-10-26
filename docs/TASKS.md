@@ -10,7 +10,7 @@ Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD
 - Saat tugas selesai: centang, isi kolom commit, perbarui ringkasan progres, lalu commit dan push.
 - Nomor `#1`–`#12` merujuk ke nomor masukan owner di dokumen ringkasan.
 
-_Terakhir diperbarui: 24 Okt 2026_
+_Terakhir diperbarui: 26 Okt 2026_
 
 ---
 
@@ -36,7 +36,7 @@ _Terakhir diperbarui: 24 Okt 2026_
 | 16 | Pemisahan invoice gabungan on-demand (tombol AI) & saran PPh 23 imbalan jasa (merging branch `feat/pisah-invoice-gabungan` ke `main`) | Sedang | 8/8 | ✅ |
 | 17 | Perbaikan Multi-Invoice DSS, Deteksi Total Gambar, & Otomatisasi Pajak | Sedang | 7/7 | ✅ |
 | 18 | Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (Kontrak Jasa DSS & Eliminasi Kode Driver) | Sedang | 7/7 | ✅ |
-| 19 | Feedback tim 24 Okt: saran PPN + PPh otomatis masuk voucher, langkah pajak di bot Telegram, tutorial di dalam aplikasi, dokumentasi | Besar | 2/4 | ⏳ |
+| 19 | Feedback tim 24 Okt: saran PPN + PPh otomatis masuk voucher, langkah pajak di bot Telegram, tutorial di dalam aplikasi, dokumentasi | Besar | 3/4 | ⏳ |
 
 ---
 
@@ -302,7 +302,7 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 | --- | --- | --- | --- |
 | T19.1 | **Saran PPN otomatis** dari PPN tercetak di invoice (mode total saja): pajak otomatis memasang "Harga sudah termasuk PPN" dengan nilai PPN **persis angka tercetak** (bukan 11% x total; PPN DSS hanya atas imbalan jasa), DPP otomatis = total - PPN tercetak. Saran PPN tampil di panel pajak. Baris potongan voucher memakai format contoh owner: `Potongan PPh 23 (Rp 2.304.696 x 2%) <invoice/barang>`. Test DSS: PPN 6 invoice sesuai angka tercetak, voucher dibayar Rp 41.719.136 | [x] | `b727fde` |
 | T19.2 | **Bot Telegram**: unggah memakai pajak otomatis (saran AI langsung terpasang, sama dengan dashboard). Setelah AI selesai, bot mengirim **ringkasan pajak per bukti** (uraian, PPN, PPh: jenis, DPP x tarif = potongan, alasan AI) beserta total, potongan, dan dibayarkan. Tombol: **Pajak bukti N** (pilih jenis PPh atau tanpa potongan; DPP imbalan jasa dan PPN tercetak dipertahankan), **Uraian bukti N** (balas dengan teks), **Simulasi voucher (PDF)** dikirim ke chat, **Pakai saran AI untuk pajak** bila ada bukti yang belum dipilih, lalu **Ajukan ke reviewer** (tidak lagi langsung mengirim tanpa diperiksa). Teks /bantuan memuat 5 langkah unggah | [x] | `4580584` |
-| T19.3 | Tutorial di dalam aplikasi: tombol **?** di topbar, langkah demi langkah yang menyorot bagian layar sesuai halaman | [ ] | |
+| T19.3 | **Tutorial di dalam aplikasi**: tombol **?** di topbar (bertitik berkedip sampai pertama kali dibuka) membuka langkah demi langkah sesuai halaman: Pembuatan Voucher, Detail Dokumen (draf PIC / keputusan reviewer), Dashboard Antrean, daftar dokumen, Dashboard, Tarif pajak; halaman lain mendapat pengenalan menu umum. Bagian yang dijelaskan disorot dan sekelilingnya digelapkan; langkah menyesuaikan peran dan dilewati bila bagiannya tidak tampil. Navigasi: Lanjut/Sebelumnya, panah kiri/kanan, Esc. Di HP kartu tampil di bawah layar. Komponen `frontend/src/components/Tour.tsx` | [x] | belum di-commit |
 | T19.4 | Perbarui dokumentasi tutorial penggunaan (SOP dan buku panduan) | [ ] | |
 ---
 
@@ -333,3 +333,4 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 | 24 Okt 2026 | T18.7 ditambahkan dan selesai: koreksi commit `1ca6482` (tabel fee DSS hafalan dan tebakan dari rasio PPN dicabut, urutan tabel bawaan dari server); batasan DPP PPh 23 dikembalikan ke penjelasan Tahap 18. BRD/PRD/SOP perlu mencatat batasan ini (T8.2–T8.4) |
 | 24 Okt 2026 | Tahap 19 ditambahkan (feedback tim, 4 poin); T19.1 selesai: saran PPN dari PPN tercetak dan format baris potongan PPh sesuai contoh owner |
 | 24 Okt 2026 | T19.2 selesai: alur bot Telegram dengan ringkasan dan pengaturan pajak per bukti, uraian, simulasi voucher PDF |
+| 26 Okt 2026 | T19.3 selesai: tutorial di dalam aplikasi (tombol ? dengan sorotan langkah demi langkah) |

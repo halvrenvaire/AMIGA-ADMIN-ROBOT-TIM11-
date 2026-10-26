@@ -172,14 +172,18 @@ export function Upload() {
           </div>
         </div>
 
-        <div className="section-title">2. Diajukan oleh</div>
-        <SubmitterProfileFields value={profile} onChange={setProfile} pic={pic} accountLink={isPic} />
+        <div data-tour="submitter">
+          <div className="section-title">2. Diajukan oleh</div>
+          <SubmitterProfileFields value={profile} onChange={setProfile} pic={pic} accountLink={isPic} />
+        </div>
 
-        <div className="section-title">3. Disetujui oleh</div>
-        {company
-          ? <SignerPicker key={clientId} clientId={clientId} clientName={company.name} submitter={submitterLabel} showSubmitter={false}
-                          onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
-          : <p className="muted" style={{ margin: 0 }}>Pilih klien dulu untuk memilih pemberi persetujuan.</p>}
+        <div data-tour="approver">
+          <div className="section-title">3. Disetujui oleh</div>
+          {company
+            ? <SignerPicker key={clientId} clientId={clientId} clientName={company.name} submitter={submitterLabel} showSubmitter={false}
+                            onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
+            : <p className="muted" style={{ margin: 0 }}>Pilih klien dulu untuk memilih pemberi persetujuan.</p>}
+        </div>
 
         <div className="section-title">4. Mode baca AI</div>
         <div className="mode-cards" role="radiogroup" aria-label="Mode baca AI">

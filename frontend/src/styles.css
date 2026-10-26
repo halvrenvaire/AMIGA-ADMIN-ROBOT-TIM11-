@@ -1215,3 +1215,35 @@ small.block { display: block; }
 /* Tahap 15: halaman bukti dari PDF unggahan (satu PDF bisa berisi beberapa invoice) */
 .bukti-pages { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-muted); font-size: 12.5px; }
 .bukti-pages .actions { gap: 6px; }
+
+/* Tutorial di dalam aplikasi (tombol ? di topbar) */
+.top-tools { display: flex; align-items: center; gap: 2px; }
+.tour-btn.pulse { position: relative; }
+.tour-btn.pulse::after { content: ""; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary, #0f766e); box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary, #0f766e) 60%, transparent);
+  animation: tour-pulse 1.6s ease-out infinite; }
+@keyframes tour-pulse { to { box-shadow: 0 0 0 8px transparent; } }
+.tour { position: absolute; top: 0; left: 0; width: 0; height: 0; z-index: 1000; pointer-events: none; }
+.tour { --tour-dim: rgba(15, 23, 42, 0.55); }
+:root[data-theme="dark"] .tour { --tour-dim: rgba(0, 0, 0, 0.72); }
+.tour-dim { position: fixed; inset: 0; background: var(--tour-dim); pointer-events: auto; }
+.tour-spot { position: absolute; border-radius: 10px; box-shadow: 0 0 0 9999px var(--tour-dim);
+  outline: 2px solid var(--primary, #0f766e); outline-offset: 2px; transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+  pointer-events: none; }
+.tour-card { position: absolute; width: min(360px, calc(100vw - 32px)); background: var(--surface); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28); padding: 16px 16px 12px;
+  pointer-events: auto; outline: none; }
+.tour-card.centered { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.tour-card h3 { margin: 2px 28px 6px 0; font-size: 16px; }
+.tour-card p { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: var(--fg-2); }
+.tour-count { color: var(--fg-3); font-size: 12px; }
+.tour-close { position: absolute; top: 8px; right: 8px; }
+.tour-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.tour-dots { display: flex; gap: 4px; margin-right: auto; flex-wrap: wrap; max-width: 50%; }
+.tour-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.tour-dots span.on { background: var(--primary, #0f766e); }
+@media (max-width: 600px) {
+  /* HP: kartu menjadi lembar di bawah layar supaya bagian yang disorot tetap terlihat */
+  .tour-card, .tour-card.centered { position: fixed; top: auto; bottom: 12px; left: 16px; right: 16px; width: auto; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tour-spot { transition: none; } .tour-btn.pulse::after { animation: none; } }

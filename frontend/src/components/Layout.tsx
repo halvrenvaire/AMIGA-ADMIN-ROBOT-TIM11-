@@ -11,6 +11,7 @@ import { Assistant } from "./Assistant";
 import { Clover, Logo } from "./Logo";
 import { ThemeToggle } from "../theme";
 import { initials } from "./ui";
+import { TourButton } from "./Tour";
 
 interface NavItem { to: string; label: string; icon: typeof FileText; roles: Role[] }
 
@@ -172,7 +173,10 @@ export function Layout() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari Request ID atau vendor…" aria-label="Cari dokumen" />
             </form>
           )}
-          <div style={canSearch ? undefined : { marginLeft: "auto" }}><ThemeToggle className="btn ghost sm icon-btn" /></div>
+          <div className="top-tools" style={canSearch ? undefined : { marginLeft: "auto" }}>
+            <TourButton />
+            <ThemeToggle className="btn ghost sm icon-btn" />
+          </div>
           <div className="user">
             <NavLink to="/akun" className="user-link" title="Pengaturan akun">
               <div className="avatar" aria-hidden="true">{initials(user.full_name)}</div>
