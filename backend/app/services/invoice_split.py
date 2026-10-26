@@ -67,7 +67,7 @@ def scan(extractor, pdf: bytes, include_account: bool, usage: dict) -> tuple[lis
     found: list[ExtractedInvoice] = []
     seen: set = set()
     general = None
-    chunks: list[tuple[int, int]] = []  # potongan halaman yang memuat tagihan
+    chunks: list[tuple[int, int]] = []  # potongan halaman yang sudah dipindai
     for first in range(1, limit + 1, step):
         last = min(first + step - 1, limit)
         chunk = pdf if (first, last) == (1, total_pages) else cut_pages(pdf, first, last)
@@ -76,8 +76,7 @@ def scan(extractor, pdf: bytes, include_account: bool, usage: dict) -> tuple[lis
             usage[k] = usage.get(k, 0) + int((result.usage or {}).get(k) or 0)
         if general is None:
             general = result.document
-        if result.invoices:
-            chunks.append((first, last))
+        chunks.append((first, last))  # semua potongan yang dipindai
         for inv in result.invoices:
             key = normalize(inv.invoice_no) or (inv.page, inv.total, normalize(inv.vendor_name))
             if key in seen:
@@ -97,13 +96,15 @@ def confirm_front_pages(extractor, pdf: bytes, found: list[ExtractedInvoice], ch
 
     Pemindaian per potongan halaman sering menyebut halaman awal potongan, bukan halaman invoice sebenarnya (berkas
     DSS: invoice di halaman 5, 9, 13, 20 terbaca 3, 6, 11, 16), sehingga rentang halaman bukti salah. Bila ada beberapa
-    invoice, setiap halaman di potongan yang memuat invoice diperiksa sendiri (paralel) dan halaman awal dicocokkan dari
+    invoice, setiap halaman yang dipindai diperiksa sendiri (paralel) dan halaman awal dicocokkan dari
     nomor invoicenya. Satu invoice: hanya halaman depannya, dan hanya bila AI melihat pemisahan imbalan jasa.
     Blok ringkasan dipakai untuk dasar potongan PPh 23 (fee_from_amounts). Gagal baca = hasil pindai tetap dipakai."""
     reader = getattr(extractor, "read_front_page", None)
     if reader is None or not found:
         return
     if len(found) > 1:
+        # Semua halaman yang dipindai, termasuk potongan tanpa invoice terdaftar: pemindaian kadang melewatkan
+        # invoice di satu potongan (berkas DSS sintetis: halaman 13 tidak terdaftar)
         pages = sorted({p for first, last in chunks for p in range(first, last + 1)})
     elif found[0].raw.get("service_fee") or found[0].service_fee is not None:
         pages = [found[0].page or 1]

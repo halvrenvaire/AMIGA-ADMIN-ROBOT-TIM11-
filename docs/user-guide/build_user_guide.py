@@ -497,7 +497,7 @@ def build():
     pdf.section("Memeriksa draf per bukti")
     pdf.p("Di kiri tampil bukti asli, di kanan data hasil baca AI. **Navigasi cepat** menandai bagian yang masih perlu "
           "diisi (kuning/merah). Bila satu PDF berisi beberapa invoice, setiap invoice menjadi satu **bukti** (tab) dengan "
-          "data, uraian, dan pajaknya sendiri. Contoh di bawah: satu PDF DSS 32 halaman dipisah otomatis menjadi 6 bukti "
+          "data, uraian, dan pajaknya sendiri. Contoh di bawah (berkas sintetis samples/dss_sintetis/, angka sama dengan kasus owner): satu PDF DSS 32 halaman dipisah otomatis menjadi 6 bukti "
           "(invoice + rincian + Faktur Pajak + timesheet per bukti).")
     pdf.figure("07-draf-atas.jpg", "Halaman draf: bukti asli, navigasi cepat, dan informasi dokumen.")
     pdf.figure("08-draf-bukti.jpg", "Tab bukti per invoice dan informasi utama hasil baca AI.")

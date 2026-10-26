@@ -233,3 +233,16 @@ def test_fee_confirmed_by_total_minus_amount_when_vat_and_subtotal_are_misread()
     # Baris "Sub total (NOT subjected to VAT)" bukan baris PPN
     assert fee_from_amounts(rows((BASIC, "1"), (FEE, "100"), (NOT_VAT, "5"), (VAT, "11"))).vat == Decimal("11")
 
+
+
+def test_invoice_missed_in_chunk_without_any_scanned_invoice_is_added(tx):
+    # Berkas DSS sintetis 26 Okt 2026: potongan halaman 11-15 tidak memuat invoice terdaftar sama sekali, padahal
+    # halaman 13 adalah halaman depan invoice 00325
+    fake = DssExtractor(dss_fronts())
+    fake.starts[11] = []
+    fake.result = inv("005-PI-2604-00325", "7683712", vendor="PT Demo Solusi Sejati")
+    use(fake)
+    doc = detail(upload(numbered_pdf(32), auto_tax="true").json()["id"])
+    assert [f["page_from"] for f in doc["files"]] == [1, 5, 9, 13, 20, 26]
+    assert 13 in fake.checked and Decimal(doc["files"][3]["data"]["tax"]["base"]) == Decimal("988047")
+    assert Decimal(doc["tax_summary"]["net"]) == Decimal("41719136")

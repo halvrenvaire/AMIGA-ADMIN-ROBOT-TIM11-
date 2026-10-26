@@ -35,3 +35,7 @@ backups/
 */deploy_ec2.sh
 # Folder dokumentasi visual siap unggah (salinan docs/user-guide/img, dibuat build_gallery.py)
 readme/Dokumentasi_Visual_AMIGA_Robot_Admin/
+
+# Dokumen asli owner/klien tidak boleh masuk repo publik (pakai contoh sintetis di samples/)
+samples/test_case_amiga/
+samples/**/WhatsApp*

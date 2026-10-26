@@ -59,7 +59,7 @@ GALLERY = [
         ("50-simulasi.jpg", "02_simulasi_voucher_dss.jpg", "Simulasi voucher berkas DSS: 6 invoice, baris potongan PPh 23, total dibayarkan Rp 41.719.136."),
         ("42-review-keputusan.jpg", "03_ringkasan_potongan_reviewer.jpg", "Ringkasan potongan pajak dan tombol keputusan Finance Reviewer."),
         ("d1-disetujui.jpg", "04_dokumen_disetujui.jpg", "Dokumen disetujui Finance Reviewer; voucher resmi terbit."),
-        ("51-voucher-resmi.jpg", "05_voucher_resmi_VCH-2026-10-0005.jpg", "Voucher Pengeluaran resmi VCH/2026/10/0005, sama dengan voucher bayar owner (Rp 41.719.136)."),
+        ("51-voucher-resmi.jpg", "05_voucher_resmi_VCH-2026-10-0006.jpg", "Voucher Pengeluaran resmi VCH/2026/10/0006, sama dengan voucher bayar owner (Rp 41.719.136)."),
         ("d3-daftar-voucher.jpg", "06_daftar_voucher.jpg", "Daftar voucher yang sudah terbit."),
         ("22-rekap.jpg", "07_rekap_voucher.jpg", "Rekap voucher per periode (laporan PDF)."),
         ("d4-jejak-audit.jpg", "08_jejak_audit_dokumen.jpg", "Jejak audit satu dokumen: unggah, baca AI, perubahan, pengajuan, keputusan."),
@@ -105,7 +105,7 @@ def build():
     pdf.set_text_color(*MUTED)
     pdf.multi_cell(0, 5, "Login: http://13.212.201.121/login · Bot Telegram: @amiga_online_ro_bot\n"
                          "Screenshot diambil dari aplikasi yang berjalan dengan AI sungguhan (Amazon Bedrock). "
-                         "Data invoice adalah data uji coba.")
+                         "Contoh DSS memakai berkas sintetis (nama, NPWP, dan rekening fiktif) dengan angka yang sama.")
     for folder, title, items in GALLERY:
         target = OUT_DIR / folder
         target.mkdir(parents=True, exist_ok=True)
