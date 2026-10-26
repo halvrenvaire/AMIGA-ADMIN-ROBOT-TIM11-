@@ -5,11 +5,12 @@ Proof of Concept untuk **MAIN Hackathon 2026** oleh **Kelompok 11 (TEAM 11 MAIN)
 AMIGA Robot Admin mengubah invoice vendor (PDF) menjadi voucher pembayaran resmi dalam hitungan detik. **AI hanya membaca invoice.** Sistem yang memverifikasi angka, kelengkapan, dan duplikasi, lalu **Finance Reviewer** menyetujui sebelum voucher diserahkan ke klien.
 
 > **Dokumen acuan** (folder [`readme/`](readme/)):
+> - [**User Guide Book v4.0**](readme/User_Guide_Book_AMIGA_Robot_Admin_v4.0.pdf): persyaratan sistem, instalasi, menjalankan aplikasi, dan panduan fitur (dibuat ulang dengan `backend/.venv/bin/python docs/user-guide/build_user_guide.py`)
 > - [BRD AMIGA Robot Admin v1.1](readme/BRD_AMIGA_Robot_Admin_v1.1.docx)
 > - [PRD AMIGA Robot Admin v2](<readme/PRD — AMIGA Robot Admin(v2).pdf>) (versi PRD 1.1)
 > - [BPMN Invoice-to-Voucher (revisi)](readme/AMIGA_Robot_Admin_Invoice_to_Voucher.bpmn)
 > - [Tracking tugas feedback owner](docs/TASKS.md)
-> - [SOP-AMIGA-FIN-001 v1.1](docs/sop.md)
+> - [SOP-AMIGA-FIN-001 v1.3](docs/sop.md)
 >
 > Bila README ini berbeda dengan dokumen acuan, **dokumen acuan yang berlaku**. Bagian [Keputusan desain](#keputusan-desain) mencatat hal yang belum diatur dokumen acuan.
 

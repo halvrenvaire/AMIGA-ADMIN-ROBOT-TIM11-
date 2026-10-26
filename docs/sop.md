@@ -88,20 +88,28 @@ SOP ini mengatur cara mengubah invoice vendor (PDF) menjadi voucher pembayaran r
 
 ### 7.1 Pengunggahan invoice — PIC Klien / Intake Support
 
-1. Masuk ke AMIGA Robot Admin dan buka menu **Unggah invoice**.
-2. Isi semua kolom wajib: **nama klien**, **jenis permintaan**, **saluran** (asal invoice, misalnya Email atau WhatsApp), dan **tanggal pengajuan**.
-3. Pilih file invoice PDF atau foto invoice (JPG, PNG, WEBP), lalu klik **Kirim ke antrean**. Pastikan foto tegak, tidak buram, dan seluruh isi invoice terlihat.
-4. Pastikan sistem menampilkan **Request ID** dan status **QUEUED**. Catat Request ID untuk pelacakan.
-5. Jika file ditolak (bukan PDF/foto yang didukung, file rusak, atau lebih dari 10 MB), sistem mengembalikan Anda ke formulir unggah. Perbaiki file lalu ulangi dari langkah 3.
+1. Masuk ke AMIGA Robot Admin dan buka menu **Pembuatan Voucher**. Tombol **?** di kanan atas membuka tutorial langkah demi langkah untuk halaman yang sedang dibuka.
+2. Isi **klien**, **kategori** (Vendor, Reimburse, Lainnya), dan **tanggal pengajuan**; periksa **Diajukan oleh** dan **Disetujui oleh**.
+3. Pilih **mode baca AI**: *Total saja* (bawaan, satu baris voucher per invoice) atau *Rincian barang/jasa*. Biarkan **Atur pajak secara otomatis** aktif supaya saran PPN dan PPh langsung terpasang (tetap bisa diubah).
+4. Pilih file bukti PDF atau foto (JPG, PNG, WEBP), maksimal 10 MB per file. Satu PDF boleh berisi beberapa invoice beserta Faktur Pajak dan timesheet: sistem memisahkannya menjadi satu **bukti** per invoice. Pastikan foto tegak, tidak buram, dan seluruh isi invoice terlihat.
+5. Klik **Simpan draf & lanjutkan**. Catat **Request ID** untuk pelacakan.
 6. Intake Support yang mengunggah atas nama klien hanya boleh melakukannya untuk klien yang didelegasikan. Sistem mencatat nama pengunggah sebenarnya.
+
+**Memeriksa draf sebelum diajukan:**
+
+1. Cocokkan vendor, nomor, tanggal, dan total setiap bukti dengan dokumen asli; perbaiki lalu **Simpan bukti**.
+2. Isi **uraian transaksi** tiap bukti (dicetak sebagai satu baris voucher).
+3. Periksa **pajak** tiap bukti. PPN tercetak di invoice dipakai apa adanya (total invoice sudah termasuk PPN). Potongan PPh dipilih PIC; AI hanya menyarankan.
+4. **Batasan DPP PPh 23 untuk invoice jasa:** bila invoice memisahkan **imbalan jasa** vendor (mis. *Management Fee & Development*) dari **penggantian biaya** (gaji/Basic Fee, BPJS, lembur driver), PPh 23 dipotong **hanya dari imbalan jasa**, yaitu bagian tagihan yang dikenai PPN. Contoh invoice DSS: total Rp 8.933.846, imbalan jasa Rp 2.304.696, PPh 23 2% = Rp 46.094. Bila sistem menampilkan peringatan imbalan jasa tidak cocok dengan PPN, isi DPP sendiri sesuai invoice.
+5. Lihat **simulasi voucher**, lalu klik **Ajukan untuk Direview**.
 
 **Lewat bot Telegram (alternatif):**
 
 1. Hubungkan akun sekali saja: dashboard → **Pengaturan akun** → **Hubungkan Telegram**, lalu kirim kode ke @amiga_ro_bot. **Jangan pernah mengirim password di chat.**
 2. Kirim file invoice **PDF** atau **foto invoice** ke chat pribadi bot. Foto sebaiknya dikirim sebagai **File** (📎 → File) supaya tidak dikompres Telegram. Beberapa file untuk satu voucher boleh dikirim sekaligus.
-3. Pilih **perusahaan** dan **jenis permintaan** lewat tombol. Saluran terisi **Telegram** dan tanggal pengajuan terisi hari ini secara otomatis.
-4. Periksa ringkasan, lalu tekan **Kirim ke AMIGA**. Bot menampilkan **Request ID** dan status **QUEUED**, lalu mengabari hasil proses AI.
-5. Bila ada kendala, perbaiki datanya lewat dashboard (lihat 7.3).
+3. Pilih **perusahaan** dan **kategori** lewat tombol, lalu tekan **Kirim ke AMIGA**. Saluran terisi **Telegram** dan tanggal pengajuan terisi hari ini secara otomatis.
+4. Bot mengirim **ringkasan pajak per bukti** (uraian, PPN, PPh dengan DPP dan alasan AI, total dibayarkan). Ubah bila perlu lewat tombol **Pajak bukti N** dan **Uraian bukti N**, dan minta **Simulasi voucher (PDF)**.
+5. Tekan **Ajukan ke reviewer**. Bila ada kendala atau DPP perlu diisi manual, perbaiki lewat dashboard (lihat 7.3).
 
 ### 7.2 Ekstraksi dan verifikasi otomatis — AI Engine dan Sistem
 
@@ -222,4 +230,5 @@ Langkah ini berjalan otomatis. Tidak ada tindakan pengguna.
 | 1.0 | 13 Oktober 2026 | Draf awal untuk PoC MAIN Hackathon 2026 | TEAM 11 MAIN |
 | 1.1 | 13 Oktober 2026 | Diselaraskan dengan BRD v1.1, PRD v2, dan BPMN revisi: field saluran, peran AI vs Sistem, perbaikan oleh PIC dengan ekstraksi ulang (Request ID sama), Kembalikan ke PIC, pengalihan otomatis saat penolakan SoD, Service Lead hanya mengatur beban, peran ganda | TEAM 11 MAIN |
 | 1.2 | 16 Oktober 2026 | Unggah invoice lewat bot Telegram resmi @amiga_ro_bot (6.4, 7.1); saluran Telegram | TEAM 11 MAIN |
+| 1.3 | 26 Oktober 2026 | 7.1 diselaraskan dengan alur draf (Pembuatan Voucher, pemeriksaan draf, simulasi, ajukan), banyak invoice dalam satu PDF, pajak otomatis, batasan DPP PPh 23 untuk invoice jasa (imbalan jasa saja), langkah pajak di bot Telegram, tutorial tombol ? | TEAM 11 MAIN |
 | 1.3 | 16 Oktober 2026 | Foto invoice (JPG, PNG, WEBP) diterima dan diubah otomatis menjadi PDF; foto asli disimpan (6.1, 7.1) | TEAM 11 MAIN |
