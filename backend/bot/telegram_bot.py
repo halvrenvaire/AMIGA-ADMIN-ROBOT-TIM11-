@@ -79,8 +79,12 @@ IN_PROGRESS = {"QUEUED", "PROCESSING"}
 HELP_TEXT = (
     "Perintah yang tersedia:\n"
     + "\n".join(f"/{c} - {d}" for c, d in COMMANDS)
-    + "\n\nUnggah invoice (PIC Klien / Intake Support): kirim file PDF atau foto invoice "
-    "(JPG, PNG, WEBP) ke chat ini, boleh beberapa file untuk satu voucher.\n"
+    + "\n\nUnggah invoice (PIC Klien / Intake Support):\n"
+    "1. Kirim file PDF atau foto invoice (JPG, PNG, WEBP), boleh beberapa file untuk satu voucher.\n"
+    "2. Pilih perusahaan dan kategori voucher, lalu tekan Kirim ke AMIGA.\n"
+    "3. AI membaca total, PPN, dan menyarankan potongan PPh tiap invoice.\n"
+    "4. Periksa ringkasan pajak: ubah jenis PPh atau uraian per bukti bila perlu, lihat simulasi voucher (PDF).\n"
+    "5. Tekan Ajukan ke reviewer.\n"
     "\nAtau tanya langsung dengan kalimat biasa, misalnya:\n"
     "• Apa yang harus dilakukan kalau kena MISSING_EVIDENCE?\n"
     "• Berapa target waktu pembuatan voucher?\n"
@@ -208,13 +212,7 @@ def format_processing_result(doc: dict) -> str:
         lines += [f"\n✍️ {manual['message']}", f"Isi datanya di dashboard: {doc_url(doc['id'])}"]
         return "\n".join(lines)
     if status == "DRAFT":
-        lines.append("Draf siap. Periksa data per invoice dan simulasi voucher di dashboard, pilih pajak tiap bukti, "
-                     "lalu kirim ke Finance Reviewer (bisa juga lewat tombol di bawah).")
-        pending = [f for f in doc.get("files") or [] if not (f.get("data") or {}).get("tax")]
-        if pending:
-            lines.append("\nSaran pajak (AI hanya menyarankan; Anda yang memilih):")
-            lines += [f"• Bukti {f['position']}: {s['name']} — {s['reason']}"
-                      for f in pending if (s := (f.get("data") or {}).get("tax_suggestion"))]
+        lines += ["", format_tax_overview(doc), "", next_step_text(doc)]
     issues = format_issues(doc)
     if issues:
         lines += ["\nKendala yang perlu Anda tindak lanjuti:", *issues,
@@ -223,12 +221,118 @@ def format_processing_result(doc: dict) -> str:
     return "\n".join(lines)
 
 
+VAT_MODE_LABEL = {"included": "termasuk PPN", "excluded": "belum termasuk PPN (ditambahkan)", "none": "tanpa PPN"}
+MAX_TAX_BUTTONS = 8  # tombol "ubah pajak" per bukti; lebih dari ini diatur di dashboard
+
+
+def _pct(value) -> str:
+    try:
+        return f"{Decimal(str(value)).normalize():f}".replace(".", ",") + "%"
+    except (InvalidOperation, TypeError, ValueError):
+        return "-"
+
+
+def format_tax_block(f: dict) -> str:
+    """Satu bukti: uraian, PPN, dan potongan PPh (pilihan PIC, atau saran AI bila belum dipilih)."""
+    data = f.get("data") or {}
+    tax, sug = data.get("tax"), data.get("tax_suggestion") or {}
+    head = f"📄 Bukti {f['position']} · {data.get('invoice_no') or '-'} · {rupiah(data.get('total'))}"
+    lines = [head, f"   Uraian: {data.get('description') or '— (belum diisi)'}"]
+    vat = (tax or {}).get("vat") or sug.get("vat") or {}
+    if vat.get("mode") and vat["mode"] != "none":
+        amount = f" {rupiah(vat['amount'])}" if vat.get("amount") else ""
+        lines.append(f"   PPN: {VAT_MODE_LABEL.get(vat['mode'], vat['mode'])}{amount}")
+    if not tax and data.get("service_fee_unverified"):
+        lines.append(f"   ⚠️ PPh: imbalan jasa terbaca {rupiah(data['service_fee_unverified'])}, tetapi tidak cocok dengan PPN "
+                     "di invoice. Isi DPP PPh 23 sesuai invoice di dashboard.")
+    elif not tax:
+        if sug:
+            base = f" · DPP {rupiah(sug['base'])}" if sug.get("base") else ""
+            lines.append(f"   PPh: belum dipilih. Saran AI: {sug['name']}{base} — {sug.get('reason') or ''}")
+        else:
+            lines.append("   PPh: belum dipilih")
+    elif tax.get("mode") == "line":
+        lines.append(f"   PPh per baris: {rupiah(tax.get('amount'))} (atur di dashboard)")
+    elif tax.get("code") == "NONE":
+        lines.append("   PPh: tanpa potongan")
+    else:
+        npwp = "" if tax.get("npwp") else " (tanpa NPWP)"
+        lines.append(f"   PPh: {tax['name']} ({rupiah(tax.get('base'))} x {_pct(tax.get('rate'))}){npwp} = "
+                     f"−{rupiah(tax.get('amount'))}")
+        if tax.get("source") == "auto" and sug.get("reason"):
+            lines.append(f"   Alasan AI: {sug['reason']}")
+    return "\n".join(lines)
+
+
+def format_tax_overview(doc: dict) -> str:
+    """Ringkasan pajak semua bukti + total, potongan, dan nilai yang dibayarkan."""
+    files = doc.get("files") or []
+    blocks = [format_tax_block(f) for f in files]
+    taxes = doc.get("tax_summary") or {}
+    if taxes.get("gross") is not None:
+        cut = Decimal(str(taxes.get("tax_total") or 0))
+        blocks.append(f"Total invoice: {rupiah(taxes['gross'])}\nPotongan PPh: {'−' if cut else ''}{rupiah(cut)}\n"
+                      f"Dibayarkan: {rupiah(taxes.get('net'))}")
+    return "\n\n".join(blocks)
+
+
+def _missing(doc: dict) -> tuple[list[int], list[int]]:
+    """Nomor bukti yang belum punya pilihan pajak, dan yang uraiannya kosong (mode total saja)."""
+    files = doc.get("files") or []
+    no_tax = [f["position"] for f in files if not (f.get("data") or {}).get("tax")]
+    no_desc = [f["position"] for f in files
+               if doc.get("extraction_mode") == "TOTAL_ONLY" and not ((f.get("data") or {}).get("description") or "").strip()]
+    return no_tax, no_desc
+
+
+def _unsure(doc: dict) -> list[int]:
+    """Bukti yang imbalan jasanya tidak cocok dengan PPN: DPP PPh diisi PIC di dashboard."""
+    return [f["position"] for f in doc.get("files") or []
+            if not (f.get("data") or {}).get("tax") and (f.get("data") or {}).get("service_fee_unverified")]
+
+
+def next_step_text(doc: dict) -> str:
+    no_tax, no_desc = _missing(doc)
+    unsure = _unsure(doc)
+    if unsure:
+        return (f"Langkah berikutnya: isi DPP PPh 23 bukti {', '.join(map(str, unsure))} di dashboard "
+                f"({doc_url(doc['id'])}), karena angka imbalan jasanya perlu dicek dengan invoice.")
+    if no_tax:
+        return (f"Langkah berikutnya: pilih pajak bukti {', '.join(map(str, no_tax))}. Tekan \"Pakai saran AI\" atau "
+                "ubah per bukti. AI hanya menyarankan; keputusan di Anda.")
+    if no_desc:
+        return f"Langkah berikutnya: isi uraian bukti {', '.join(map(str, no_desc))}."
+    return "Periksa pajak di atas (bisa diubah per bukti) dan simulasi voucher, lalu tekan \"Ajukan ke reviewer\"."
+
+
 def draft_buttons(doc: dict) -> list:
-    """Draf yang pajaknya belum dipilih: pakai saran AI atau tanpa potongan, lalu kirim. Selebihnya: kirim saja."""
-    if all((f.get("data") or {}).get("tax") for f in doc.get("files") or []):
-        return [[("📤 Kirim ke reviewer", f"sub:{doc['id']}")]]
-    return [[("✅ Pakai saran pajak & kirim", f"tx:a:{doc['id']}")],
-            [("Tanpa potongan & kirim", f"tx:n:{doc['id']}")]]
+    """Tombol draf: saran AI untuk bukti yang belum dipilih, ubah pajak/uraian per bukti, simulasi, ajukan."""
+    doc_id, files = doc["id"], doc.get("files") or []
+    no_tax, no_desc = _missing(doc)
+    rows = []
+    if set(no_tax) - set(_unsure(doc)):
+        rows.append([("🤖 Pakai saran AI untuk pajak", f"tx:a:{doc_id}")])
+    elif not no_desc:
+        rows.append([("📤 Ajukan ke reviewer", f"sub:{doc_id}")])
+    if len(files) <= MAX_TAX_BUTTONS:
+        for f in files:
+            row = [(f"✏️ Pajak bukti {f['position']}", f"tc:{doc_id}:{f['position']}")]
+            if doc.get("extraction_mode") == "TOTAL_ONLY":
+                row.append((f"📝 Uraian bukti {f['position']}", f"de:{doc_id}:{f['position']}"))
+            rows.append(row)
+    rows.append([("📄 Simulasi voucher (PDF)", f"pv:{doc_id}")])
+    return rows
+
+
+def tax_choice_buttons(doc_id: str, position: int, rates: list[dict], current: str | None) -> list:
+    rows = []
+    for r in rates:
+        if not r.get("is_active"):
+            continue
+        label = "Tanpa potongan" if r["code"] == "NONE" else f"{r['name']} ({_pct(r['rate_npwp'])})"
+        rows.append([(("● " if r["code"] == current else "") + label, f"ts:{doc_id}:{position}:{r['code']}")])
+    rows.append([("↩️ Kembali", f"ov:{doc_id}")])
+    return rows
 
 
 def format_assistant(body: dict) -> str:
@@ -307,6 +411,17 @@ class TelegramAPI:
                     [{"text": label, "callback_data": data} for label, data in row] for row in buttons]}
             self.call("sendMessage", **params)
 
+    def send_document(self, chat_id: int, filename: str, content: bytes, caption: str = "") -> None:
+        try:
+            with self.lock:
+                r = self.client.post(f"{self.base}/sendDocument", data={"chat_id": str(chat_id), "caption": caption},
+                                     files={"document": (filename, content, "application/pdf")})
+            body = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            raise RuntimeError(f"Telegram sendDocument gagal ({type(e).__name__})") from None
+        if not body.get("ok"):
+            raise RuntimeError(f"Telegram sendDocument ditolak: {body.get('description')}")
+
     def answer_callback(self, callback_id: str) -> None:
         try:
             self.call("answerCallbackQuery", callback_query_id=callback_id)
@@ -347,7 +462,7 @@ class AmigaAPI:
     def __init__(self, client: httpx.Client | None = None):
         self.client = client or httpx.Client(base_url=settings.bot_api_base_url, timeout=120)
 
-    def request(self, user: User, method: str, path: str, **kwargs):
+    def request(self, user: User, method: str, path: str, raw: bool = False, **kwargs):
         headers = {"Authorization": f"Bearer {create_access_token(user)}"}
         try:
             r = self.client.request(method, path, headers=headers, **kwargs)
@@ -362,7 +477,7 @@ class AmigaAPI:
                 detail = "Server AMIGA sedang bermasalah. Coba lagi beberapa saat lagi." if r.status_code >= 500 \
                     else f"Permintaan ditolak ({r.status_code})."
             raise BackendError(detail)
-        return r.json()
+        return r.content if raw else r.json()
 
 
 # --- Bot ---
@@ -410,6 +525,8 @@ class AmigaBot:
         self.session_factory = session_factory
         self.guard = LoginGuard()
         self.drafts: dict[int, UploadDraft] = {}
+        # Menunggu balasan teks: chat → (dokumen, nomor bukti) untuk uraian transaksi
+        self.awaiting_description: dict[int, tuple[str, int]] = {}
         self.watch_in_background = watch_in_background
 
     # -- penerimaan update --
@@ -479,6 +596,8 @@ class AmigaBot:
                 return login_instructions()
 
             user = link.user
+            if command is not None:
+                self.awaiting_description.pop(chat_id, None)
             if command == "/logout":
                 self.drafts.pop(chat_id, None)
                 telegram_service.unlink(db, link, via="bot Telegram")
@@ -496,7 +615,10 @@ class AmigaBot:
             if command is not None:
                 return f"Perintah {command} tidak dikenal.\n\n{HELP_TEXT}"
             session_id = link.session_id
+            waiting = self.awaiting_description.pop(chat_id, None)
 
+        if waiting is not None:
+            return self._set_description(user, waiting[0], waiting[1], text)
         self.tg.typing(chat_id)
         body = self.amiga.request(user, "POST", "/ask-agent", json={"question": text[:2000], "session_id": session_id})
         return format_assistant(body)
@@ -555,17 +677,93 @@ class AmigaBot:
 
     # -- unggah invoice --
 
-    def _choose_tax_and_submit(self, user, mode: str, document_id: str) -> str:
-        """Tombol Telegram: PIC memilih pajak setiap bukti yang belum dipilih (saran AI atau tanpa potongan),
-        lalu draf dikirim ke reviewer. Pilihan tercatat sebagai pilihan PIC di jejak audit."""
+    def _overview(self, user, document_id: str, note: str = "") -> Reply:
+        """Ringkasan draf (pajak per bukti, total, dibayarkan) dengan tombol langkah berikutnya."""
+        doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
+        if doc["status"] not in ("DRAFT", "EXCEPTION"):
+            return Reply(f"{doc['request_id']} sudah {STATUS_LABEL.get(doc['status'], doc['status'])}; "
+                         f"tidak bisa diubah lagi.\nDetail: /status {doc['request_id']}")
+        head = f"{note}\n\n" if note else ""
+        text = (f"{head}📝 {doc['request_id']} · {doc.get('client', {}).get('name') or '-'}\n\n"
+                f"{format_tax_overview(doc)}\n\n{next_step_text(doc)}\nDashboard: {doc_url(document_id)}")
+        return Reply(text, draft_buttons(doc))
+
+    def _apply_ai_taxes(self, user, document_id: str) -> Reply:
+        """Saran pajak AI/aturan diterapkan ke bukti yang belum dipilih; PIC memeriksa dulu sebelum mengajukan."""
         doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
         for f in doc.get("files") or []:
             data = f.get("data") or {}
-            if data.get("tax"):
-                continue
-            code = (data.get("tax_suggestion") or {}).get("code", "NONE") if mode == "a" else "NONE"
-            self.amiga.request(user, "PUT", f"/documents/{document_id}/files/{f['position']}/tax",
-                               json={"code": code, "npwp": data.get("npwp_known") is not False})
+            if data.get("tax") or data.get("service_fee_unverified"):
+                continue  # pilihan PIC tidak ditimpa; DPP yang belum pasti diisi PIC di dashboard
+            self._put_tax(user, document_id, f["position"], data, (data.get("tax_suggestion") or {}).get("code", "NONE"))
+        return self._overview(user, document_id, "✅ Saran pajak AI diterapkan. Periksa sebelum mengajukan:")
+
+    def _put_tax(self, user, document_id: str, position: int, data: dict, code: str) -> dict:
+        """Simpan jenis PPh satu bukti. DPP dan PPN yang sudah ada (mis. imbalan jasa dan PPN tercetak) dipertahankan."""
+        tax, sug = data.get("tax") or {}, data.get("tax_suggestion") or {}
+        base = tax.get("base") if tax and not tax.get("base_auto") else sug.get("base")
+        vat = tax.get("vat") or sug.get("vat")
+        body = {"code": code, "npwp": tax.get("npwp", data.get("npwp_known") is not False),
+                "base": base if code != "NONE" else None}
+        if vat and vat.get("mode"):
+            body["vat"] = {"mode": vat["mode"], "rate": vat.get("rate") or "11", "show": bool(vat.get("show"))}
+        return self.amiga.request(user, "PUT", f"/documents/{document_id}/files/{position}/tax", json=body)
+
+    def _tax_menu(self, user, document_id: str, position: int) -> Reply:
+        doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
+        f = next((x for x in doc.get("files") or [] if x["position"] == position), None)
+        if f is None:
+            return Reply("Bukti tidak ditemukan. Muat ulang ringkasan.", [[("↩️ Ringkasan", f"ov:{document_id}")]])
+        data = f.get("data") or {}
+        if (data.get("tax") or {}).get("mode") == "line":
+            return Reply(f"Bukti {position} memakai PPh per baris; ubah di dashboard: {doc_url(document_id)}",
+                         [[("↩️ Kembali", f"ov:{document_id}")]])
+        rates = self.amiga.request(user, "GET", "/tax-rates")
+        current = (data.get("tax") or {}).get("code") or (data.get("tax_suggestion") or {}).get("code")
+        sug = data.get("tax_suggestion") or {}
+        hint = f"\n\nSaran AI: {sug['name']} — {sug.get('reason') or ''}" if sug else ""
+        return Reply(f"{format_tax_block(f)}{hint}\n\nPilih jenis potongan PPh untuk bukti {position}. "
+                     "DPP dan PPN yang terbaca dari invoice tetap dipakai; ubah DPP manual di dashboard.",
+                     tax_choice_buttons(document_id, position, rates, current))
+
+    def _set_tax(self, user, document_id: str, position: int, code: str) -> Reply:
+        doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
+        f = next((x for x in doc.get("files") or [] if x["position"] == position), None)
+        if f is None:
+            return Reply("Bukti tidak ditemukan.", [[("↩️ Ringkasan", f"ov:{document_id}")]])
+        self._put_tax(user, document_id, position, f.get("data") or {}, code)
+        return self._overview(user, document_id, f"✅ Pajak bukti {position} disimpan.")
+
+    def _ask_description(self, chat_id: int, user, document_id: str, position: int) -> str:
+        doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
+        f = next((x for x in doc.get("files") or [] if x["position"] == position), None)
+        if f is None:
+            return "Bukti tidak ditemukan."
+        self.awaiting_description[chat_id] = (document_id, position)
+        current = (f.get("data") or {}).get("description") or "-"
+        return (f"Uraian bukti {position} sekarang:\n{current}\n\nBalas pesan ini dengan uraian baru "
+                "(dicetak sebagai satu baris di voucher, mis. \"Management Fee & Development Driver A\").")
+
+    def _set_description(self, user, document_id: str, position: int, text: str) -> Reply:
+        doc = self.amiga.request(user, "GET", f"/documents/{document_id}")
+        f = next((x for x in doc.get("files") or [] if x["position"] == position), None)
+        if f is None or doc.get("extraction_mode") != "TOTAL_ONLY":
+            return Reply("Uraian bukti ini diubah di dashboard.", [[("↩️ Ringkasan", f"ov:{document_id}")]])
+        data = f.get("data") or {}
+        body = {k: data.get(k) for k in ("vendor_name", "invoice_no", "invoice_date", "total",
+                                         "bank_name", "account_no", "account_name")}
+        body["description"] = text.strip()[:500]
+        self.amiga.request(user, "PUT", f"/documents/{document_id}/files/{position}/data", json=body)
+        return self._overview(user, document_id, f"✅ Uraian bukti {position} disimpan.")
+
+    def _send_preview(self, chat_id: int, user, document_id: str) -> Reply:
+        pdf = self.amiga.request(user, "GET", f"/documents/{document_id}/voucher-preview",
+                                 params={"attachments": "false"}, raw=True)
+        self.tg.send_document(chat_id, f"simulasi-voucher-{document_id[:8]}.pdf", pdf,
+                              "Simulasi voucher (bukan voucher resmi). Lampiran bukti ada di dashboard.")
+        return self._overview(user, document_id)
+
+    def _submit_draft(self, user, document_id: str) -> str:
         sent = self.amiga.request(user, "POST", f"/documents/{document_id}/submit")
         taxes = sent.get("tax_summary") or {}
         paid = f"\nDibayarkan: {rupiah(taxes['net'])}" if taxes.get("net") is not None else ""
@@ -689,12 +887,24 @@ class AmigaBot:
             if link is None:
                 return login_instructions()
             user = link.user
-        if data.startswith("tx:"):
-            return self._choose_tax_and_submit(user, data[3:4], data[5:])
+        if data.startswith("tx:a:"):
+            return self._apply_ai_taxes(user, data[5:])
         if data.startswith("sub:"):
-            sent = self.amiga.request(user, "POST", f"/documents/{data[4:]}/submit")
-            return (f"📤 {sent['request_id']} dikirim ke Finance Reviewer ({sent.get('assigned_reviewer') or '-'}).\n"
-                    f"Status: {STATUS_LABEL.get(sent['status'], sent['status'])}")
+            return self._submit_draft(user, data[4:])
+        if data.startswith("ov:"):
+            return self._overview(user, data[3:])
+        if data.startswith("pv:"):
+            return self._send_preview(chat_id, user, data[3:])
+        if data.startswith(("tc:", "de:", "ts:")):
+            parts = data.split(":")
+            if len(parts) < 3 or not parts[2].isdigit():
+                return "Tombol tidak valid."
+            doc_id, position = parts[1], int(parts[2])
+            if parts[0] == "tc":
+                return self._tax_menu(user, doc_id, position)
+            if parts[0] == "de":
+                return self._ask_description(chat_id, user, doc_id, position)
+            return self._set_tax(user, doc_id, position, parts[3] if len(parts) > 3 else "NONE")
         draft = self._draft(chat_id, user)
         if draft is None:
             return "Pengajuan ini sudah tidak aktif. Kirim ulang file PDF invoice untuk memulai."
@@ -725,8 +935,9 @@ class AmigaBot:
         self.tg.typing(chat_id)
         doc = self.amiga.request(
             user, "POST", "/documents",
+            # Sama dengan dashboard: saran pajak AI langsung terpasang, PIC memeriksa sebelum mengajukan
             data={"client_id": draft.client["id"], "request_type": draft.request_type,
-                  "channel": "Telegram", "submitted_date": date.today().isoformat()},
+                  "channel": "Telegram", "submitted_date": date.today().isoformat(), "auto_tax": "true"},
             files=[("files", (name, content, media_type)) for name, content, _, media_type in draft.files],
         )
         self.tg.send_message(chat_id, (

@@ -110,14 +110,17 @@ export interface FileData {
   line_items: FileLine[];
   /** Uraian transaksi (mode total saja): satu baris voucher per invoice. */
   description?: string | null;
-  /** Uraian spesifik singkat terkait invoice (mis. Management Fee & Development Syaiful Rindang). */
+  /** Uraian spesifik singkat terkait invoice (mis. Management Fee & Development Driver A). */
   service_description?: string | null;
   /** Pilihan pajak PIC (Tahap 4); tarif disalin saat dipilih. */
   tax?: TaxChoice | null;
   /** Saran PPh tiap baris (aturan kata kunci, atau AI bila diminta PIC); null untuk baris PPN. */
   line_suggestions?: (LineSuggestion | null)[];
   /** `base`: dasar potongan yang disarankan (imbalan jasa saja) bila invoice memisahkan fee dari penggantian biaya. */
-  tax_suggestion?: { code: string; name: string; reason: string; source: "ai" | "aturan"; base?: string } | null;
+  tax_suggestion?: {
+    code: string; name: string; reason: string; source: "ai" | "aturan"; base?: string;
+    vat?: { mode: "included" | "excluded" | "none"; rate: string; amount: string; reason: string }
+  } | null;
   /** Disalin AI dari invoice: imbalan jasa penerbit (mis. Management Fee) dan PPN yang tercetak. */
   service_fee?: string | null;
   /** Imbalan jasa yang dibaca AI tetapi tidak cocok dengan PPN tercetak, sehingga tidak dipakai. */

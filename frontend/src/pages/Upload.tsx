@@ -144,127 +144,131 @@ export function Upload() {
       </div>
 
       <div className="with-aside">
-      <form className="card panel upload-form" onSubmit={save}>
-        {error && <Alert>{error}</Alert>}
-        {!clients.length && <Alert kind="warn">Akun Anda belum ditugaskan ke perusahaan mana pun. Hubungi System Admin.</Alert>}
+        <form className="card panel upload-form" onSubmit={save}>
+          {error && <Alert>{error}</Alert>}
+          {!clients.length && <Alert kind="warn">Akun Anda belum ditugaskan ke perusahaan mana pun. Hubungi System Admin.</Alert>}
 
-        <div className="section-title">1. Data pengajuan</div>
-        <div className="grid-3">
-          <div className="field">
-            <label htmlFor="client">Klien</label>
-            <select id="client" className="input" required value={clientId} onChange={(e) => chooseClient(e.target.value)}>
-              {clients.length !== 1 && <option value="" disabled>Pilih perusahaan…</option>}
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <small>Hanya perusahaan yang ditugaskan kepada Anda.</small>
+          <div className="section-title">1. Data pengajuan</div>
+          <div className="grid-3">
+            <div className="field">
+              <label htmlFor="client">Klien</label>
+              <select id="client" className="input" required value={clientId} onChange={(e) => chooseClient(e.target.value)}>
+                {clients.length !== 1 && <option value="" disabled>Pilih perusahaan…</option>}
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <small>Hanya perusahaan yang ditugaskan kepada Anda.</small>
+            </div>
+            <div className="field">
+              <label htmlFor="type">Kategori</label>
+              <select id="type" className="input" required value={requestType} onChange={(e) => setRequestType(e.target.value)}>
+                {REQUEST_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <small>Untuk filter di dashboard; tidak dicetak di voucher.</small>
+            </div>
+            <div className="field">
+              <label htmlFor="submitted">Tanggal pengajuan</label>
+              <input id="submitted" className="input" type="date" required value={submittedDate}
+                onChange={(e) => setSubmittedDate(e.target.value)} />
+            </div>
           </div>
-          <div className="field">
-            <label htmlFor="type">Kategori</label>
-            <select id="type" className="input" required value={requestType} onChange={(e) => setRequestType(e.target.value)}>
-              {REQUEST_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-            </select>
-            <small>Untuk filter di dashboard; tidak dicetak di voucher.</small>
+
+          <div data-tour="submitter">
+            <div className="section-title">2. Diajukan oleh</div>
+            <SubmitterProfileFields value={profile} onChange={setProfile} pic={pic} accountLink={isPic} />
           </div>
-          <div className="field">
-            <label htmlFor="submitted">Tanggal pengajuan</label>
-            <input id="submitted" className="input" type="date" required value={submittedDate}
-                   onChange={(e) => setSubmittedDate(e.target.value)} />
+
+          <div data-tour="approver">
+            <div className="section-title">3. Disetujui oleh</div>
+            {company
+              ? <SignerPicker key={clientId} clientId={clientId} clientName={company.name} submitter={submitterLabel} showSubmitter={false}
+                onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
+              : <p className="muted" style={{ margin: 0 }}>Pilih klien dulu untuk memilih pemberi persetujuan.</p>}
           </div>
-        </div>
 
-        <div className="section-title">2. Diajukan oleh</div>
-        <SubmitterProfileFields value={profile} onChange={setProfile} pic={pic} accountLink={isPic} />
+          <div className="section-title">4. Mode baca AI</div>
+          <div className="mode-cards" role="radiogroup" aria-label="Mode baca AI">
+            {(Object.keys(MODE_INFO) as ExtractionMode[]).map((m) => (
+              <label key={m} className={`mode-card${mode === m ? " on" : ""}`}>
+                <input type="radio" name="mode" value={m} checked={mode === m} onChange={() => setMode(m)} />
+                <span className="mode-ic">{m === "TOTAL_ONLY" ? <Receipt /> : <ListOrdered />}</span>
+                <span><b>{MODE_INFO[m].title}{m === "TOTAL_ONLY" && <small className="chip ok">Bawaan</small>}</b>
+                  <small>{MODE_INFO[m].desc}</small></span>
+              </label>
+            ))}
+          </div>
+          <small className="muted">Mode masih bisa diganti di halaman berikutnya.</small>
 
-        <div className="section-title">3. Disetujui oleh</div>
-        {company
-          ? <SignerPicker key={clientId} clientId={clientId} clientName={company.name} submitter={submitterLabel} showSubmitter={false}
-                          onChange={(ids, chosen) => { setSigners(ids); setApprovers(chosen); }} />
-          : <p className="muted" style={{ margin: 0 }}>Pilih klien dulu untuk memilih pemberi persetujuan.</p>}
+          <details className="extras">
+            <summary>Fitur tambahan <span className="muted">(opsional)</span></summary>
+            <div className="extras-body">
+              <label className="toggle">
+                <input type="checkbox" checked={extras} onChange={(e) => setExtras(e.target.checked)} />
+                Catat saluran asal dan tenggat
+              </label>
+              {extras && (
+                <div className="grid-2">
+                  <div className="field">
+                    <label htmlFor="channel">Saluran</label>
+                    <select id="channel" className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>
+                      <option>Email</option><option>WhatsApp</option><option>Lainnya</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="due">Tenggat</label>
+                    <input id="due" className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                  </div>
+                </div>
+              )}
+              <label className="toggle">
+                <input type="checkbox" checked={includeAccount} onChange={(e) => setIncludeAccount(e.target.checked)} />
+                Perlu input rekening tujuan ke voucher
+              </label>
+              {includeAccount && <small className="muted">AI ikut membaca bank dan nomor rekening, lalu dicek ke data vendor dan dicetak di voucher.</small>}
+              <label className="toggle">
+                <input type="checkbox" checked={autoTax} onChange={(e) => setAutoTax(e.target.checked)} />
+                Atur pajak secara otomatis <span className="muted">· sistem langsung menerapkan rekomendasi PPh &amp; PPN ke setiap invoice (bisa diubah di draf)</span>
+              </label>
+            </div>
+          </details>
 
-        <div className="section-title">4. Mode baca AI</div>
-        <div className="mode-cards" role="radiogroup" aria-label="Mode baca AI">
-          {(Object.keys(MODE_INFO) as ExtractionMode[]).map((m) => (
-            <label key={m} className={`mode-card${mode === m ? " on" : ""}`}>
-              <input type="radio" name="mode" value={m} checked={mode === m} onChange={() => setMode(m)} />
-              <span className="mode-ic">{m === "TOTAL_ONLY" ? <Receipt /> : <ListOrdered />}</span>
-              <span><b>{MODE_INFO[m].title}{m === "TOTAL_ONLY" && <small className="chip ok">Bawaan</small>}</b>
-                <small>{MODE_INFO[m].desc}</small></span>
-            </label>
-          ))}
-        </div>
-        <small className="muted">Mode masih bisa diganti di halaman berikutnya.</small>
-
-        <details className="extras">
-          <summary>Fitur tambahan <span className="muted">(opsional)</span></summary>
-          <div className="extras-body">
-          <label className="toggle">
-            <input type="checkbox" checked={extras} onChange={(e) => setExtras(e.target.checked)} />
-            Catat saluran asal dan tenggat
-          </label>
-          {extras && (
-            <div className="grid-2">
-              <div className="field">
-                <label htmlFor="channel">Saluran</label>
-                <select id="channel" className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>
-                  <option>Email</option><option>WhatsApp</option><option>Lainnya</option>
-                </select>
+          <div className="section-title">5. File bukti <span className="muted">({files.length}/{MAX_FILES})</span></div>
+          {files.length > 0 && (
+            <ul className="file-list">
+              {files.map((f, i) => (
+                <li key={`${f.name}-${f.size}`}>
+                  <FileText />
+                  <span className="name">{i + 1}. {f.name}</span>
+                  <span className="muted">{(f.size / 1024).toFixed(0)} KB</span>
+                  <button type="button" className="btn ghost sm" aria-label={`Lihat ${f.name}`} title="Lihat file"
+                    onClick={() => setPreviewFile(f)}><Eye /></button>
+                  <button type="button" className="btn ghost sm" aria-label={`Hapus ${f.name}`}
+                    onClick={() => setFiles(files.filter((_, j) => j !== i))}><X /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {files.length < MAX_FILES && (
+            <div className={`drop ${over ? "over" : ""}`} onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}
+              role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}>
+              <UploadCloud />
+              <div style={{ marginTop: 6 }}>
+                Seret file PDF atau foto invoice ke sini atau <b>ketuk untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
               </div>
-              <div className="field">
-                <label htmlFor="due">Tenggat</label>
-                <input id="due" className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-              </div>
+              <small className="muted">Bisa beberapa file sekaligus. Maks. {MAX_MB} MB per file. Satu file boleh berisi invoice beserta Faktur Pajak dan timesheet, atau beberapa invoice sekaligus: AI memisahkannya per invoice.</small>
             </div>
           )}
-          <label className="toggle">
-            <input type="checkbox" checked={includeAccount} onChange={(e) => setIncludeAccount(e.target.checked)} />
-            Perlu input rekening tujuan ke voucher
-          </label>
-          {includeAccount && <small className="muted">AI ikut membaca bank dan nomor rekening, lalu dicek ke data vendor dan dicetak di voucher.</small>}
-          <label className="toggle">
-            <input type="checkbox" checked={autoTax} onChange={(e) => setAutoTax(e.target.checked)} />
-            Atur pajak secara otomatis <span className="muted">· sistem langsung menerapkan rekomendasi PPh &amp; PPN ke setiap invoice (bisa diubah di draf)</span>
-          </label>
-          </div>
-        </details>
+          <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(e) => add(e.target.files)} />
 
-        <div className="section-title">5. File bukti <span className="muted">({files.length}/{MAX_FILES})</span></div>
-        {files.length > 0 && (
-          <ul className="file-list">
-            {files.map((f, i) => (
-              <li key={`${f.name}-${f.size}`}>
-                <FileText />
-                <span className="name">{i + 1}. {f.name}</span>
-                <span className="muted">{(f.size / 1024).toFixed(0)} KB</span>
-                <button type="button" className="btn ghost sm" aria-label={`Lihat ${f.name}`} title="Lihat file"
-                        onClick={() => setPreviewFile(f)}><Eye /></button>
-                <button type="button" className="btn ghost sm" aria-label={`Hapus ${f.name}`}
-                        onClick={() => setFiles(files.filter((_, j) => j !== i))}><X /></button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {files.length < MAX_FILES && (
-          <div className={`drop ${over ? "over" : ""}`} onClick={() => inputRef.current?.click()}
-               onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}
-               role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}>
-            <UploadCloud />
-            <div style={{ marginTop: 6 }}>
-              Seret file PDF atau foto invoice ke sini atau <b>ketuk untuk memilih</b>{files.length > 0 && " (tambah invoice lain)"}
-            </div>
-            <small className="muted">Bisa beberapa file sekaligus. Maks. {MAX_MB} MB per file. Satu file boleh berisi invoice beserta Faktur Pajak dan timesheet, atau beberapa invoice sekaligus: AI memisahkannya per invoice.</small>
+          <div className="actions" style={{ justifyContent: "flex-end" }}>
+            <button className="btn primary" disabled={busy || !clients.length || !files.length || !clientId}>
+              <Save /> {busy ? "Menyimpan…" : "Simpan draf & lanjutkan"}
+            </button>
           </div>
-        )}
-        <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(e) => add(e.target.files)} />
-
-        <div className="actions" style={{ justifyContent: "flex-end" }}>
-          <button className="btn primary" disabled={busy || !clients.length || !files.length || !clientId}>
-            <Save /> {busy ? "Menyimpan…" : "Simpan draf & lanjutkan"}
-          </button>
-        </div>
-      </form>
-      {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
-      <UploadAside company={company?.name} requestType={requestType} dueDate={extras ? dueDate : ""} files={files}
-                   approvers={approvers} mode={mode} submitter={submitterLabel} includeAccount={includeAccount} />
+        </form>
+        {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
+        <UploadAside company={company?.name} requestType={requestType} dueDate={extras ? dueDate : ""} files={files}
+          approvers={approvers} mode={mode} submitter={submitterLabel} includeAccount={includeAccount} />
       </div>
     </>
   );

@@ -122,8 +122,8 @@ TOTAL_INSTRUCTION = """Kembalikan HANYA satu objek JSON (tanpa teks lain):
 penerbit tagihan, bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar (Grand
 Total / Total Bayar / Amount Due), ditulis persis seperti di dokumen sebagai teks (mis. "Rp 2.695.000").
 "service_fee": imbalan jasa penerbit (mis. "Management Fee"), disalin persis HANYA bila invoice memecah tagihan menjadi
-imbalan jasa dan penggantian biaya; null bila tidak. JANGAN mengisi dengan kode pegawai/driver (mis. DD05354). Harus berupa nominal uang (rupiah) atau null. "vat_amount": PPN yang tercetak; null bila tidak ada.
-"description": uraian ringkas peruntukan atau jenis jasa/barang (mis. "Management Fee & Development Syaiful Rindang", "Cetak Payung", atau "Pengadaan seragam"), disalin dari invoice atau lampirannya; null bila tidak ada.
+imbalan jasa dan penggantian biaya; null bila tidak. JANGAN mengisi dengan kode pegawai/driver (mis. DD00002). Harus berupa nominal uang (rupiah) atau null. "vat_amount": PPN yang tercetak; null bila tidak ada.
+"description": uraian ringkas peruntukan atau jenis jasa/barang (mis. "Management Fee & Development Driver A", "Cetak Payung", atau "Pengadaan seragam"), disalin dari invoice atau lampirannya; null bila tidak ada.
 Tanggal dokumen Indonesia ditulis hari-bulan-tahun ("12-10-2026" = "2026-10-12")."""
 
 PAGE_SYSTEM_PROMPT = """Kamu staf keuangan yang memeriksa satu halaman dari berkas tagihan gabungan. Tugasmu HANYA
@@ -197,9 +197,9 @@ Beberapa struk dalam satu halaman = beberapa entri dengan "page" yang sama. "ven
 bukan judul bagian seperti "Penjual" atau "Dari". "total": jumlah akhir yang harus dibayar, ditulis persis seperti
 di dokumen sebagai teks (mis. "Rp 2.695.000").
 "service_fee": imbalan jasa penerbit (mis. "Management Fee" atau "Management Fee & Development"), disalin persis
-HANYA bila invoice memecah tagihan menjadi imbalan jasa dan penggantian biaya/basic fee; null bila tidak. JANGAN mengisi dengan kode pegawai/driver (mis. DD05354). Harus berupa NOMINAL UANG (rupiah), atau null jika tidak ada.
+HANYA bila invoice memecah tagihan menjadi imbalan jasa dan penggantian biaya/basic fee; null bila tidak. JANGAN mengisi dengan kode pegawai/driver (mis. DD00002). Harus berupa NOMINAL UANG (rupiah), atau null jika tidak ada.
 "vat_amount": nilai PPN / VAT yang tercetak di invoice (mis. "VAT / PPN", "Jumlah PPN"); null bila tidak ada.
-"description": uraian singkat peruntukan atau nama layanan/driver jika tertulis (mis. "Management Fee & Development Syaiful Rindang", "Overtime Driver - Syaiful Rindang"); null bila tidak ada.
+"description": uraian singkat peruntukan atau nama layanan/driver jika tertulis (mis. "Management Fee & Development Driver A", "Overtime Driver - Driver A"); null bila tidak ada.
 PENTING: Faktur Pajak (nomor seri 16 digit, diawali 040 atau semacamnya) BUKAN invoice dan TIDAK BOLEH masuk ke daftar invoices.
 Tanggal dokumen Indonesia ditulis hari-bulan-tahun ("12-10-2026" = "2026-10-12")."""
 
@@ -489,7 +489,7 @@ def parse_response(text: str) -> ExtractedInvoice:
     fee = service_fee_from_components(data.get("components")) or _positive(data.get("service_fee"))
     vat, unverified_fee = _positive(data.get("vat_amount")), None
 
-    # Sanity check: nilai imbalan jasa tidak boleh berupa angka kecil kode driver (mis. 5354 dari DD05354) bila total jutaan
+    # Sanity check: nilai imbalan jasa tidak boleh berupa angka kecil kode driver (mis. 5354 dari DD00002) bila total jutaan
     if fee is not None and total is not None and total >= Decimal("1000000") and fee < Decimal("50000"):
         fee = None
 
@@ -553,6 +553,7 @@ AMOUNT_TEXT = re.compile(r"\s*(rp\.?\s*)?-?[\d.,\s]+(,-+|\.-+|-+)?\s*", re.IGNOR
 
 
 VAT_LABEL = re.compile(r"\b(vat|ppn)\b", re.IGNORECASE)
+SUBTOTAL_LABEL = re.compile(r"sub\s*total|subjected|terkena|dpp|dasar", re.IGNORECASE)
 EXACT = Decimal(1)  # selisih pembulatan PPN (Rp) saat mencocokkan angka tercetak satu sama lain
 
 
@@ -586,7 +587,7 @@ def fee_from_amounts(rows) -> FeeReading:
             labelled += value
         if value is not None:
             values.append(value)
-            if VAT_LABEL.search(label) and vat is None:
+            if VAT_LABEL.search(label) and not SUBTOTAL_LABEL.search(label) and vat is None:
                 vat = value
     if not split:
         return FeeReading()
@@ -600,21 +601,25 @@ def fee_from_amounts(rows) -> FeeReading:
             elif abs(a * 12 / 100 - v) <= EXACT:
                 candidates.add((a * 12 / 11).quantize(Decimal(1), rounding=ROUND_HALF_UP))
     labelled = labelled or None
+    # Selisih dua angka (mis. Total Invoice - Total Amount = PPN) ikut dipakai bila baris PPN sendiri salah terbaca
+    diffs = {a - b for a in values for b in values if a > b}
     if labelled is not None and (any(abs(labelled - c) <= EXACT for c in candidates)
-                                 or any(abs(labelled * 11 / 12 - v) <= EXACT for v in values)):
-        # Cocok dengan PPN, atau dengan "Sub total terkena PPN" (DPP nilai lain = imbalan x 11/12)
+                                 or any(abs(labelled * 11 / 12 - v) <= EXACT for v in values)
+                                 or any(abs(labelled * 11 / 100 - d) <= EXACT for d in diffs)):
+        # Cocok dengan PPN, dengan "Sub total terkena PPN" (DPP nilai lain = imbalan x 11/12), atau dengan selisih
+        # total invoice dan jumlah sebelum PPN
         fee = labelled
     elif len(candidates) == 1:
         fee = next(iter(candidates))
     else:
         return FeeReading(split=True, vat=vat, unverified=labelled)
-    matched = next((v for v in values if abs(fee * 11 / 100 - v) <= EXACT), vat)
+    matched = next((v for v in [*values, *sorted(diffs)] if abs(fee * 11 / 100 - v) <= EXACT), vat)
     return FeeReading(split=True, fee=fee, vat=matched)
 
 
 def _positive(value) -> Decimal | None:
     """Angka yang disalin AI; nol, negatif, atau tidak terbaca dianggap tidak ada. Teks yang bukan angka (mis. AI
-    menyalin label "Management Fee ... DD05592") ditolak, supaya angka di dalam label tidak terbaca sebagai nilai."""
+    menyalin label "Management Fee ... DD00003") ditolak, supaya angka di dalam label tidak terbaca sebagai nilai."""
     if isinstance(value, str) and not AMOUNT_TEXT.fullmatch(value):
         return None
     number = to_decimal(value)

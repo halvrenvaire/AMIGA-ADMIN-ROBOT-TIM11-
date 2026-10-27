@@ -132,6 +132,7 @@ class FakeTelegram:
         self.sent: list[tuple[int, str]] = []
         self.buttons: list = []  # tombol pada pesan terakhir
         self.files: dict[str, bytes] = {}
+        self.documents: list[tuple[int, str, bytes]] = []
 
     def send_message(self, chat_id, text, buttons=None):
         self.sent.append((chat_id, text))
@@ -142,6 +143,9 @@ class FakeTelegram:
 
     def answer_callback(self, callback_id):
         pass
+
+    def send_document(self, chat_id, filename, content, caption=""):
+        self.documents.append((chat_id, filename, content))
 
     def clear_buttons(self, chat_id, message_id):
         pass

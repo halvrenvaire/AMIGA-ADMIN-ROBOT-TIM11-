@@ -48,8 +48,7 @@ const normalizeVatMode = (m: string | null | undefined): VatMode | null =>
 
 /** PPN dan hitungan sistem (sama dengan backend tax_service.vat_breakdown). `payable`: yang dibayar sebelum PPh bila
  *  PPN ditambahkan ke harga; tanpa `payable` = total invoice. */
-function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number):
-  { amount: number; computed: number; warning: string | null; payable?: number } {
+function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode, rate: number, printed: number | null = null): { amount: number; computed: number; warning: string | null; payable?: number } {
   const items = lines.map((l, i) => ({ l, r: rows[i] })).filter(({ r }) => r && r.kind === "item");
   const itemSum = items.reduce((s, { l }) => s + (Number(l.subtotal) || 0), 0);
   const stated = lines.filter((_, i) => rows[i]?.kind === "vat").reduce((s, l) => s + (Number(l.subtotal) || 0), 0);
@@ -65,8 +64,9 @@ function vatInfo(lines: TaxLine[], rows: Row[], total: string, vatMode: VatMode,
     return { amount, computed: amount, warning, payable: (items.length ? itemSum : Number(total) || 0) + amount };
   }
   if (!items.length && vatMode !== "none" && total !== "") {
-    // Tanpa rincian, harga sudah termasuk PPN: total = DPP + PPN
-    const amount = Number(total) - totalDpp(Number(total), rate);
+    // Tanpa rincian, harga sudah termasuk PPN: total = DPP + PPN. PPN tercetak di invoice dipakai bila ada
+    // (invoice jasa seperti DSS: PPN hanya atas imbalan jasa, jadi tarif x total akan salah)
+    const amount = vatMode === "included" && printed != null ? printed : Number(total) - totalDpp(Number(total), rate);
     return { amount, computed: amount, warning: null as string | null };
   }
   if (vatMode === "included") {
@@ -114,7 +114,8 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   })), [file.data]);
   const initialVat = current?.vat;
   // Sama dengan backend: tanpa pengaturan, "belum termasuk PPN" bila ada baris PPN, selain itu "tidak ada"
-  const defaultVatMode: VatMode = saved.some(isVatLine) ? "excluded" : "none";
+  // Belum ada pilihan pajak: saran PPN dari pembacaan invoice (PPN tercetak = total sudah termasuk PPN)
+  const defaultVatMode: VatMode = saved.some(isVatLine) ? "excluded" : suggestion?.vat?.mode ?? "none";
   const [vatMode, setVatMode] = useState<VatMode>(normalizeVatMode(initialVat?.mode) ?? defaultVatMode);
   const [vatRate, setVatRate] = useState(initialVat ? plainNumber(initialVat.rate) : "11");
   const [vatShow, setVatShow] = useState(initialVat?.show ?? false);
@@ -142,14 +143,16 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const itemIdx = rows.map((r, i) => (r.kind === "item" ? i : -1)).filter((i) => i >= 0);
   const dpp = (i: number) => lineDpp(lines[i], rows[i], vatMode, vatPct);
   const dppTotal = itemIdx.reduce((s, i) => s + dpp(i), 0);
-  const vat = vatInfo(lines, rows, total, vatMode, vatPct);
+  const printedVat = file.data?.vat_printed ? Number(file.data.vat_printed) : null;
+  const vat = vatInfo(lines, rows, total, vatMode, vatPct, printedVat);
   const gross = total === "" ? null : Number(total);
   // Dibayarkan sebelum PPh: harga + PPN bila PPN ditambahkan, selain itu total invoice
   const payable = gross == null ? null : calc ? vat.payable ?? gross
     : vatMode === "excluded" ? gross + (Number(vatAmount) || 0) : gross;
 
   // Mode satu jenis: DPP otomatis = jumlah DPP baris barang/jasa; tanpa rincian = total dikurangi PPN di dalamnya
-  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode !== "included" ? gross : totalDpp(gross, vatPct);
+  const autoBase = dppTotal > 0 ? dppTotal : gross == null ? null : itemIdx.length || vatMode !== "included" ? gross
+    : printedVat != null ? gross - printedVat : totalDpp(gross, vatPct);
   const invoiceBase = manual || !calc ? (base === "" ? null : Number(base)) : autoBase;
   const invoiceCut = !calc ? (code === "NONE" ? 0 : Number(cutAmount) || 0)
     : invoiceBase && rateOf(code) ? Math.round((invoiceBase * rateOf(code)) / 100) : 0;
@@ -171,8 +174,10 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
   const body = () => ({
     mode, code: mode === "invoice" ? code : "NONE", npwp,
     base: mode === "invoice" && (manual || !calc) && base !== "" ? base : null,
-    ...(!calc && { calc: false, vat_amount: vatMode !== "none" && vatAmount !== "" ? vatAmount : null,
-                   amount: code !== "NONE" && cutAmount !== "" ? cutAmount : null }),
+    ...(!calc && {
+      calc: false, vat_amount: vatMode !== "none" && vatAmount !== "" ? vatAmount : null,
+      amount: code !== "NONE" && cutAmount !== "" ? cutAmount : null
+    }),
     lines: rows.map((r, i) => ({
       index: i, vat: r.vat, pph: mode === "line" && r.kind === "item" ? r.pph || null : undefined,
       // Jenis baris hanya dikirim bila berbeda dengan tebakan sistem atau pernah dikoreksi PIC
@@ -191,8 +196,10 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
     return {
       mode: m, code: m === "invoice" ? t.code : "NONE", npwp: t.npwp,
       base: m === "invoice" && !t.base_auto && t.base != null ? plainNumber(t.base) : null,
-      ...(manualCalc && { calc: false, vat_amount: t.vat?.mode !== "none" && t.vat?.amount != null ? plainNumber(t.vat.amount) : null,
-                          amount: t.code !== "NONE" && t.amount != null ? plainNumber(t.amount) : null }),
+      ...(manualCalc && {
+        calc: false, vat_amount: t.vat?.mode !== "none" && t.vat?.amount != null ? plainNumber(t.vat.amount) : null,
+        amount: t.code !== "NONE" && t.amount != null ? plainNumber(t.amount) : null
+      }),
       lines: rs.map((r, i) => ({
         index: i, vat: r.vat, pph: m === "line" && r.kind === "item" ? ls[i].pph || null : undefined,
         kind: ls[i].kind || (r.kind === "vat") !== VAT_LINE.test(ls[i].description) ? r.kind : undefined,
@@ -266,16 +273,16 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
       )}
       <label className="toggle">
         <input type="checkbox" checked={calc} disabled={off}
-               onChange={(e) => {
-                 setCalc(e.target.checked);
-                 if (!e.target.checked) {
-                   // Mulai dari hitungan sistem, lalu PIC menyesuaikan dengan angka di invoice
-                   setMode("invoice");
-                   setBase(autoBase != null ? String(autoBase) : "");
-                   setVatAmount(vatMode !== "none" ? String(Math.round(vat.amount)) : "");
-                   setCutAmount(String(invoiceCut));
-                 }
-               }} />
+          onChange={(e) => {
+            setCalc(e.target.checked);
+            if (!e.target.checked) {
+              // Mulai dari hitungan sistem, lalu PIC menyesuaikan dengan angka di invoice
+              setMode("invoice");
+              setBase(autoBase != null ? String(autoBase) : "");
+              setVatAmount(vatMode !== "none" ? String(Math.round(vat.amount)) : "");
+              setCutAmount(String(invoiceCut));
+            }
+          }} />
         <span>Hitung pajak otomatis <span className="muted">· matikan bila ingin mengisi DPP, PPN, dan potongan PPh sendiri sesuai invoice</span></span>
       </label>
 
@@ -296,20 +303,20 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
               <label htmlFor="vat-rate">Tarif PPN</label>
               <div style={{ display: "flex", gap: 8 }}>
                 <select id="vat-rate" className="input" disabled={off} value={VAT_RATES.includes(vatRate) ? vatRate : "other"}
-                        onChange={(e) => setVatRate(e.target.value === "other" ? "" : e.target.value)}>
+                  onChange={(e) => setVatRate(e.target.value === "other" ? "" : e.target.value)}>
                   {VAT_RATES.map((r) => <option key={r} value={r}>{r}%</option>)}
                   <option value="other">Lainnya</option>
                 </select>
                 {!VAT_RATES.includes(vatRate) && (
                   <input className="input num" type="number" min="0.01" max="100" step="0.01" placeholder="%" aria-label="Tarif PPN lainnya"
-                         style={{ width: 90 }} disabled={off} value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
+                    style={{ width: 90 }} disabled={off} value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
                 )}
               </div>
               {calc ? (
                 <small>{vatMode === "excluded" ? "PPN ditambahkan" : "PPN pada tagihan ini"}: <b className="num">{rupiah(vat.amount)}</b></small>
               ) : (
                 <input className="input num" type="number" min="0" placeholder="Nilai PPN di invoice" aria-label="Nilai PPN (manual)"
-                       style={{ marginTop: 6 }} disabled={off} value={vatAmount} onChange={(e) => setVatAmount(e.target.value)} />
+                  style={{ marginTop: 6 }} disabled={off} value={vatAmount} onChange={(e) => setVatAmount(e.target.value)} />
               )}
             </div>
           )}
@@ -327,10 +334,10 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
         <b>Potongan PPh</b>
         <div className="seg" role="radiogroup" aria-label="Penerapan PPh">
           <button type="button" role="radio" aria-checked={mode === "invoice"} className={mode === "invoice" ? "active" : ""} disabled={off}
-                  onClick={() => setMode("invoice")}>Satu jenis untuk seluruh invoice</button>
+            onClick={() => setMode("invoice")}>Satu jenis untuk seluruh invoice</button>
           <button type="button" role="radio" aria-checked={mode === "line"} className={mode === "line" ? "active" : ""} disabled={off || !lines.length || !calc}
-                  title={!lines.length ? "Hanya untuk mode rincian barang/jasa" : !calc ? "Hanya saat pajak dihitung otomatis" : undefined}
-                  onClick={() => setMode("line")}>Berbeda per baris</button>
+            title={!lines.length ? "Hanya untuk mode rincian barang/jasa" : !calc ? "Hanya saat pajak dihitung otomatis" : undefined}
+            onClick={() => setMode("line")}>Berbeda per baris</button>
         </div>
         {mode === "invoice" && distinctSuggestions.size > 1 && (
           <p className="tax-hint tax-switch">
@@ -342,6 +349,11 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           <p className="tax-hint">
             <span className="chip gray">{suggestion.source === "ai" ? "Saran AI" : "Saran sistem"}</span>{" "}
             <b>{suggestion.name}</b> · {suggestion.reason}. Keputusan tetap di Anda.
+          </p>
+        )}
+        {suggestion?.vat && (
+          <p className="tax-hint">
+            <span className="chip gray">Saran PPN</span> Harga sudah termasuk PPN · {suggestion.vat.reason}.
           </p>
         )}
         {mode === "invoice" && file.data?.service_fee_unverified && (
@@ -377,7 +389,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
           <div className="field">
             <label htmlFor="tax-npwp">NPWP vendor</label>
             <select id="tax-npwp" className="input" value={npwp ? "1" : "0"} disabled={off || (mode === "invoice" && code === "NONE")}
-                    onChange={(e) => setNpwp(e.target.value === "1")}>
+              onChange={(e) => setNpwp(e.target.value === "1")}>
               <option value="1">Punya NPWP</option>
               <option value="0">Tidak punya NPWP</option>
             </select>
@@ -391,11 +403,11 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
             <div className="field">
               <label htmlFor="tax-base">Dasar pengenaan pajak (DPP)</label>
               <input id="tax-base" className="input num" type="number" disabled={off || (calc && !manual)}
-                     value={manual || !calc ? base : autoBase ?? ""} onChange={(e) => setBase(e.target.value)} />
+                value={manual || !calc ? base : autoBase ?? ""} onChange={(e) => setBase(e.target.value)} />
               {calc && (
                 <label className="toggle" style={{ marginTop: 4 }}>
                   <input type="checkbox" checked={!manual} disabled={off}
-                         onChange={(e) => { setManual(!e.target.checked); setBase(autoBase != null ? String(autoBase) : ""); }} />
+                    onChange={(e) => { setManual(!e.target.checked); setBase(autoBase != null ? String(autoBase) : ""); }} />
                   <span>{itemIdx.length ? "Otomatis dari rincian (tanpa PPN)" : "Otomatis dari total (tanpa PPN)"}</span>
                 </label>
               )}
@@ -410,7 +422,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
               ) : (
                 <>
                   <input id="tax-cut" className="input num" type="number" min="0" disabled={off} value={cutAmount}
-                         onChange={(e) => setCutAmount(e.target.value)} />
+                    onChange={(e) => setCutAmount(e.target.value)} />
                   <small>Tarif acuan {pct(rateOf(code))}{payable != null && <> · dibayarkan untuk bukti ini: <b>{rupiah(payable - invoiceCut)}</b></>}</small>
                 </>
               )}
@@ -448,12 +460,12 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
             <div className="tax-bulk">
               <label className="toggle">
                 <input type="checkbox" checked={allSelected} disabled={off}
-                       onChange={() => setSelected(allSelected ? new Set() : new Set(itemIdx))} />
+                  onChange={() => setSelected(allSelected ? new Set() : new Set(itemIdx))} />
                 <span>Pilih semua</span>
               </label>
               <span className="muted">{selected.size} baris dipilih</span>
               <select className="input" style={{ width: "auto" }} aria-label="Jenis PPh untuk baris terpilih" value={bulkCode}
-                      disabled={off} onChange={(e) => setBulkCode(e.target.value)}>
+                disabled={off} onChange={(e) => setBulkCode(e.target.value)}>
                 {pphList.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
               </select>
               <button type="button" className="btn sm" disabled={off || !selected.size} onClick={() => applyBulk(bulkCode)}>Terapkan ke baris terpilih</button>
@@ -480,7 +492,7 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
                     <tr key={i} className={!item ? "muted" : selected.has(i) ? "selected" : ""}>
                       {mode === "line" && (
                         <td>{item && <input type="checkbox" aria-label={`Pilih baris ${i + 1}`} checked={selected.has(i)}
-                                            disabled={off} onChange={() => toggle(i)} />}</td>
+                          disabled={off} onChange={() => toggle(i)} />}</td>
                       )}
                       <td>{i + 1}</td>
                       <td>
@@ -493,10 +505,10 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
                             </span>
                           )}
                           <button type="button" className="link-btn" disabled={off}
-                                  onClick={() => {
-                                    setRow(i, { kind: item ? "vat" : "item", pph: "" });
-                                    if (item && vatMode === "none") setVatMode("excluded");  // baris PPN berarti PPN ditambahkan ke harga
-                                  }}>
+                            onClick={() => {
+                              setRow(i, { kind: item ? "vat" : "item", pph: "" });
+                              if (item && vatMode === "none") setVatMode("excluded");  // baris PPN berarti PPN ditambahkan ke harga
+                            }}>
                             {item ? "Tandai sebagai baris PPN" : "Bukan baris PPN"}
                           </button>
                         </div>
@@ -504,12 +516,12 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
                       <td className="right num nowrap">{item ? rupiah(dpp(i)) : rupiah(l.subtotal || null)}</td>
                       {vatMode !== "none" && (
                         <td>{item && <input type="checkbox" aria-label={`Baris ${i + 1} kena PPN`} title="Kena PPN" checked={r.vat}
-                                            disabled={off} onChange={(e) => setRow(i, { vat: e.target.checked })} />}</td>
+                          disabled={off} onChange={(e) => setRow(i, { vat: e.target.checked })} />}</td>
                       )}
                       {mode === "line" && (
                         <td>{item && (
                           <select className="input sm" aria-label={`PPh baris ${i + 1}`} value={r.pph} disabled={off}
-                                  onChange={(e) => setRow(i, { pph: e.target.value })}>
+                            onChange={(e) => setRow(i, { pph: e.target.value })}>
                             <option value="">Tanpa potongan</option>
                             {pphList.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
                           </select>
@@ -537,8 +549,8 @@ export function TaxPanel({ doc, file, lines, total, disabled, onDirty, onChange,
         <div className="actions" style={{ justifyContent: "flex-end" }}>
           {dirty && current && <button className="btn" disabled={busy} onClick={reset}><Undo2 /> Batalkan</button>}
           <button className="btn primary" disabled={off || (mode === "invoice" && (manual || !calc) && base === "" && code !== "NONE")
-                    || (vatMode !== "none" && !(Number(vatRate) > 0)) || (!calc && code !== "NONE" && cutAmount === "")}
-                  onClick={apply}>Terapkan pajak</button>
+            || (vatMode !== "none" && !(Number(vatRate) > 0)) || (!calc && code !== "NONE" && cutAmount === "")}
+            onClick={apply}>Terapkan pajak</button>
         </div>
       )}
     </div>

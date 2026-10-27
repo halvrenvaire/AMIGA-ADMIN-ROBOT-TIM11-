@@ -2,7 +2,7 @@
 
 Contoh owner (voucher 1702): PPh 23 2% dipotong dari "Management Fee & Development" (bagian yang dikenai PPN), bukan
 dari total invoice; Basic Fee, BPJS, dan Overtime driver adalah penggantian biaya. Angka baris di test ini disalin dari
-pembacaan Nova Lite yang sebenarnya pada berkas samples/test_case_amiga/test_invoice dss.pdf, termasuk salah bacanya.
+pembacaan Nova Lite yang sebenarnya pada berkas samples/dss_sintetis/invoice_dss_sintetis.pdf, termasuk salah bacanya.
 """
 import copy
 import io
@@ -75,13 +75,13 @@ def test_invoice_without_reimbursed_costs_is_not_a_fee_split():
 
 def test_label_copied_instead_of_amount_is_rejected():
     # Pemindaian nyata: AI menyalin label; angka "05592" dari kode driver tidak boleh terbaca sebagai imbalan jasa
-    assert _positive("Management Fee & Development Driver Service DD05592 / ARIS") is None
+    assert _positive("Management Fee & Development Driver Service DD00003 / DRIVER C") is None
     assert _positive("VAT / PPN") is None
     assert _positive("Rp. 2.304.696,-") == Decimal("2304696")
     assert _positive("2,304,696.00") == Decimal("2304696.00")
-    part = parse_response('{"document_class": "invoice", "vendor_name": "PT Dayakarya Solusi Sejati", '
+    part = parse_response('{"document_class": "invoice", "vendor_name": "PT Demo Solusi Sejati", '
                           '"invoice_no": "005-PI-2604-00325", "total": "7,683,712.00", '
-                          '"service_fee": "Management Fee & Development Driver Service DD05592 / ARIS", '
+                          '"service_fee": "Management Fee & Development Driver Service DD00003 / DRIVER C", '
                           '"vat_amount": "VAT / PPN"}')
     assert part.service_fee is None and part.vat_printed is None
 
@@ -100,7 +100,7 @@ class DssExtractor(ScanningExtractor):
         starts: dict[int, list[ExtractedInvoice]] = {}
         for no, page, total, _, _ in DSS:
             wrong_page = ((page - 1) // 5) * 5 + 1
-            scanned = inv(no, total, vendor="PT Dayakarya Solusi Sejati")
+            scanned = inv(no, total, vendor="PT Demo Solusi Sejati")
             scanned.raw = {"service_fee": "Management Fee & Development Driver Service"}
             starts.setdefault(wrong_page, []).append(scanned)
         super().__init__(starts)
@@ -138,7 +138,16 @@ def test_dss_file_pages_and_pph23_base_follow_the_owner_voucher(tx):
         tax = data["tax"]  # pajak otomatis: PPh 23 2% dari imbalan jasa
         assert tax["code"] == "PPH23" and Decimal(tax["base"]) == Decimal(fee)
         assert Decimal(tax["amount"]) == (Decimal(fee) * 2 / 100).quantize(Decimal(1))
+        # Saran PPN otomatis: PPN tercetak berarti total sudah termasuk PPN; nilainya angka tercetak, bukan 11% x total
+        assert tax["vat"]["mode"] == "included"
+        assert data["tax_suggestion"]["vat"]["amount"] == vat and "tercetak" in data["tax_suggestion"]["vat"]["reason"]
     summary = doc["tax_summary"]
+    assert [Decimal(v["amount"]) for v in summary["vat"]] == [Decimal(v) for *_, v in DSS]
+    text = " ".join(PdfReader(io.BytesIO(api(PIC).get(f"/documents/{doc['id']}/voucher-preview",
+                                                       params={"attachments": False}).content)).pages[0]
+                    .extract_text().split())
+    assert "Potongan PPh 23 (Rp 2.304.696 x 2%) 005-PI-2604-00322 (Rp 46.094)" in text
+    assert "(termasuk PPN) Rp 8.933.846" in text
     # Voucher 1702 owner: total invoice 41.896.238, potongan PPh 23 177.102, dibayar 41.719.136
     assert Decimal(summary["gross"]) == Decimal("41896238")
     assert Decimal(summary["tax_total"]) == Decimal("177102")
@@ -153,3 +162,87 @@ def test_fee_left_for_pic_when_front_page_numbers_do_not_match(tx):
     data = doc["files"][3]["data"]
     assert data.get("service_fee") is None and Decimal(data["service_fee_unverified"]) == Decimal("988047")
     assert fake.checked.count(13) == 2  # dibaca ulang sekali
+
+
+def test_service_fee_is_never_guessed_from_total_or_vat_ratio():
+    from app.services import tax_service
+    # Total sama persis dengan invoice DSS, tetapi tanpa imbalan jasa yang terbaca: tidak ada tabel angka hafalan
+    assert tax_service.service_fee({"vendor_name": "PT Demo Solusi Sejati (DSS)", "total": "8933846"}) is None
+    # Invoice PT yang hanya sebagian barangnya kena PPN (PPN < 8% dari total) bukan invoice imbalan jasa
+    assert tax_service.service_fee({"vendor_name": "PT Sumber Makmur", "total": "10000000", "vat_printed": "330000"}) is None
+    assert tax_service.suggest_by_rules({"vendor_name": "PT Sumber Makmur", "total": "10000000",
+                                         "vat_printed": "330000"}, False).code == "NONE"
+    # Imbalan jasa yang sudah dicocokkan dengan PPN tetap dipakai
+    assert tax_service.service_fee({"service_fee": "2304696"}) == Decimal("2304696")
+
+
+def test_invoice_missed_by_scan_is_added_from_page_check(tx):
+    # Pembacaan nyata 26 Okt 2026: pemindaian per 5 halaman tidak mendaftar invoice 00323 (halaman 5), padahal
+    # pemeriksaan per halaman menemukan halaman depannya
+    fake = DssExtractor(dss_fronts())
+    fake.starts[1] = [i for i in fake.starts[1] if i.invoice_no != "005-PI-2604-00323"]
+    # Bukti yang terlewat dibaca ulang AI (mode total saja) untuk data kepalanya
+    fake.result = inv("005-PI-2604-00323", "8933846", vendor="PT Demo Solusi Sejati")
+    use(fake)
+    doc = detail(upload(numbered_pdf(32), auto_tax="true").json()["id"])
+    files = doc["files"]
+    assert [f["page_from"] for f in files] == [1, 5, 9, 13, 20, 26]
+    assert [f["data"]["invoice_no"] for f in files] == [no for no, *_ in DSS]
+    assert fake.calls == 1  # hanya bukti yang terlewat yang dibaca ulang
+    added = files[1]["data"]
+    assert Decimal(added["service_fee"]) == Decimal("2304696") and added["vendor_name"] == "PT Demo Solusi Sejati"
+    assert Decimal(added["tax"]["base"]) == Decimal("2304696")
+    assert Decimal(doc["tax_summary"]["net"]) == Decimal("41719136")
+
+
+def test_scanned_detail_page_is_dropped_and_unsure_fee_is_not_auto_taxed(tx):
+    # Pembacaan nyata 26 Okt 2026: lampiran rincian di halaman 6 terdaftar sebagai invoice "005-DO2311-000001";
+    # imbalan jasa invoice 00325 tidak cocok dengan PPN
+    fronts = dss_fronts()
+    fronts[13].amounts = rows((OVERTIME, "6,586,980.00"), (FEE, "988,047.00"), (VAT, "908,685.00"))
+    fake = DssExtractor(fronts)
+    detail_page = inv("005-DO2311-000001", "6375633", vendor="PT Demo Solusi Sejati")
+    fake.starts[6].insert(0, detail_page)
+    use(fake)
+    doc = detail(upload(numbered_pdf(32), auto_tax="true").json()["id"])
+    files = doc["files"]
+    assert [f["data"]["invoice_no"] for f in files] == [no for no, *_ in DSS]
+    unsure = files[3]["data"]
+    # Pajak tidak dipasang otomatis dengan DPP seluruh tagihan; PIC mengisi DPP (peringatan di panel pajak)
+    assert unsure.get("tax") is None and Decimal(unsure["service_fee_unverified"]) == Decimal("988047")
+    r = api(PIC).post(f"/documents/{doc['id']}/tax/apply-all")
+    assert r.json()["files"][3]["data"].get("tax") is None
+
+
+def test_misread_number_is_matched_only_when_close():
+    from app.services.invoice_split import _same_invoice
+    front = PageInfo(True, "005-PI-2604-00324", rows((TOTAL, "8,933,846.00")))
+    assert _same_invoice(inv("005-PI-2604-0O324", "1"), front)  # salah baca satu karakter
+    assert _same_invoice(inv(None, "8933846"), front)  # nomor tidak terbaca, total sama
+    assert not _same_invoice(inv("005-DO2311-000001", "6375633"), front)  # lampiran rincian
+
+
+def test_fee_confirmed_by_total_minus_amount_when_vat_and_subtotal_are_misread():
+    # Halaman 13, pembacaan nyata 26 Okt 2026: PPN 908.685 dan "Sub total terkena PPN" 7.575.027 salah terbaca, tetapi
+    # Total Invoice - Total Amount = 7.683.712 - 7.575.027 = 108.685 = 988.047 x 11%
+    misread = rows((BASIC, "0.00"), (OVERTIME, "6,586,980.00"), (FEE, "988,047.00"), (AMOUNT, "7,575,027.00"),
+                   (NOT_VAT, "6,669,317.00"), (VAT_SUB, "7,575,027.00"), (VAT, "908,685.00"), (STAMP, "0.00"),
+                   (TOTAL, "7,683,712.00"))
+    r = fee_from_amounts(misread)
+    assert r.fee == Decimal("988047") and r.vat == Decimal("108685")
+    # Baris "Sub total (NOT subjected to VAT)" bukan baris PPN
+    assert fee_from_amounts(rows((BASIC, "1"), (FEE, "100"), (NOT_VAT, "5"), (VAT, "11"))).vat == Decimal("11")
+
+
+
+def test_invoice_missed_in_chunk_without_any_scanned_invoice_is_added(tx):
+    # Berkas DSS sintetis 26 Okt 2026: potongan halaman 11-15 tidak memuat invoice terdaftar sama sekali, padahal
+    # halaman 13 adalah halaman depan invoice 00325
+    fake = DssExtractor(dss_fronts())
+    fake.starts[11] = []
+    fake.result = inv("005-PI-2604-00325", "7683712", vendor="PT Demo Solusi Sejati")
+    use(fake)
+    doc = detail(upload(numbered_pdf(32), auto_tax="true").json()["id"])
+    assert [f["page_from"] for f in doc["files"]] == [1, 5, 9, 13, 20, 26]
+    assert 13 in fake.checked and Decimal(doc["files"][3]["data"]["tax"]["base"]) == Decimal("988047")
+    assert Decimal(doc["tax_summary"]["net"]) == Decimal("41719136")

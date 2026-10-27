@@ -16,7 +16,7 @@ import io
 import pytest
 import uuid
 
-VENDOR = "PT Dayakarya Solusi Sejati"
+VENDOR = "PT Demo Solusi Sejati"
 
 # (nomor invoice, penggantian biaya, imbalan jasa, PPN, total tagihan, PPh 23 yang diharapkan), 6 invoice acuan
 DSS = [
@@ -75,7 +75,7 @@ def use(extractor_obj):
 def upload_combined(pdf, **form):
     data = {"client_id": client_id("PT Klien Alpha"), "request_type": "Voucher Pengeluaran Vendor",
             "submitted_date": "2026-10-22", **form}
-    return api(PIC).post("/documents", data=data, files=[("files", ("test_invoice dss.pdf", pdf, "application/pdf"))])
+    return api(PIC).post("/documents", data=data, files=[("files", ("invoice_dss_sintetis.pdf", pdf, "application/pdf"))])
 
 
 # --- Aturan pemecahan (tanpa AI) ---
@@ -114,7 +114,7 @@ def test_slice_pdf_keeps_page_range():
 # --- Salinan angka pajak dari invoice ---
 
 def test_parse_response_copies_service_fee_and_printed_vat():
-    inv = parse_response('{"document_class":"invoice","vendor_name":"PT Dayakarya Solusi Sejati",'
+    inv = parse_response('{"document_class":"invoice","vendor_name":"PT Demo Solusi Sejati",'
                          '"invoice_no":"005-PI-2604-00322","total":"8,933,846.00",'
                          '"service_fee":"2,304,696.00","vat_amount":"253,517.00"}')
     assert (inv.total, inv.service_fee, inv.vat_printed) == (Decimal(8933846), Decimal(2304696), Decimal(253517))
