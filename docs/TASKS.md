@@ -1,7 +1,7 @@
 # Tracking Tugas — Feedback Owner AMIGA
 
 Sumber: **Ringkasan Pemahaman Feedback Owner AMIGA** (18 Okt 2026, 12 masukan owner), ditambah feedback owner setelahnya.
-Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD v3](../readme/PRD_AMIGA_Robot_Admin_v3.pdf) · [BPMN v2](../readme/AMIGA_Robot_Admin_Invoice_to_Voucher_v2.png)
+Dokumen acuan lain: [BRD v3.0](../readme/BRD_AMIGA_Robot_Admin_v3.0.pdf) · [PRD v3](../readme/PRD_AMIGA_Robot_Admin_v3.pdf) · [BPMN v2](../readme/AMIGA_Robot_Admin_Invoice_to_Voucher_v2.png)
 
 **Cara pakai**
 
@@ -10,7 +10,7 @@ Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD
 - Saat tugas selesai: centang, isi kolom commit, perbarui ringkasan progres, lalu commit dan push.
 - Nomor `#1`–`#12` merujuk ke nomor masukan owner di dokumen ringkasan.
 
-_Terakhir diperbarui: 26 Okt 2026_
+_Terakhir diperbarui: 27 Okt 2026_
 
 ---
 
@@ -25,7 +25,7 @@ _Terakhir diperbarui: 26 Okt 2026_
 | 5 | Konfirmasi tarif pajak | Kecil | 1/2 | ❓ PPh 26 |
 | 6 | Feedback owner 19–20 Okt (kop voucher, PPN, tabel voucher) | Sedang | 4/4 | ✅ |
 | 7 | Pertanyaan terbuka ke owner | — | 0/4 | ❓ |
-| 8 | Dokumen & rilis (BRD, PRD, BPMN, buku panduan, deploy) | Sedang | 2/7 | ⏳ |
+| 8 | Dokumen & rilis (BRD, PRD, BPMN, buku panduan, deploy) | Sedang | 3/7 | ⏳ |
 | 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ |
 | 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
 | 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
@@ -119,7 +119,7 @@ _Terakhir diperbarui: 26 Okt 2026_
 | ID | Tugas | Status | Catatan |
 | --- | --- | --- | --- |
 | T8.1 | Perbarui BPMN: alur draf (PIC edit → simulasi → kirim), reviewer tanpa edit | [ ] | BPMN v2 masih alur lama (reviewer mengoreksi) |
-| T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4, dan pengaturan PPN/PPh per baris T9.1–T9.6); satu voucher boleh beberapa vendor/rekening setelah dikonfirmasi PIC (T10.3); format voucher Tahap 11 | [ ] | |
+| T8.2 | BRD v3.0 (as-built 27 Okt 2026): 18 perubahan D1–D18 terhadap v2.0 (alur draf, kategori, reimburse, banyak invoice per PDF, mode baca AI, pajak dan PPN, DPP PPh 23 imbalan jasa, format voucher, rekening opsional, isi manual, profil pengaju, bot @amiga_online_ro_bot, kemudahan pakai, biaya AI, lokasi server, status DRAFT), epic dan UAT diperbarui, pertanyaan terbuka dan lembar persetujuan. Sisa format voucher Tahap 11 dicatat sebagai backlog | [x] | belum di-commit |
 | T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner; batas 5 halaman per file dihapus (T12.1); rekening tidak wajib (T13.1) | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
@@ -343,3 +343,4 @@ pembacaan invoice; potongan PPh masuk voucher bayar, (2) alur bot Telegram ditam
 | 26 Okt 2026 | T19.6 ditambahkan dan selesai: galeri dokumentasi visual untuk pengumpulan tugas MAIN |
 | 26 Okt 2026 | T19.7 ditambahkan dan selesai: data asli owner dikeluarkan dari repo publik, contoh DSS sintetis |
 | 26 Okt 2026 | Riwayat git ditulis ulang (git filter-repo) untuk mengeluarkan dokumen asli owner dari repo publik; semua hash commit di file ini disesuaikan dengan riwayat baru. README: bagian Coba aplikasi dan Mulai cepat |
+| 27 Okt 2026 | T8.2 selesai: BRD v3.0 (DOCX dan PDF) di `readme/` |

@@ -34,7 +34,7 @@ contoh kasus DSS dibuat oleh `backend/scripts/make_dss_sample.py`.
 
 > **Dokumen acuan** (folder [`readme/`](readme/)):
 > - [**User Guide Book v4.0**](readme/User_Guide_Book_AMIGA_Robot_Admin_v4.0.pdf): persyaratan sistem, instalasi, menjalankan aplikasi, dan panduan fitur (dibuat ulang dengan `backend/.venv/bin/python docs/user-guide/build_user_guide.py`)
-> - [BRD AMIGA Robot Admin v1.1](readme/BRD_AMIGA_Robot_Admin_v1.1.docx)
+> - [BRD AMIGA Robot Admin v3.0](readme/BRD_AMIGA_Robot_Admin_v3.0.pdf) ([DOCX](readme/BRD_AMIGA_Robot_Admin_v3.0.docx))
 > - [PRD AMIGA Robot Admin v2](<readme/PRD — AMIGA Robot Admin(v2).pdf>) (versi PRD 1.1)
 > - [BPMN Invoice-to-Voucher (revisi)](readme/AMIGA_Robot_Admin_Invoice_to_Voucher.bpmn)
 > - [Tracking tugas feedback owner](docs/TASKS.md)
