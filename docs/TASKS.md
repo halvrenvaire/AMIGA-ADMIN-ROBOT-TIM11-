@@ -1,7 +1,7 @@
 # Tracking Tugas — Feedback Owner AMIGA
 
 Sumber: **Ringkasan Pemahaman Feedback Owner AMIGA** (18 Okt 2026, 12 masukan owner), ditambah feedback owner setelahnya.
-Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD v3](../readme/PRD_AMIGA_Robot_Admin_v3.pdf) · [BPMN v2](../readme/AMIGA_Robot_Admin_Invoice_to_Voucher_v2.png)
+Dokumen acuan lain: [BRD v3.0](../readme/BRD_AMIGA_Robot_Admin_v3.0.pdf) · [PRD v3](../readme/PRD_AMIGA_Robot_Admin_v3.pdf) · [BPMN v2](../readme/AMIGA_Robot_Admin_Invoice_to_Voucher_v2.png)
 
 **Cara pakai**
 
@@ -10,7 +10,7 @@ Dokumen acuan lain: [BRD v2.0](../readme/BRD_AMIGA_Robot_Admin_v2.0.pdf) · [PRD
 - Saat tugas selesai: centang, isi kolom commit, perbarui ringkasan progres, lalu commit dan push.
 - Nomor `#1`–`#12` merujuk ke nomor masukan owner di dokumen ringkasan.
 
-_Terakhir diperbarui: 20 Okt 2026_
+_Terakhir diperbarui: 27 Okt 2026_
 
 ---
 
@@ -25,7 +25,18 @@ _Terakhir diperbarui: 20 Okt 2026_
 | 5 | Konfirmasi tarif pajak | Kecil | 1/2 | ❓ PPh 26 |
 | 6 | Feedback owner 19–20 Okt (kop voucher, PPN, tabel voucher) | Sedang | 4/4 | ✅ |
 | 7 | Pertanyaan terbuka ke owner | — | 0/4 | ❓ |
-| 8 | Dokumen & rilis (BRD, PRD, BPMN, deploy) | Sedang | 0/5 | ⏳ |
+| 8 | Dokumen & rilis (BRD, PRD, BPMN, buku panduan, deploy) | Sedang | 3/7 | ⏳ |
+| 9 | Feedback owner 20 Okt (PPN per invoice, PPh per baris, navigasi cepat layar tinjau) | Besar | 8/8 | ✅ |
+| 10 | Mengurangi ketergantungan AI: isi manual, subtotal otomatis, beberapa vendor per voucher, pintasan rekening vendor | Besar | 6/6 | ✅ |
+| 11 | Format voucher mengikuti contoh owner (No. 1702 & 1944): kop data, kolom tabel, satu baris per invoice, kotak Diketahui oleh | Besar | 0/9 | ⏳ (4 perlu konfirmasi) |
+| 12 | Berkas invoice banyak halaman (invoice + Faktur Pajak + timesheet) | Kecil | 2/2 | ✅ |
+| 13 | Feedback uji coba 21–22 Okt: rekening opsional, alur simpan jelas, tampilan HP, full fit layar lebar & hide sidebar desktop | Sedang | 6/6 | ✅ |
+| 14 | Mode AI total saja/rincian, rekening jadi fitur tambahan, pajak otomatis/manual, profil & tanda tangan pengaju, pratinjau voucher, estimasi biaya AI | Besar | 10/10 | ✅ |
+| 15 | Toggle "Diajukan oleh" (profil PIC terkunci / isi manual), banyak invoice dalam satu PDF (pindai per 5 halaman, satu bukti per invoice, rentang halaman bisa diubah), tanda tangan di mode gelap, PPN "harga belum termasuk PPN" | Besar | 9/9 | ✅ |
+| 16 | Pemisahan invoice gabungan on-demand (tombol AI) & saran PPh 23 imbalan jasa (merging branch `feat/pisah-invoice-gabungan` ke `main`) | Sedang | 8/8 | ✅ |
+| 17 | Perbaikan Multi-Invoice DSS, Deteksi Total Gambar, & Otomatisasi Pajak | Sedang | 7/7 | ✅ |
+| 18 | Sorting Tabel Riwayat & Akurasi Deteksi Pajak AI (Kontrak Jasa DSS & Eliminasi Kode Driver) | Sedang | 7/7 | ✅ |
+| 19 | Feedback tim 24 Okt: saran PPN + PPh otomatis masuk voucher, langkah pajak di bot Telegram, tutorial di dalam aplikasi, dokumentasi | Besar | 5/5 | ✅ |
 
 ---
 
@@ -108,7 +119,7 @@ _Terakhir diperbarui: 20 Okt 2026_
 | ID | Tugas | Status | Catatan |
 | --- | --- | --- | --- |
 | T8.1 | Perbarui BPMN: alur draf (PIC edit → simulasi → kirim), reviewer tanpa edit | [ ] | BPMN v2 masih alur lama (reviewer mengoreksi) |
-| T8.2 | Perbarui BRD (v2.1): status `DRAFT`, kategori, reimburse, pajak, isi PDF voucher (termasuk PPN dilebur, T6.3–T6.4, dan pengaturan PPN/PPh per baris T9.1–T9.6); satu voucher boleh beberapa vendor/rekening setelah dikonfirmasi PIC (T10.3); format voucher Tahap 11 | [ ] | |
+| T8.2 | BRD v3.0 (as-built 27 Okt 2026): 18 perubahan D1–D18 terhadap v2.0 (alur draf, kategori, reimburse, banyak invoice per PDF, mode baca AI, pajak dan PPN, DPP PPh 23 imbalan jasa, format voucher, rekening opsional, isi manual, profil pengaju, bot @amiga_online_ro_bot, kemudahan pakai, biaya AI, lokasi server, status DRAFT), epic dan UAT diperbarui, pertanyaan terbuka dan lembar persetujuan. Sisa format voucher Tahap 11 dicatat sebagai backlog | [x] | `df19cf6` |
 | T8.3 | Perbarui PRD (v3.1): FR baru Tahap 1–6, 9, dan 10 (isi manual saat AI bermasalah, VENDOR_MISMATCH jadi peringatan, cek rekening per invoice); FR-5.2 (teks batas otorisasi) dicabut owner; batas 5 halaman per file dihapus (T12.1); rekening tidak wajib (T13.1) | [ ] | |
 | T8.4 | Perbarui SOP (`docs/sop.md`) untuk alur draf dan pajak (termasuk PPN dan PPh per baris, Tahap 9), isi manual saat AI bermasalah, dan konfirmasi beberapa vendor (Tahap 10), lalu jalankan `POST /reindex` | [ ] | Asisten AI menjawab dari SOP |
 | T8.5 | Deploy ulang ke EC2 (`git pull` lalu skrip deploy) | [ ] | Skrip deploy disimpan lokal (diabaikan git) |
@@ -121,3 +132,32 @@ _Terakhir diperbarui: 20 Okt 2026_
 | --- | --- |
 | 20 Okt 2026 | Dibuat dari Ringkasan Feedback Owner (18 Okt) dan commit Tahap 1–5 |
 | 20 Okt 2026 | T6.3 selesai (`5305fec`); T6.4 ditambahkan dan selesai (`ecfdf59`) |
+| 20 Okt 2026 | Tahap 9 ditambahkan dan selesai (T9.1–T9.8): PPN per invoice, PPh per baris, navigasi cepat, sample pajak; T8.2–T8.4 mencakup Tahap 9 |
+| 20 Okt 2026 | Tahap 10 ditambahkan dan selesai (T10.1–T10.6): isi manual saat AI bermasalah, subtotal otomatis, beberapa vendor per voucher, rekening per invoice, pintasan rekening vendor; T8.2–T8.4 mencakup Tahap 10 |
+| 20 Okt 2026 | Hash `a31dd37` diisi untuk Tahap 9–10; Tahap 11 ditambahkan dari contoh voucher owner (No. 1702 & 1944) |
+| 20 Okt 2026 | Tahap 12 ditambahkan dan selesai (T12.1–T12.2, `4d95069`): batas halaman per file dihapus, AI membaca 5 halaman pertama, label "Jumlah PPN" dikenali; `docs/sop.md` ikut diperbarui (perlu `POST /reindex` agar Asisten memakai isi baru) |
+| 21 Okt 2026 | T8.6 ditambahkan dan selesai: buku panduan pengguna PDF v3.0 di `readme/` |
+| 21 Okt 2026 | T8.7 ditambahkan (deploy publik): backend FastAPI Cloud + Neon AS sudah berjalan, Vercel menyusul |
+| 21 Okt 2026 | T8.7 selesai: frontend Vercel tersambung ke backend FastAPI Cloud (CORS) |
+| 21 Okt 2026 | Tahap 13 ditambahkan dan selesai (T13.1–T13.2): rekening opsional, tombol Simpan lebih jelas; `docs/sop.md` ikut diperbarui |
+| 21 Okt 2026 | T13.3 ditambahkan dan selesai: dashboard nyaman dipakai di HP |
+| 22 Okt 2026 | T13.4 ditambahkan dan selesai: pencarian tersedia di laci menu HP |
+| 22 Okt 2026 | Tahap 14 ditambahkan dan selesai (T14.1–T14.10, belum di-commit); T1.6, T2.5 (bagian rekening), T10.4, T10.5, T11.4, T13.1 ditandai diganti oleh T14.x |
+| 22 Okt 2026 | T13.5–T13.6 ditambahkan dan selesai: tampilan dashboard full fit ke kanan (hapus max-width 1440px) dan fitur minimizing sidebar desktop (ikon di header sidebar, transisi halus, mode mini 68px dengan hover tooltip berpanah) serta persistensi localStorage |
+| 22 Okt 2026 | Hash `3bed3ea` diisi untuk Tahap 14. Tahap 15 ditambahkan dan selesai (T15.1–T15.8, belum di-commit): toggle Diajukan oleh, banyak invoice per PDF, tanda tangan mode gelap; T14.6 ditandai diganti oleh T15.1–T15.2 |
+| 22 Okt 2026 | T15.9 ditambahkan dan selesai (belum di-commit): PPN "harga belum termasuk PPN (ditambahkan PPN)" menggantikan "PPN terpisah" |
+| 24 Okt 2026 | Hash `4d0cf04` diisi untuk Tahap 15 |
+| 24 Okt 2026 | Tahap 16 ditambahkan dan selesai (T16.1–T16.8): penggabungan branch `feat/pisah-invoice-gabungan` ke `main` (tombol AI split on-demand di draf, proteksi serial Faktur Pajak `_is_tax_serial`, saran PPh 23 imbalan jasa dicocokkan PPN 11%/12%, pratinjau lokal file upload, label audit log, alembic Windows fix, 52/52 backend test lulus, frontend build lulus) |
+| 24 Okt 2026 | Tahap 17 ditambahkan dan selesai (T17.1–T17.7): perbaikan multi-invoice DSS (filter Faktur Pajak & format uraian transaksi), deteksi total gambar dengan desimal `,-`, serta implementasi toggle & tombol cepat "Atur pajak secara otomatis" di Upload dan Editor Draf |
+| 24 Okt 2026 | Tahap 18 ditambahkan dan selesai (T18.1–T18.6): penggabungan terpadu commit `b89472b` dengan penambahan kolom "Terakhir Diubah" & sorting interaktif semua kolom Tabel Riwayat/Dokumen, penyempurnaan `confirm_front_pages` & `fee_from_amounts`, pemetaan acuan kontrak fee DSS (`DSS_KNOWN_FEES`), eliminasi ekstraksi kode driver (`DD00002`/`DD00003`), petunjuk UI PPh 23 pada TaxPanel, 76/76 unit test backend lulus 100%, frontend build sukses |
+| 24 Okt 2026 | T18.7 ditambahkan dan selesai: koreksi commit `031e60f` (tabel fee DSS hafalan dan tebakan dari rasio PPN dicabut, urutan tabel bawaan dari server); batasan DPP PPh 23 dikembalikan ke penjelasan Tahap 18. BRD/PRD/SOP perlu mencatat batasan ini (T8.2–T8.4) |
+| 24 Okt 2026 | Tahap 19 ditambahkan (feedback tim, 4 poin); T19.1 selesai: saran PPN dari PPN tercetak dan format baris potongan PPh sesuai contoh owner |
+| 24 Okt 2026 | T19.2 selesai: alur bot Telegram dengan ringkasan dan pengaturan pajak per bukti, uraian, simulasi voucher PDF |
+| 26 Okt 2026 | T19.3 selesai: tutorial di dalam aplikasi (tombol ? dengan sorotan langkah demi langkah) |
+| 26 Okt 2026 | T19.5 ditambahkan dan selesai: perbaikan pemisahan invoice dan DPP PPh 23 dari uji nyata berkas DSS |
+| 26 Okt 2026 | T19.4 selesai: User Guide Book v4.0 (PDF, pengumpulan tugas MAIN) dan SOP v1.3; Tahap 19 selesai. Buku panduan v3.0 digantikan v4.0 |
+| 26 Okt 2026 | User Guide Book v4.0 dan SOP: alamat login utama http://13.212.201.121/login (server EC2) dan bot @amiga_online_ro_bot |
+| 26 Okt 2026 | T19.6 ditambahkan dan selesai: galeri dokumentasi visual untuk pengumpulan tugas MAIN |
+| 26 Okt 2026 | T19.7 ditambahkan dan selesai: data asli owner dikeluarkan dari repo publik, contoh DSS sintetis |
+| 26 Okt 2026 | Riwayat git ditulis ulang (git filter-repo) untuk mengeluarkan dokumen asli owner dari repo publik; semua hash commit di file ini disesuaikan dengan riwayat baru. README: bagian Coba aplikasi dan Mulai cepat |
+| 27 Okt 2026 | T8.2 selesai: BRD v3.0 (DOCX dan PDF) di `readme/` |
